@@ -18,7 +18,7 @@ dependencyResolutionManagement {
     }
 }
 
-include(":shared")
+include(":desktop")
 include(":server")
 
 rootProject.name = "u_judge_server"

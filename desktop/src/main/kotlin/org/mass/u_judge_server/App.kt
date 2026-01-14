@@ -15,8 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.ui.tooling.preview.Preview
-import u_judge_server.shared.generated.resources.Res
-import u_judge_server.shared.generated.resources.compose_multiplatform
+import u_judge_server.desktop.generated.resources.Res
+import u_judge_server.desktop.generated.resources.compose_multiplatform
 
 
 @Composable
