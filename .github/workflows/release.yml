@@ -10,6 +10,10 @@ jobs:
     permissions: write-all
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
       - uses: gradle/wrapper-validation-action@v3
       - uses: gradle/actions@v2
         with:
@@ -24,6 +28,10 @@ jobs:
     permissions: write-all
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
       - uses: gradle/wrapper-validation-action@v3
       - uses: gradle/actions@v2
         with:
@@ -38,6 +46,10 @@ jobs:
     permissions: write-all
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
       - uses: gradle/wrapper-validation-action@v3
       - uses: gradle/actions@v2
         with:
