@@ -1,0 +1,65 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build macOS installer (.dmg)
+        run: ./gradlew packageDistributionForCurrentOS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: desktop/build/compose/binaries/main/dmg/*.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Windows installer (.msi)
+        run: gradlew.bat packageDistributionForCurrentOS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: desktop/build/compose/binaries/main/msi/*.msi
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Linux installer (.deb)
+        run: ./gradlew packageDistributionForCurrentOS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: desktop/build/compose/binaries/main/deb/*.deb
