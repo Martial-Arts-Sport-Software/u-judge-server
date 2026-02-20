@@ -1,4 +1,4 @@
-package org.mass.u_judge_server
+package org.mass
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image

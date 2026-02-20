@@ -1,4 +1,4 @@
-package org.mass.u_judge_server
+package org.mass
 
 class Greeting {
     private val platform = getPlatform()
