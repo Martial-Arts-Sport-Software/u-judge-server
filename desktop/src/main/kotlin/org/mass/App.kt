@@ -13,8 +13,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
-import org.jetbrains.compose.ui.tooling.preview.Preview
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.compose_multiplatform
 
@@ -24,6 +25,12 @@ import u_judge_server.desktop.generated.resources.compose_multiplatform
 fun App() {
     MaterialTheme {
         var showContent by remember { mutableStateOf(false) }
+        val coroutineScope = rememberCoroutineScope()
+
+        coroutineScope.launch {
+            Server.start()
+        }
+
         Column(
             modifier = Modifier
                 .background(MaterialTheme.colorScheme.primaryContainer)

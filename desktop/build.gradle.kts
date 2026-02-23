@@ -14,46 +14,31 @@ dependencies {
     implementation(libs.kotlinx.datetime)
     implementation(libs.kotlin.logging)
     implementation(libs.uuid)
-    implementation(compose.material3)
-    implementation(compose.runtime)
-    implementation(compose.foundation)
-    implementation(compose.ui)
-    implementation(compose.components.resources)
-    implementation(compose.components.uiToolingPreview)
+
+    implementation(libs.compose.runtime)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.preview)
+    implementation(libs.compose.components.resources)
+    implementation(libs.compose.components.uiToolingPreview)
 
     implementation(compose.desktop.currentOs)
-
-    // Ktor Server
-    implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
-    implementation(libs.ktor.server.content.negotiation)
-    implementation(libs.ktor.serialization.kotlinx.json)
 
     // Ktor Client
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
 
-    // PostgreSQL & ORM
-    implementation(libs.postgresql)
-    implementation(libs.exposed.core)
-    implementation(libs.exposed.dao)
-    implementation(libs.exposed.java.time)
-
-    // Connection Pool
-    implementation(libs.hikari)
-
     // Logging
     implementation(libs.logback.classic)
     implementation(libs.slf4j.api)
 
-    // Lifecycle & Coroutines (JVM only)
-    implementation(libs.kotlinx.coroutinesSwing)
+    implementation(project(":server"))
 }
 
 compose.desktop {
     application {
-        mainClass = "org.mass.u_judge_server.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "UJudgeServer"
