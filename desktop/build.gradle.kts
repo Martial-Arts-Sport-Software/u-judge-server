@@ -22,6 +22,7 @@ dependencies {
     implementation(libs.compose.preview)
     implementation(libs.compose.components.resources)
     implementation(libs.compose.components.uiToolingPreview)
+    implementation(libs.navigation.compose)
 
     implementation(compose.desktop.currentOs)
 

@@ -1,56 +1,130 @@
 package org.mass
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.safeContentPadding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import kotlinx.coroutines.launch
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import org.jetbrains.compose.resources.painterResource
+import androidx.compose.ui.tooling.preview.Preview
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.mass.enums.Routes
+import org.mass.screens.EntryScreen
+import org.mass.ui.TypographyManager.getTypography
 import u_judge_server.desktop.generated.resources.Res
-import u_judge_server.desktop.generated.resources.compose_multiplatform
+import u_judge_server.desktop.generated.resources.app_background
 
-
+/**
+ * Main fun, that render the whole application
+ */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 @Preview
 fun App() {
-    MaterialTheme {
-        var showContent by remember { mutableStateOf(false) }
-        val coroutineScope = rememberCoroutineScope()
+    State.navController = rememberNavController()
+    State.density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
-        coroutineScope.launch {
-            Server.start()
-        }
+    coroutineScope.launch {
+        Server.start()
+    }
 
-        Column(
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .safeContentPadding()
-                .fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
+    MaterialTheme(
+        typography = getTypography()
+    ) {
+        CompositionLocalProvider(
+            compositionLocalOf { State.currentLocale } provides State.currentLocale
         ) {
-            Button(onClick = { showContent = !showContent }) {
-                Text("Click me!")
-            }
-            AnimatedVisibility(showContent) {
-                val greeting = remember { Greeting().greet() }
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            Box(
+                Modifier
+                    .fillMaxSize(),
+            ) {
+                Image(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    painter = painterResource(Res.drawable.app_background),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop
+                )
+                AnimatedVisibility(
+                    visible = true,
+                    enter = fadeIn(),
+                    exit = fadeOut()
                 ) {
-                    Image(painterResource(Res.drawable.compose_multiplatform), null)
-                    Text("Compose: $greeting")
+                    Box(
+                        Modifier
+                            .padding(10.dp)
+                            .fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        NavHost(
+                            navController = State.navController!!,
+                            startDestination = Routes.ENTRY.path,
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            animatedComposable(Routes.ENTRY) {
+                                EntryScreen.Load()
+                            }
+                        }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = false,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                    }
                 }
             }
         }
     }
+}
+
+/**
+ * Renders composable, usually screen instance, by specific route
+ * @param route - [Routes] instance, on which content must be rendered
+ * @param content - [Composable] fun, usually represents some screen, shown on specific [route]
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+fun NavGraphBuilder.animatedComposable(
+    route: Routes,
+    content: @Composable () -> Unit
+) {
+    composable(
+        route = route.path,
+        enterTransition = { fadeIn(tween(300)) },
+        exitTransition = { fadeOut(tween(300)) },
+        popEnterTransition = { fadeIn(tween(300)) },
+        popExitTransition = { fadeOut(tween(300)) },
+        content = {
+            LaunchedEffect(State.isAnimating) {
+                if (State.isAnimating) {
+                    delay(400)
+                    State.isAnimating = false
+                }
+            }
+            content()
+        }
+    )
 }
