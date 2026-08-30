@@ -40,28 +40,42 @@ Pilot не считается production-ready до отдельного hardeni
 - Новые архитектурные слои добавляются только для конкретных границ: transport, persistence, scoring и replication.
 - Работа ведётся от чисто воспроизводимых сборок и CI.
 
+## Статус выполнения на `main`
+
+Статус сверяется только с влитыми в `main` изменениями и их тестами/CI. Частично выполненный этап не закрывает gate.
+
+- [ ] Gate G0: baseline частично готов; требуется подтверждённый baseline обоих репозиториев.
+- [ ] Gate G1: P2P in-memory spike готов частично; PostgreSQL и mobile realtime spikes не готовы.
+- [ ] Gate G2: не готов.
+- [ ] Gate G3: не готов.
+- [ ] Gate G4: не готов.
+- [ ] Gate G5: не готов.
+- [ ] Gate G6: не готов.
+- [ ] Gate G7: не готов.
+- [ ] Gate G8: не готов.
+
 ## 4. Этап 0: фиксация baseline
 
 Срок: неделя 1.
 
 ### Результаты
 
-- Актуализированы README и документы обоих репозиториев.
-- Зафиксировано, какие локальные изменения должны войти в release branch.
-- Версия pilot отделена от преждевременных `1.0.0` и старых milestones.
-- Создан единый backlog по requirement IDs.
-- Настроен CI на push/PR: build, tests, wrapper validation и статические проверки.
-- Java toolchain закреплён на Java 21.
+- [x] Актуализированы README и документы обоих репозиториев.
+- [x] Зафиксировано, какие локальные изменения должны войти в release branch.
+- [x] Версия pilot отделена от преждевременных `1.0.0` и старых milestones.
+- [x] Создан единый backlog по requirement IDs.
+- [x] Настроен CI на push/PR: build, tests, wrapper validation и статические проверки.
+- [x] Java toolchain закреплён на Java 21.
 
 ### Решения ADR
 
-| ADR     | Решение, которое нужно принять                    |
-|---------|---------------------------------------------------|
-| ADR-001 | Формат event envelope, sequence и idempotency     |
-| ADR-002 | P2P discovery, join и anti-entropy protocol       |
-| ADR-003 | Управляемая установка PostgreSQL на Windows/macOS |
-| ADR-004 | HTTP/WebSocket contract и version negotiation     |
-| ADR-005 | Версионирование XLSX import adapter               |
+| Статус | ADR     | Решение, которое нужно принять                    |
+|--------|---------|---------------------------------------------------|
+| [x]    | ADR-001 | Формат event envelope, sequence и idempotency     |
+| [ ]    | ADR-002 | P2P discovery, join и anti-entropy protocol       |
+| [ ]    | ADR-003 | Управляемая установка PostgreSQL на Windows/macOS |
+| [ ]    | ADR-004 | HTTP/WebSocket contract и version negotiation     |
+| [ ]    | ADR-005 | Версионирование XLSX import adapter               |
 
 ### Gate G0
 
@@ -75,25 +89,25 @@ Pilot не считается production-ready до отдельного hardeni
 
 ### P2P spike
 
-- Запустить минимум 3 peer-процесса.
-- Создать события на двух peers во время искусственного partition.
-- Восстановить сеть и получить одинаковый набор event IDs и проекции.
-- Проверить duplicate delivery, restart и sequence gaps.
-- Измерить объём метаданных и время сходимости.
+- [x] Запустить минимум 3 peer-процесса.
+- [x] Создать события на двух peers во время искусственного partition.
+- [x] Восстановить сеть и получить одинаковый набор event IDs и проекции.
+- [x] Проверить duplicate delivery, restart и sequence gaps.
+- [ ] Измерить объём метаданных и время сходимости.
 
 ### PostgreSQL spike
 
-- Автоматически подготовить локальную PostgreSQL instance.
-- Выполнить start/stop, schema migration и аварийный restart.
-- Проверить чистую Windows и macOS machine.
-- Определить upgrade/backup strategy и размер installer.
+- [ ] Автоматически подготовить локальную PostgreSQL instance.
+- [ ] Выполнить start/stop, schema migration и аварийный restart.
+- [ ] Проверить чистую Windows и macOS machine.
+- [ ] Определить upgrade/backup strategy и размер installer.
 
 ### Realtime spike
 
-- Android/iPhone обнаруживают server через mDNS.
-- Client проходит pairing и WebSocket handshake.
-- Событие получает ACK и безопасно повторяется после disconnect.
-- Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
+- [ ] Android/iPhone обнаруживают server через mDNS.
+- [ ] Client проходит pairing и WebSocket handshake.
+- [ ] Событие получает ACK и безопасно повторяется после disconnect.
+- [ ] Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
 
 ### Gate G1
 
