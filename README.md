@@ -19,6 +19,10 @@ Desktop-приложение площадки и локальный server U'Jud
 
 Реализованы Compose Desktop shell, базовая навигация, Ktor CIO server на `0.0.0.0:8080`, mDNS-публикация `_u-judge._tcp` и CI на `push`/`pull_request`. CI валидирует Gradle Wrapper и whitespace в diff, затем собирает проект на JDK 21 через `./gradlew build`. Первый P2P spike подтвердил in-memory event journal с идемпотентной доставкой, диагностикой sequence gaps и сходимостью трёх peers после partition; решение описано в [ADR-001](docs/adr/ADR-001-event-envelope.md). Текущий `POST /score` является заглушкой и не входит в API v1. Турнирная модель, scoring, PostgreSQL lifecycle, production P2P transport, импорт, аудит и рабочий client contract ещё не реализованы.
 
+Начат PostgreSQL persistence spike: versioned JDBC migration сохраняет и восстанавливает envelope Stage 1, но managed
+PostgreSQL lifecycle и clean-machine proof для Windows/macOS ещё не реализованы. Решение и ограничения зафиксированы в
+[ADR-003](docs/adr/ADR-003-managed-postgresql.md).
+
 Подробное разделение текущего и целевого состояния находится в [описании проекта](docs/PROJECT.md).
 
 ## Модули
