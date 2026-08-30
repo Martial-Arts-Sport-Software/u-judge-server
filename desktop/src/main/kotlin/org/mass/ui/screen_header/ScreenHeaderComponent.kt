@@ -2,7 +2,6 @@ package org.mass.ui.screen_header
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.Text
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +24,7 @@ import org.mass.ui.button.ButtonStyles
 import org.mass.ui.button.clickWithTransition
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.back_icon
+import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun ScreenHeaderComponent(
@@ -34,9 +34,9 @@ fun ScreenHeaderComponent(
 
     LaunchedEffect(currentRoute) {
         isAnimating = true
-        delay(250)
+        delay(250.milliseconds)
         displayedTitle = currentRoute
-        delay(150)
+        delay(150.milliseconds)
         isAnimating = false
     }
 

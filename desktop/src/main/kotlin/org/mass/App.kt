@@ -35,6 +35,7 @@ import org.mass.screens.EntryScreen
 import org.mass.ui.TypographyManager.getTypography
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.app_background
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Main fun, that render the whole application
@@ -130,7 +131,7 @@ fun NavGraphBuilder.animatedComposable(
         content = {
             LaunchedEffect(State.isAnimating) {
                 if (State.isAnimating) {
-                    delay(400)
+                    delay(400.milliseconds)
                     State.isAnimating = false
                 }
             }

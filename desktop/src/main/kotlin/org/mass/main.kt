@@ -2,8 +2,6 @@ package org.mass
 
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.WindowDecoration
-import androidx.compose.ui.window.WindowDecorationDefaults
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import org.mass.State.currentRoute
