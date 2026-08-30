@@ -1,11 +1,15 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    kotlin("jvm")
+    alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.composeHotReload)
+}
+
+kotlin {
+    jvmToolchain(21)
 }
 
 dependencies {
@@ -31,6 +35,8 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
 
+    implementation(libs.dns.sd.kt)
+
     // Logging
     implementation(libs.logback.classic)
     implementation(libs.slf4j.api)
@@ -40,6 +46,8 @@ dependencies {
 
 compose.desktop {
     application {
+        mainClass = "org.mass.MainKt"
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "UJudgeServer"

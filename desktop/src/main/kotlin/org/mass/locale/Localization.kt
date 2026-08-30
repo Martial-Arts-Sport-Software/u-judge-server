@@ -9,12 +9,21 @@ import org.mass.State
 object Localization {
     private val strings = mapOf(
         "en" to mapOf(
+            //Entry Screen
             "entry_title" to "U'JUDGE - Server",
             "entry_quote" to "A good judge is always fair...",
             "entry_description" to "Olympic Taekwondo\n" +
                     "Sport and combat Hapkido",
             "entry_devices_connection" to "Connect devices",
             "entry_judge_surname" to "Judge surname",
+
+            //Devices Connection Screen
+            "devices_connection_connected" to "Connected devices",
+            "devices_connection_available" to "Available devices",
+
+            //Routes Titles
+            "entry" to "Entry",
+            "devices_connection" to "Devices connection",
 
             "discipline_title" to "Choose discipline",
             "discipline_kerugi" to "Kerugi",
@@ -95,12 +104,21 @@ object Localization {
         ),
 
         "ru" to mapOf(
+            //Entry Screen
             "entry_title" to "U'JUDGE - Сервер",
             "entry_quote" to "Хороший судья беспристрастен...",
             "entry_description" to "Олимпийское Тхэквондо\n" +
                     "Спортивное и боевое Хапкидо",
             "entry_devices_connection" to "Подключение устройств",
             "entry_judge_surname" to "Фамилия арбитра",
+
+            //Devices Connection Screen
+            "devices_connection_connected" to "Подключённые устройства",
+            "devices_connection_available" to "Доступные устройства",
+
+            //Routes Titles
+            "entry" to "Вход",
+            "devices_connection" to "Подключение устройств",
 
             "discipline_title" to "Выберите дисциплину",
             "discipline_kerugi" to "Весовые категории",

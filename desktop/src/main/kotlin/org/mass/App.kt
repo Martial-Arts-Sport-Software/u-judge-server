@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -22,9 +23,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import org.mass.State.coroutinesScope
+import org.mass.State.currentRoute
+import org.mass.State.density
+import org.mass.State.navController
 import org.mass.enums.Routes
+import org.mass.screens.DevicesConnectionScreen
 import org.mass.screens.EntryScreen
 import org.mass.ui.TypographyManager.getTypography
 import u_judge_server.desktop.generated.resources.Res
@@ -37,12 +43,13 @@ import u_judge_server.desktop.generated.resources.app_background
 @Composable
 @Preview
 fun App() {
-    State.navController = rememberNavController()
-    State.density = LocalDensity.current
-    val coroutineScope = rememberCoroutineScope()
+    navController = rememberNavController()
+    coroutinesScope = rememberCoroutineScope()
+    density = LocalDensity.current
 
-    coroutineScope.launch {
-        Server.start()
+    val currentBackStackEntry = navController!!.currentBackStackEntryAsState()
+    currentBackStackEntry.value?.destination?.route?.let { route ->
+        currentRoute = route
     }
 
     MaterialTheme(
@@ -74,12 +81,15 @@ fun App() {
                         contentAlignment = Alignment.Center
                     ) {
                         NavHost(
-                            navController = State.navController!!,
+                            navController = navController!!,
                             startDestination = Routes.ENTRY.path,
                             contentAlignment = Alignment.Center,
                         ) {
                             animatedComposable(Routes.ENTRY) {
                                 EntryScreen.Load()
+                            }
+                            animatedComposable(Routes.DEVICES_CONNECTION) {
+                                DevicesConnectionScreen.Load()
                             }
                         }
                     }

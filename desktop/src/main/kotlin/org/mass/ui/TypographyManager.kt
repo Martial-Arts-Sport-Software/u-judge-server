@@ -27,7 +27,7 @@ object TypographyManager {
         return Typography(
             titleLarge = TextStyle(
                 fontFamily = montserratVariable,
-                fontSize = 3.em,
+                fontSize = 2.em,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 lineHeight = 1.em,
@@ -40,7 +40,7 @@ object TypographyManager {
             ),
             titleSmall = TextStyle(
                 fontFamily = montserratVariable,
-                fontSize = 1.em,
+                fontSize = 1.2.em,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             ),

@@ -1,6 +1,10 @@
 plugins {
-    kotlin("jvm")
+    alias(libs.plugins.kotlinJvm)
     application
+}
+
+kotlin {
+    jvmToolchain(21)
 }
 
 dependencies {
@@ -10,6 +14,7 @@ dependencies {
     implementation(libs.postgresql)
     implementation(libs.exposed.core)
     implementation(libs.exposed.dao)
+    implementation(libs.exposed.jdbc)
     implementation(libs.exposed.java.time)
 
     // Ktor Server
@@ -24,7 +29,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("org.mass.u_judge_server.MainKt")
+    mainClass.set("org.mass.ServerKt")
 }
 
 tasks.named<JavaExec>("run") {

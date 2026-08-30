@@ -16,6 +16,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+fun main() {
+    Server.start()
+    Runtime.getRuntime().addShutdownHook(Thread(Server::stop))
+    Thread.currentThread().join()
+}
+
 object Server {
     private var ktorServer: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
     private var mdnsScope: CoroutineScope? = null

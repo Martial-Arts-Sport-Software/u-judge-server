@@ -1,24 +1,24 @@
 [versions]
-compose-hot-reload = "1.0.0-beta04"
-compose-multiplatform = "1.10.1"
+compose-hot-reload = "1.2.0"
+compose-multiplatform = "1.12.0"
 navigation-compose = "2.9.2"
 
-kotlin = "2.3.10"
-kotlinx-coroutines = "1.10.2"
-kotlinx-serialization = "1.9.0"
-kotlinx-datetime = "0.5.0"
+kotlin = "2.4.10"
+kotlinx-coroutines = "1.11.0"
+kotlinx-serialization = "1.11.0"
+kotlinx-datetime = "0.8.0-0.6.x-compat"
 
-ktor = "3.2.0"
-exposed = "0.41.1"
-postgresql = "42.7.7"
-hikari = "6.3.3"
+ktor = "3.5.2"
+exposed = "1.5.0"
+postgresql = "42.7.13"
+hikari = "7.1.0"
 
-logback = "1.5.25"
-slf4j = "2.0.17"
-kotlin-logging = "7.0.14"
+logback = "1.6.3"
+slf4j = "2.0.18"
+kotlin-logging = "8.0.4"
 
-uuid = "0.8.0"
-dnsSdKt = "1.0.5"
+uuid = "0.8.4"
+dnsSdKt = "1.1.0"
 
 [libraries]
 kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
@@ -56,6 +56,7 @@ ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negoti
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 exposed-core = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposed" }
 exposed-dao = { module = "org.jetbrains.exposed:exposed-dao", version.ref = "exposed" }
+exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "exposed" }
 exposed-java-time = { module = "org.jetbrains.exposed:exposed-java-time", version.ref = "exposed" }
 hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 
@@ -68,4 +69,5 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 composeHotReload = { id = "org.jetbrains.compose.hot-reload", version.ref = "compose-hot-reload" }
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

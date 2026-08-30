@@ -42,7 +42,7 @@ import u_judge_server.desktop.generated.resources.club_logo
 /**
  * Welcome screen
  */
-object EntryScreen: Screen {
+object EntryScreen : Screen {
     @Composable
     override fun Load() {
         Box(
@@ -57,10 +57,12 @@ object EntryScreen: Screen {
                     Modifier
                         .fillMaxWidth(0.6f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(
-                            topStart = 15.dp,
-                            bottomStart = 15.dp
-                        ))
+                        .clip(
+                            RoundedCornerShape(
+                                topStart = 15.dp,
+                                bottomStart = 15.dp
+                            )
+                        )
                         .background(Color(0xFF7C45E2)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -119,8 +121,11 @@ object EntryScreen: Screen {
                         }
                     )
 
-                    val devicesConnectionOnClick = remember { {
-                    } }
+                    val devicesConnectionOnClick = remember {
+                        {
+                            clickWithTransition(Routes.DEVICES_CONNECTION)
+                        }
+                    }
 
                     Spacer(Modifier.weight(0.2f))
 
