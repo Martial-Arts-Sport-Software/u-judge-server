@@ -115,6 +115,7 @@ Weapon Freestyle в U'Judge v1 остаётся одним общим режим
 - `GET /` и заглушка `POST /score`;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
+- CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
 
 ### 7.2. Не реализовано в server
 
@@ -126,7 +127,7 @@ Weapon Freestyle в U'Judge v1 остаётся одним общим режим
 - P2P-обнаружение, авторизация и репликация;
 - импорт XLSX, история, аудит, экспорт и backup;
 - интерфейсы арбитра, наблюдателя и редактора сеток;
-- автоматические тесты и обязательный CI на изменения.
+- автоматические тестовые сценарии.
 
 Текущее `POST /score` не читает тело запроса и всегда отвечает `Score OK`. Оно не является API v1.
 
