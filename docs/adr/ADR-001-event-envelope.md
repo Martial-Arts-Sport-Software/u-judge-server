@@ -25,7 +25,8 @@ Each peer retains every accepted event ID. Re-delivery of an identical envelope 
 `ownerPeerId`/`sequence` pair with different data is rejected. Peers exchange their journal entries in both directions.
 
 A projection only uses the contiguous prefix beginning at sequence `1` for each owner. Higher events remain in the journal,
-Projection order is deterministic: owners sort lexicographically, then their event sequences sort ascending.
+but are not projected until every preceding sequence arrives. Projection order is deterministic: owners sort
+lexicographically, then their event sequences sort ascending.
 
 The spike accepts an existing event collection on construction to model journal recovery after restart. Production recovery
 will load the same envelope from PostgreSQL rather than process memory.
