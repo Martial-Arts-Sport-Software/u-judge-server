@@ -17,7 +17,7 @@ Desktop-приложение площадки и локальный server U'Jud
 
 ## Текущее состояние
 
-Реализованы Compose Desktop shell, базовая навигация, Ktor CIO server на `0.0.0.0:8080` и mDNS-публикация `_u-judge._tcp`. Текущий `POST /score` является заглушкой и не входит в API v1. Турнирная модель, scoring, PostgreSQL lifecycle, P2P, импорт, аудит и рабочий client contract ещё не реализованы.
+Реализованы Compose Desktop shell, базовая навигация, Ktor CIO server на `0.0.0.0:8080`, mDNS-публикация `_u-judge._tcp` и CI на `push`/`pull_request`. CI валидирует Gradle Wrapper и whitespace в diff, затем собирает проект на JDK 21 через `./gradlew build`. Текущий `POST /score` является заглушкой и не входит в API v1. Турнирная модель, scoring, PostgreSQL lifecycle, P2P, импорт, аудит и рабочий client contract ещё не реализованы.
 
 Подробное разделение текущего и целевого состояния находится в [описании проекта](docs/PROJECT.md).
 
