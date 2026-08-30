@@ -8,6 +8,8 @@ kotlin {
 }
 
 dependencies {
+    testImplementation(kotlin("test"))
+
     implementation(libs.kotlinx.coroutinesSwing)
 
     // Postgres & ORM
@@ -26,6 +28,10 @@ dependencies {
     // Connection Pool
     implementation(libs.hikari)
     implementation(libs.dns.sd.kt)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 application {
