@@ -118,6 +118,10 @@ clean-machine verification и Gate G1 не закрыты. Детали в [ADR-
 - [ ] Событие получает ACK и безопасно повторяется после disconnect.
 - [ ] Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
 
+Текущее доказательство: `GET /v1/metadata` публикует version, capabilities, identity площадки, pairing policy и server
+time до pairing; integration tests подтверждают JSON contract и отсутствие anonymous `POST /score`. Этот slice не заменяет
+pairing, WebSocket handshake, durable ACK, reconnect или physical-device mDNS evidence.
+
 ### Gate G1
 
 Single-peer PostgreSQL and client reconnect are confirmed by working prototypes. P2P is explicitly deferred from v1 Pilot;
