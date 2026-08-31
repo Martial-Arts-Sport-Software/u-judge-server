@@ -97,7 +97,7 @@ architecture. They are not v1 Pilot acceptance gates.
 - [x] Восстановить сеть и получить одинаковый набор event IDs и проекции.
 - [x] Проверить duplicate delivery, restart и sequence gaps.
 - [x] Измерить объём метаданных и время сходимости.
-- [ ] Перенести P2P implementation spike в post-v1 backlog.
+- [x] Перенести P2P implementation spike в [post-v1 backlog](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/24).
 
 ### PostgreSQL spike
 
