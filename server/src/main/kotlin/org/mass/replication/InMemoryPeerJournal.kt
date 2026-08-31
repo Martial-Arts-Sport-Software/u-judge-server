@@ -1,6 +1,8 @@
 package org.mass.replication
 
 import java.util.UUID
+import kotlin.time.Duration
+import kotlin.time.measureTime
 
 data class JournalEvent(
     val id: String,
@@ -8,6 +10,20 @@ data class JournalEvent(
     val sequence: Long,
     val payload: String,
 )
+
+data class SynchronizationMetrics(
+    val transmittedEventCount: Int,
+    val metadataBytes: Int,
+    val payloadBytes: Int,
+    val elapsed: Duration,
+) {
+    operator fun plus(other: SynchronizationMetrics) = SynchronizationMetrics(
+        transmittedEventCount = transmittedEventCount + other.transmittedEventCount,
+        metadataBytes = metadataBytes + other.metadataBytes,
+        payloadBytes = payloadBytes + other.payloadBytes,
+        elapsed = elapsed + other.elapsed,
+    )
+}
 
 class InMemoryPeerJournal(
     private val peerId: String,
@@ -68,9 +84,21 @@ class InMemoryPeerJournal(
         }
     }
 
-    fun synchronizeWith(other: InMemoryPeerJournal) {
-        receive(other.events)
-        other.receive(events)
+    fun synchronizeWith(other: InMemoryPeerJournal): SynchronizationMetrics {
+        val sentToThisPeer = other.events
+        lateinit var sentBackToOther: List<JournalEvent>
+        val elapsed = measureTime {
+            receive(sentToThisPeer)
+            sentBackToOther = events
+            other.receive(sentBackToOther)
+        }
+        val transmittedEvents = sentToThisPeer + sentBackToOther
+        return SynchronizationMetrics(
+            transmittedEventCount = transmittedEvents.size,
+            metadataBytes = transmittedEvents.sumOf(::metadataSizeBytes),
+            payloadBytes = transmittedEvents.sumOf { it.payload.toByteArray(Charsets.UTF_8).size },
+            elapsed = elapsed,
+        )
     }
 
     private fun eventsByOwner(): Map<String, List<JournalEvent>> =
@@ -92,5 +120,10 @@ class InMemoryPeerJournal(
 
     private companion object {
         val eventComparator = compareBy<JournalEvent>(JournalEvent::ownerPeerId, JournalEvent::sequence, JournalEvent::id)
+
+        fun metadataSizeBytes(event: JournalEvent): Int =
+            event.id.toByteArray(Charsets.UTF_8).size +
+                event.ownerPeerId.toByteArray(Charsets.UTF_8).size +
+                Long.SIZE_BYTES
     }
 }

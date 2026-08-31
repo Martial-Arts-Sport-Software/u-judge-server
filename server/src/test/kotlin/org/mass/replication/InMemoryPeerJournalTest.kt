@@ -3,6 +3,7 @@ package org.mass.replication
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.ZERO
 
 class InMemoryPeerJournalTest {
     @Test
@@ -53,5 +54,46 @@ class InMemoryPeerJournalTest {
 
         assertTrue(receivingPeer.missingSequences.isEmpty())
         assertEquals(listOf("first", "second"), receivingPeer.projectedPayloads)
+    }
+
+    @Test
+    fun `synchronization reports transmitted envelope metadata separately from payload bytes`() {
+        val courtOne = InMemoryPeerJournal(
+            "court-1",
+            listOf(JournalEvent("e1", "court-1", 1, "abc")),
+        )
+        val courtTwo = InMemoryPeerJournal(
+            "court-2",
+            listOf(JournalEvent("e2", "court-2", 1, "xy")),
+        )
+
+        val metrics = courtOne.synchronizeWith(courtTwo)
+
+        assertEquals(3, metrics.transmittedEventCount)
+        assertEquals(51, metrics.metadataBytes)
+        assertEquals(7, metrics.payloadBytes)
+        assertTrue(metrics.elapsed >= ZERO)
+        assertEquals(courtOne.eventIds, courtTwo.eventIds)
+    }
+
+    @Test
+    fun `three peer reconnect reports convergence metrics for the partition exchange`() {
+        val courtOne = InMemoryPeerJournal("court-1")
+        val courtTwo = InMemoryPeerJournal("court-2")
+        val courtThree = InMemoryPeerJournal("court-3")
+
+        courtOne.append("court-1-score")
+        courtTwo.append("court-2-score")
+
+        val metrics = courtOne.synchronizeWith(courtThree) +
+            courtTwo.synchronizeWith(courtThree) +
+            courtOne.synchronizeWith(courtThree)
+
+        assertEquals(8, metrics.transmittedEventCount)
+        assertEquals(408, metrics.metadataBytes)
+        assertEquals(104, metrics.payloadBytes)
+        assertTrue(metrics.elapsed >= ZERO)
+        assertEquals(courtOne.eventIds, courtTwo.eventIds)
+        assertEquals(courtOne.eventIds, courtThree.eventIds)
     }
 }
