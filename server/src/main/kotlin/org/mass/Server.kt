@@ -23,6 +23,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.time.Instant
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.UUID
 
 /** Metadata a mobile client uses to validate a server before pairing. */
@@ -66,11 +68,22 @@ data class PendingPairingRequest(
 )
 
 @Serializable
+data class AcceptedPairingRequest(
+    val requestId: String,
+    val deviceId: String,
+    val surname: String,
+    val platform: String,
+    val reconnectCredential: String,
+    val state: String = "accepted",
+)
+
+@Serializable
 data class PairingRequestError(val code: String)
 
-/** Retains unapproved judge devices until the operator approval slice is available. */
+/** Retains pending judge devices and local operator approval decisions. */
 class PairingRequests {
     private val pendingByDeviceId = mutableMapOf<String, PendingPairingRequest>()
+    private val acceptedByRequestId = mutableMapOf<String, AcceptedPairingRequest>()
 
     fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
         val deviceId = command.deviceId.trim()
@@ -98,12 +111,41 @@ class PairingRequests {
     fun pending(): List<PendingPairingRequest> = synchronized(this) {
         pendingByDeviceId.values.toList()
     }
+
+    fun approve(requestId: String): PairingApproval = synchronized(this) {
+        acceptedByRequestId[requestId]?.let {
+            return PairingApproval.Accepted(it, created = false)
+        }
+        val pendingEntry = pendingByDeviceId.entries.firstOrNull { it.value.requestId == requestId }
+            ?: return PairingApproval.UnknownRequest
+        pendingByDeviceId.remove(pendingEntry.key)
+        val pending = pendingEntry.value
+        val accepted = AcceptedPairingRequest(
+            requestId = pending.requestId,
+            deviceId = pending.deviceId,
+            surname = pending.surname,
+            platform = pending.platform,
+            reconnectCredential = newReconnectCredential(),
+        )
+        acceptedByRequestId[requestId] = accepted
+        PairingApproval.Accepted(accepted, created = true)
+    }
+
+    private fun newReconnectCredential(): String = ByteArray(32).also(SecureRandom()::nextBytes).let {
+        Base64.getUrlEncoder().withoutPadding().encodeToString(it)
+    }
 }
 
 sealed interface PairingSubmission {
     data class Pending(val request: PendingPairingRequest, val created: Boolean) : PairingSubmission
 
     data object Rejected : PairingSubmission
+}
+
+sealed interface PairingApproval {
+    data class Accepted(val request: AcceptedPairingRequest, val created: Boolean) : PairingApproval
+
+    data object UnknownRequest : PairingApproval
 }
 
 /** Configures the HTTP protocol exposed by the local court server. */
