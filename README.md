@@ -69,4 +69,4 @@ Desktop-приложение площадки и локальный server U'Jud
 - готовые сетки импортируются, генерация жеребьёвки не входит в scope;
 - Windows signing и macOS notarization отложены до этапа после pilot;
 - P2P protocol и упаковка PostgreSQL должны пройти обязательные ADR/spikes;
-- схема импорта остаётся blocked до получения обезличенного реального XLSX.
+- baseline схемы импорта зафиксирован как `df-template-v1`; adapter и его тесты входят в этап 4.

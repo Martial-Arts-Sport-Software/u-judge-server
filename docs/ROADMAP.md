@@ -8,8 +8,8 @@
 
 ## 1. Цель релиза
 
-Подготовить пилот U'Judge, на котором можно провести тренировочное соревнование в изолированной LAN с несколькими
-площадками, мобильными судьями, импортированными сетками, полным аудитом и восстановлением после сетевых разрывов.
+Подготовить пилот U'Judge, на котором можно провести тренировочное соревнование в изолированной Wi-Fi сети с одним
+desktop peer, мобильными судьями, импортированными сетками, полным аудитом и восстановлением после сетевых разрывов.
 
 Pilot не считается production-ready до отдельного hardening после полевого испытания.
 
@@ -19,20 +19,20 @@ Pilot не считается production-ready до отдельного hardeni
 |-------------|---------------------------------------------------|
 | Команда     | Один разработчик                                  |
 | Срок        | До 3 месяцев                                      |
-| Desktop     | Windows и macOS                                   |
-| Mobile      | Android и iPhone                                  |
-| Масштаб     | До 8 площадок, до 500 участников                  |
-| Сеть        | Изолированная LAN, без обязательного интернета    |
+| Desktop     | Windows и macOS Ventura и новее                   |
+| Mobile      | Honor 50 Lite (Android 11) и iPhone 15 (iOS 26.6) |
+| Масштаб     | Один peer, одна площадка, 5-7 court clients; до 500 участников |
+| Сеть        | Изолированная Wi-Fi сеть через выделенный роутер площадки |
 | Хранилище   | Управляемый приложением PostgreSQL на каждом peer |
-| Репликация  | Обязательная P2P-модель без центрального узла     |
-| Дисциплины  | Все шесть режимов U'Judge                         |
+| Репликация  | Не входит в v1 Pilot; целевая post-v1 P2P-модель  |
+| Дисциплины  | 8 дисциплин из PDF 1 + Tanbon как продуктовая дисциплина |
 
 Объём крайне напряжённый для одного разработчика. План реализуем только как pilot с жёсткими техническими гейтами.
 Нельзя компенсировать отставание исключением тестов сохранности данных, scoring или reconnect.
 
 ## 3. Принципы выполнения
 
-- Сначала один вертикальный Kerugi slice, затем расширение на остальные дисциплины.
+- Сначала один вертикальный Kerugi slice, затем Tanbon и остальные семь дисциплин из PDF 1.
 - События и контракты проектируются до UI-интеграции.
 - Источник результата - append-only журнал, а не изменяемые счётчики.
 - Каждая функция получает тестируемый acceptance criterion из `REQUIREMENTS.md`.
@@ -45,7 +45,7 @@ Pilot не считается production-ready до отдельного hardeni
 Статус сверяется только с влитыми в `main` изменениями и их тестами/CI. Частично выполненный этап не закрывает gate.
 
 - [ ] Gate G0: baseline частично готов; требуется подтверждённый baseline обоих репозиториев.
-- [ ] Gate G1: P2P in-memory spike готов частично; PostgreSQL и mobile realtime spikes не готовы.
+- [ ] Gate G1: single-peer PostgreSQL и mobile realtime spikes не готовы; P2P остаётся post-v1.
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
 - [ ] Gate G4: не готов.
@@ -72,7 +72,7 @@ Pilot не считается production-ready до отдельного hardeni
 | Статус | ADR     | Архитектурное решение                             |
 |--------|---------|---------------------------------------------------|
 | [x]    | [ADR-001](adr/ADR-001-event-envelope.md) | Формат event envelope, sequence и idempotency     |
-| [x]    | [ADR-002](adr/ADR-002-p2p-discovery-join-anti-entropy.md) | P2P discovery, join и anti-entropy protocol       |
+| [x]    | [ADR-002](adr/ADR-002-p2p-discovery-join-anti-entropy.md) | P2P discovery, dual networks, leader claims и anti-entropy |
 | [x]    | [ADR-003](adr/ADR-003-managed-postgresql.md) | Управляемая установка PostgreSQL на Windows/macOS |
 | [x]    | [ADR-004](adr/ADR-004-http-websocket-contract.md) | HTTP/WebSocket contract и version negotiation     |
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
@@ -89,11 +89,15 @@ Pilot не считается production-ready до отдельного hardeni
 
 ### P2P spike
 
+P2P replication, dual network planes, deterministic leader election and quorum-backed claims are retained as the post-v1
+architecture. They are not v1 Pilot acceptance gates.
+
 - [x] Запустить минимум 3 peer-процесса.
 - [x] Создать события на двух peers во время искусственного partition.
 - [x] Восстановить сеть и получить одинаковый набор event IDs и проекции.
 - [x] Проверить duplicate delivery, restart и sequence gaps.
 - [x] Измерить объём метаданных и время сходимости.
+- [ ] Перенести P2P implementation spike в post-v1 backlog.
 
 ### PostgreSQL spike
 
@@ -109,16 +113,15 @@ clean-machine verification и Gate G1 не закрыты. Детали в [ADR-
 
 ### Realtime spike
 
-- [ ] Android/iPhone обнаруживают server через mDNS.
+- [ ] Honor 50 Lite/Android 11 и iPhone 15/iOS 26.6 обнаруживают server через mDNS на роутере площадки.
 - [ ] Client проходит pairing и WebSocket handshake.
 - [ ] Событие получает ACK и безопасно повторяется после disconnect.
 - [ ] Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
 
 ### Gate G1
 
-P2P, managed PostgreSQL и client reconnect подтверждены работающими прототипами. Если любой spike не проходит к концу
-второй недели, дата pilot пересматривается. Замена P2P центральным сервером не допускается без изменения требований
-владельцем продукта.
+Single-peer PostgreSQL and client reconnect are confirmed by working prototypes. P2P is explicitly deferred from v1 Pilot;
+its later implementation must preserve ADR-002 ownership and quorum semantics.
 
 ## 6. Этап 2: доменная и инфраструктурная основа
 
@@ -186,19 +189,21 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Зависимость
 
-До начала нужен обезличенный реальный XLSX. Без него `IMP-001` остаётся blocker, а импорт нельзя считать завершённым по
-синтетическому формату.
+Реальный входной файл получен и разобран как `df-template-v1`: `/Users/maksim/Downloads/df.xlsx`. Схема больше не является
+внешним blocker. Нужно реализовать adapter, подтвердить атомарный импорт и воспроизведение `PDF 1` после импорта и `PDF 2`
+после обработки сеток.
 
 ### Функциональность
 
 - Версионированный XLSX adapter.
 - Validation report с координатами ошибки.
 - Atomic import и backup before import.
+- Создание сущностей соревнования в БД и выходных PDF-артефактов по текущему desktop workflow.
 - Preview и исправление сетки до первого события.
-- Неизменяемое назначение сетки площадке.
+- Эксклюзивное назначение сетки единственному v1 peer на время `IN_PROGRESS`; leader claim is post-v1.
 - Текущий/следующий поединок.
 - Продвижение победителя и общий progress.
-- Репликация импортированных сеток и результатов.
+- Репликация импортированных сеток и результатов переносится в post-v1.
 - История всех площадок.
 
 ### Исключение
@@ -208,8 +213,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Gate G4
 
-Один peer импортирует соревнование, остальные получают идентичные сетки, после чего две площадки автономно проводят
-разные сетки и синхронизируют progress.
+Один v1 peer импортирует соревнование и проводит сетки для подключённых court clients; multi-peer replication is post-v1.
 
 ## 9. Этап 5: остальные дисциплины
 
@@ -220,7 +224,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Realtime pipeline Kerugi переиспользуется без копирования transport logic.
 - Голова `2`, туловище `1`.
 - `CROSS` хранится без изменения счёта.
-- Эксперт подтверждает пользовательские правила.
+- Подтверждены пользовательские правила: `HEAD=2`, `BODY=1`, `CROSS` не изменяет счёт и сохраняется в audit.
 
 ### Hosinsool
 
@@ -228,10 +232,10 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - 4 критерия презентации.
 - Штрафы и итог с точностью `0.1`.
 
-### Pair, Group и Weapon Freestyle
+### Pair, Group, Sword, Pole, Paired Nunchaku и Paired Fans
 
 - Наборы критериев соответствуют правилам и текущему клиентскому UI.
-- Weapon остаётся единым режимом.
+- Четыре weapon-дисциплины реализуются как отдельные режимы.
 - Настраиваемые judge count и aggregation formula.
 - Default aggregation исключает min/max и усредняет остаток.
 - `Send` необратим для судьи.
@@ -279,7 +283,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Надёжность
 
-- 8 peers и целевое число клиентов.
+- Один peer и 5-7 целевых mobile clients через роутер площадки.
 - До 500 импортированных участников.
 - Packet loss, latency, peer restart и длительный partition.
 - Проверка восстановления durable outbox клиента.
@@ -305,7 +309,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 - Провести минимум одну Kerugi/Tanbon сетку.
 - Провести выступления всех технических режимов.
-- Выполнить контролируемый разрыв между peers.
+- Проверка P2P partition, leader loss и split-brain claim переносится в post-v1.
 - Выполнить reconnect мобильного клиента с buffered events.
 - Сравнить UI, историю и ручной контрольный протокол.
 
@@ -319,9 +323,9 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 - Все Must-требования имеют тест или зафиксированное доказательство приёмки.
 - Scoring всех дисциплин подтверждён экспертом.
-- P2P convergence подтверждена после partition и restart.
+- Single-peer state recovery подтверждена после restart; P2P convergence переносится в post-v1.
 - Нет известных способов потерять или дважды применить подтверждённое событие.
-- Сетка имеет одного неизменяемого владельца.
+- В v1 сетка имеет единственного локального владельца во время `IN_PROGRESS`; leader quorum claim переносится в post-v1.
 - История объясняет каждое изменение результата.
 - XLSX/CSV совпадают с сохранённым состоянием.
 - Backup восстановлен на отдельном чистом окружении.
@@ -332,7 +336,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 | Риск                                        | Вероятность | Влияние     | Снижение риска                                                                  |
 |---------------------------------------------|-------------|-------------|---------------------------------------------------------------------------------|
-| P2P без coordinator не укладывается в срок  | Высокая     | Критическое | Spike в первые 2 недели, неизменяемое владение сеткой, перенос даты при провале |
+| P2P без coordinator не укладывается в срок  | Высокая     | Критическое | P2P явно исключён из v1; deterministic leader/quorum claim планируется после Pilot |
 | Managed PostgreSQL усложняет installers     | Высокая     | Высокое     | Ранний Windows/macOS spike, миграции и backup до UI                             |
 | Нет реального XLSX                          | Высокая     | Высокое     | Получить обезличенный файл до этапа сеток                                       |
 | Один разработчик                            | Высокая     | Высокое     | Вертикальные slices, минимальные abstractions, запрет расширения scope          |
