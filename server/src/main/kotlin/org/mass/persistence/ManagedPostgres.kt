@@ -26,6 +26,7 @@ sealed interface PostgresState {
 
 class ManagedPostgres(
     private val command: PostgresCommand,
+    private val provisioner: PostgresProvisioner? = null,
     private val stopTimeout: Duration = Duration.ofSeconds(5),
 ) {
     private var currentState: PostgresState = PostgresState.Stopped
@@ -36,6 +37,11 @@ class ManagedPostgres(
     fun start(): PostgresState {
         val current = refreshState()
         if (current is PostgresState.Running) return current
+
+        val provisioning = provisioner?.initialize()
+        if (provisioning is PostgresProvisioningState.Failed) {
+            return PostgresState.Failed(provisioning.diagnostic).also { currentState = it }
+        }
 
         if (!isPortAvailable(command.port)) {
             return PostgresState.Failed("PostgreSQL port ${command.port} is already in use").also {

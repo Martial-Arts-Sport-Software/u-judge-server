@@ -2,7 +2,9 @@ package org.mass.persistence
 
 import java.net.ServerSocket
 import java.net.InetAddress
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -55,6 +57,33 @@ class ManagedPostgresTest {
         assertTrue(failed.diagnostic.contains("exited"))
     }
 
+    @Test
+    fun `initializes the data directory before starting the supervised child`() {
+        val root = createTempDirectory()
+        try {
+            val dataDirectory = root.resolve("postgres")
+            val provisioner = PostgresProvisioner(
+                initdbCommand(
+                    "-cp",
+                    System.getProperty("java.class.path"),
+                    InitdbProcessFixture::class.java.name,
+                    "",
+                    dataDirectory.toString(),
+                ),
+                dataDirectory,
+            )
+            val postgres = ManagedPostgres(waitingCommand(port = 54324), provisioner = provisioner)
+
+            val running = assertIs<PostgresState.Running>(postgres.start())
+
+            assertTrue(Files.exists(dataDirectory.resolve("PG_VERSION")))
+            assertEquals(PostgresState.Stopped, postgres.stop())
+            assertTrue(!running.process.isAlive)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun waitingCommand(port: Int): PostgresCommand = javaCommand(
         "-cp",
         System.getProperty("java.class.path"),
@@ -66,6 +95,9 @@ class ManagedPostgresTest {
         arguments = listOf(ProcessHandle.current().info().command().orElseThrow()) + arguments,
         port = port,
     )
+
+    private fun initdbCommand(vararg arguments: String): List<String> =
+        listOf(ProcessHandle.current().info().command().orElseThrow()) + arguments
 }
 
 object ManagedPostgresProcessFixture {
