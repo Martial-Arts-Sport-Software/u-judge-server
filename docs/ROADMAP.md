@@ -19,20 +19,20 @@ Pilot не считается production-ready до отдельного hardeni
 |-------------|---------------------------------------------------|
 | Команда     | Один разработчик                                  |
 | Срок        | До 3 месяцев                                      |
-| Desktop     | Windows и macOS                                   |
-| Mobile      | Android и iPhone                                  |
-| Масштаб     | Один peer и его court clients; до 500 участников |
-| Сеть        | Изолированная Wi-Fi сеть для одного peer и его court clients |
+| Desktop     | Windows и macOS Ventura и новее                   |
+| Mobile      | Honor 50 Lite (Android 11) и iPhone 15 (iOS 26.6) |
+| Масштаб     | Один peer, одна площадка, 5-7 court clients; до 500 участников |
+| Сеть        | Изолированная Wi-Fi сеть через выделенный роутер площадки |
 | Хранилище   | Управляемый приложением PostgreSQL на каждом peer |
 | Репликация  | Не входит в v1 Pilot; целевая post-v1 P2P-модель  |
-| Дисциплины  | Все шесть режимов U'Judge                         |
+| Дисциплины  | Все 8 дисциплин из PDF 1                           |
 
 Объём крайне напряжённый для одного разработчика. План реализуем только как pilot с жёсткими техническими гейтами.
 Нельзя компенсировать отставание исключением тестов сохранности данных, scoring или reconnect.
 
 ## 3. Принципы выполнения
 
-- Сначала один вертикальный Kerugi slice, затем расширение на остальные дисциплины.
+- Сначала один вертикальный Kerugi slice, затем Tanbon и остальные шесть технических дисциплин.
 - События и контракты проектируются до UI-интеграции.
 - Источник результата - append-only журнал, а не изменяемые счётчики.
 - Каждая функция получает тестируемый acceptance criterion из `REQUIREMENTS.md`.
@@ -113,7 +113,7 @@ clean-machine verification и Gate G1 не закрыты. Детали в [ADR-
 
 ### Realtime spike
 
-- [ ] Android/iPhone обнаруживают server через mDNS.
+- [ ] Honor 50 Lite/Android 11 и iPhone 15/iOS 26.6 обнаруживают server через mDNS на роутере площадки.
 - [ ] Client проходит pairing и WebSocket handshake.
 - [ ] Событие получает ACK и безопасно повторяется после disconnect.
 - [ ] Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
@@ -230,10 +230,10 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - 4 критерия презентации.
 - Штрафы и итог с точностью `0.1`.
 
-### Pair, Group и Weapon Freestyle
+### Pair, Group, Sword, Pole, Paired Nunchaku и Paired Fans
 
 - Наборы критериев соответствуют правилам и текущему клиентскому UI.
-- Weapon остаётся единым режимом.
+- Четыре weapon-дисциплины реализуются как отдельные режимы.
 - Настраиваемые judge count и aggregation formula.
 - Default aggregation исключает min/max и усредняет остаток.
 - `Send` необратим для судьи.
@@ -281,7 +281,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Надёжность
 
-- 8 peers и целевое число клиентов.
+- Один peer и 5-7 целевых mobile clients через роутер площадки.
 - До 500 импортированных участников.
 - Packet loss, latency, peer restart и длительный partition.
 - Проверка восстановления durable outbox клиента.
