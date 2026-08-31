@@ -119,8 +119,10 @@ clean-machine verification и Gate G1 не закрыты. Детали в [ADR-
 - [ ] Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
 
 Текущее доказательство: `GET /v1/metadata` публикует version, capabilities, identity площадки, pairing policy и server
-time до pairing; integration tests подтверждают JSON contract и отсутствие anonymous `POST /score`. Этот slice не заменяет
-pairing, WebSocket handshake, durable ACK, reconnect или physical-device mDNS evidence.
+time до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, создаёт pending request и дедуплицирует retry
+по device ID. Integration tests подтверждают JSON contract, отсутствие anonymous `POST /score` и rejection без создания
+pending state. Эти slices не заменяют operator approval, credentials, WebSocket handshake, durable ACK, reconnect или
+physical-device mDNS evidence.
 
 ### Gate G1
 
