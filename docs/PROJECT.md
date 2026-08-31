@@ -269,7 +269,7 @@ Mobile clients                         Mobile clients
 
 | Вопрос                     | Статус                   | Условие закрытия                                                       |
 |----------------------------|--------------------------|------------------------------------------------------------------------|
-| Фактическая схема XLSX     | Анализ в работе          | Разобраны листы/колонки `df.xlsx` и зафиксирована версия адаптера тестами |
+| Фактическая схема XLSX     | Baseline зафиксирован    | Реализован и протестирован adapter для `df-template-v1`                 |
 | P2P transport/anti-entropy | Post-v1 scope           | Реализация отложена; ADR-002 сохраняет целевую topology и claim semantics |
 | Управляемый PostgreSQL     | ADR                      | Проверена автоматическая установка и lifecycle на чистых Windows/macOS |
 | Минимальные Android/iOS    | Решение принято          | Physical-device smoke tests на Honor 50 Lite/Android 11 и iPhone 15/iOS 26.6 |
