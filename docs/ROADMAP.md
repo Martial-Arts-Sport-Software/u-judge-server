@@ -71,10 +71,10 @@ Pilot не считается production-ready до отдельного hardeni
 
 | Статус | ADR     | Решение, которое нужно принять                    |
 |--------|---------|---------------------------------------------------|
-| [x]    | ADR-001 | Формат event envelope, sequence и idempotency     |
-| [ ]    | ADR-002 | P2P discovery, join и anti-entropy protocol       |
-| [ ]    | ADR-003 | Управляемая установка PostgreSQL на Windows/macOS |
-| [ ]    | ADR-004 | HTTP/WebSocket contract и version negotiation     |
+| [x]    | [ADR-001](adr/ADR-001-event-envelope.md) | Формат event envelope, sequence и idempotency     |
+| [ ]    | [ADR-002](adr/ADR-002-p2p-discovery-join-anti-entropy.md) | P2P discovery, join и anti-entropy protocol       |
+| [ ]    | [ADR-003](adr/ADR-003-managed-postgresql.md) | Управляемая установка PostgreSQL на Windows/macOS |
+| [ ]    | [ADR-004](adr/ADR-004-http-websocket-contract.md) | HTTP/WebSocket contract и version negotiation     |
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
 
 ### Gate G0
