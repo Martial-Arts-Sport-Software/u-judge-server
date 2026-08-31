@@ -126,8 +126,8 @@ Authoritative source для v1 Pilot — предоставленный «Про
 ### 7.2. Не реализовано в server
 
 - модель соревнования и сеток;
-- operator approval/rejection, credentials и persistent реестр подключённых устройств; in-memory pending pairing requests
-  валидируют фамилию и platform и дедуплицируются по device ID;
+- operator rejection, secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory
+  operator service одобряет валидный pending request и выдаёт reconnect credential без anonymous LAN write endpoint;
 - pairing, WebSocket handshake, durable ACK и reconnect; `POST /score` удалён и не является API v1;
 - таймер, scoring и формулы дисциплин;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
