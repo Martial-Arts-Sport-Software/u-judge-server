@@ -21,7 +21,8 @@ lifecycle states with a disposable JVM fixture.
 
 `PostgresProvisioner` now invokes a configured `initdb` command for a missing data directory, requires the resulting
 `PG_VERSION` marker, reuses an initialized directory, and refuses to overwrite a nonempty unrecognized directory. Its JVM
-fixture tests do not execute a real PostgreSQL binary.
+fixture tests do not execute a real PostgreSQL binary. `ManagedPostgres.restart()` replaces an unexpectedly exited child
+with a new supervised process after repeating the provisioning/start path.
 
 This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. It does
 not demonstrate a real PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`,

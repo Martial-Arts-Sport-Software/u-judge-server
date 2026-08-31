@@ -22,8 +22,8 @@ Desktop-приложение площадки и локальный server U'Jud
 Начат PostgreSQL persistence spike: versioned JDBC migration сохраняет и восстанавливает envelope Stage 1,
 `PostgresProvisioner` готовит configured data directory через `initdb` без перезаписи неизвестных данных до того, как
 `ManagedPostgres` супервизирует сконфигурированный дочерний процесс, и сообщает конфликт loopback-порта, ошибку запуска или
-аварийный exit. Реальный PostgreSQL lifecycle, bundled distribution и clean-machine proof для Windows/macOS ещё не
-реализованы.
+аварийный exit; `restart()` заменяет аварийно завершившийся supervised child. Реальный PostgreSQL lifecycle, bundled
+distribution и clean-machine proof для Windows/macOS ещё не реализованы.
 Решение и ограничения зафиксированы в [ADR-003](docs/adr/ADR-003-managed-postgresql.md).
 
 Подробное разделение текущего и целевого состояния находится в [описании проекта](docs/PROJECT.md).
