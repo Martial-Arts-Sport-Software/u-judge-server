@@ -8,8 +8,8 @@
 
 ## 1. Цель релиза
 
-Подготовить пилот U'Judge, на котором можно провести тренировочное соревнование в изолированной LAN с несколькими
-площадками, мобильными судьями, импортированными сетками, полным аудитом и восстановлением после сетевых разрывов.
+Подготовить пилот U'Judge, на котором можно провести тренировочное соревнование в изолированной Wi-Fi сети с одним
+desktop peer, мобильными судьями, импортированными сетками, полным аудитом и восстановлением после сетевых разрывов.
 
 Pilot не считается production-ready до отдельного hardening после полевого испытания.
 
@@ -21,10 +21,10 @@ Pilot не считается production-ready до отдельного hardeni
 | Срок        | До 3 месяцев                                      |
 | Desktop     | Windows и macOS                                   |
 | Mobile      | Android и iPhone                                  |
-| Масштаб     | До 8 площадок, до 500 участников                  |
-| Сеть        | Изолированная LAN: общая peer-network и отдельные court-network |
+| Масштаб     | Один peer и его court clients; до 500 участников |
+| Сеть        | Изолированная Wi-Fi сеть для одного peer и его court clients |
 | Хранилище   | Управляемый приложением PostgreSQL на каждом peer |
-| Репликация  | Обязательная P2P-модель без центрального узла     |
+| Репликация  | Не входит в v1 Pilot; целевая post-v1 P2P-модель  |
 | Дисциплины  | Все шесть режимов U'Judge                         |
 
 Объём крайне напряжённый для одного разработчика. План реализуем только как pilot с жёсткими техническими гейтами.
@@ -45,7 +45,7 @@ Pilot не считается production-ready до отдельного hardeni
 Статус сверяется только с влитыми в `main` изменениями и их тестами/CI. Частично выполненный этап не закрывает gate.
 
 - [ ] Gate G0: baseline частично готов; требуется подтверждённый baseline обоих репозиториев.
-- [ ] Gate G1: P2P in-memory spike готов частично; PostgreSQL и mobile realtime spikes не готовы.
+- [ ] Gate G1: single-peer PostgreSQL и mobile realtime spikes не готовы; P2P остаётся post-v1.
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
 - [ ] Gate G4: не готов.
@@ -89,15 +89,15 @@ Pilot не считается production-ready до отдельного hardeni
 
 ### P2P spike
 
+P2P replication, dual network planes, deterministic leader election and quorum-backed claims are retained as the post-v1
+architecture. They are not v1 Pilot acceptance gates.
+
 - [x] Запустить минимум 3 peer-процесса.
 - [x] Создать события на двух peers во время искусственного partition.
 - [x] Восстановить сеть и получить одинаковый набор event IDs и проекции.
 - [x] Проверить duplicate delivery, restart и sequence gaps.
 - [x] Измерить объём метаданных и время сходимости.
-- [ ] Реализовать deterministic leader election по lowest stable UUID и majority quorum.
-- [ ] Атомарно подтверждать `TAKE` с leader term и membership view.
-- [ ] Проверить потерю leader: активные owners продолжают работу, новые claims блокируются до нового quorum.
-- [ ] Проверить разделение peer-network и court-network на Ethernet + Wi-Fi или двух Wi-Fi интерфейсах.
+- [ ] Перенести P2P implementation spike в post-v1 backlog.
 
 ### PostgreSQL spike
 
@@ -120,9 +120,8 @@ clean-machine verification и Gate G1 не закрыты. Детали в [ADR-
 
 ### Gate G1
 
-P2P, managed PostgreSQL и client reconnect подтверждены работающими прототипами. Если любой spike не проходит к концу
-второй недели, дата pilot пересматривается. Замена P2P центральным сервером не допускается без изменения требований
-владельцем продукта.
+Single-peer PostgreSQL and client reconnect are confirmed by working prototypes. P2P is explicitly deferred from v1 Pilot;
+its later implementation must preserve ADR-002 ownership and quorum semantics.
 
 ## 6. Этап 2: доменная и инфраструктурная основа
 
@@ -199,10 +198,10 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Validation report с координатами ошибки.
 - Atomic import и backup before import.
 - Preview и исправление сетки до первого события.
-- Эксклюзивное назначение сетки площадке на время `IN_PROGRESS` через leader claim.
+- Эксклюзивное назначение сетки единственному v1 peer на время `IN_PROGRESS`; leader claim is post-v1.
 - Текущий/следующий поединок.
 - Продвижение победителя и общий progress.
-- Репликация импортированных сеток и результатов.
+- Репликация импортированных сеток и результатов переносится в post-v1.
 - История всех площадок.
 
 ### Исключение
@@ -212,8 +211,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Gate G4
 
-Один peer импортирует соревнование, остальные получают идентичные сетки, после чего две площадки автономно проводят
-разные сетки и синхронизируют progress.
+Один v1 peer импортирует соревнование и проводит сетки для подключённых court clients; multi-peer replication is post-v1.
 
 ## 9. Этап 5: остальные дисциплины
 
@@ -309,8 +307,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 - Провести минимум одну Kerugi/Tanbon сетку.
 - Провести выступления всех технических режимов.
-- Выполнить контролируемый разрыв между peers.
-- Выполнить потерю leader и проверить безопасную переизбрание без split-brain claim.
+- Проверка P2P partition, leader loss и split-brain claim переносится в post-v1.
 - Выполнить reconnect мобильного клиента с buffered events.
 - Сравнить UI, историю и ручной контрольный протокол.
 
@@ -324,9 +321,9 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 - Все Must-требования имеют тест или зафиксированное доказательство приёмки.
 - Scoring всех дисциплин подтверждён экспертом.
-- P2P convergence подтверждена после partition и restart.
+- Single-peer state recovery подтверждена после restart; P2P convergence переносится в post-v1.
 - Нет известных способов потерять или дважды применить подтверждённое событие.
-- Сетка имеет не более одного владельца во время `IN_PROGRESS`; claim подтверждён leader quorum.
+- В v1 сетка имеет единственного локального владельца во время `IN_PROGRESS`; leader quorum claim переносится в post-v1.
 - История объясняет каждое изменение результата.
 - XLSX/CSV совпадают с сохранённым состоянием.
 - Backup восстановлен на отдельном чистом окружении.
@@ -337,7 +334,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 | Риск                                        | Вероятность | Влияние     | Снижение риска                                                                  |
 |---------------------------------------------|-------------|-------------|---------------------------------------------------------------------------------|
-| P2P без coordinator не укладывается в срок  | Высокая     | Критическое | Spike в первые 2 недели, deterministic leader/quorum claim, перенос даты при провале |
+| P2P без coordinator не укладывается в срок  | Высокая     | Критическое | P2P явно исключён из v1; deterministic leader/quorum claim планируется после Pilot |
 | Managed PostgreSQL усложняет installers     | Высокая     | Высокое     | Ранний Windows/macOS spike, миграции и backup до UI                             |
 | Нет реального XLSX                          | Высокая     | Высокое     | Получить обезличенный файл до этапа сеток                                       |
 | Один разработчик                            | Высокая     | Высокое     | Вертикальные slices, минимальные abstractions, запрет расширения scope          |

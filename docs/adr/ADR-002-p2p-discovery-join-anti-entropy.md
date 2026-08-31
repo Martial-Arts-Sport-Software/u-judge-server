@@ -31,18 +31,21 @@ It does not prove a network protocol, durable cursors, peer authorization, or br
 
 ## Options
 
-| Option | Description | Advantages | Risks | Pilot fit |
+| Option | Description | Advantages | Risks | Post-v1 fit |
 | --- | --- | --- | --- | --- |
-| A. Direct LAN mesh with leader claims | Peers discover a bootstrap peer through mDNS, join with a competition code, then keep direct authenticated WebSocket connections to known peers. A stable elected leader atomically confirms bracket claims; anti-entropy exchanges per-owner cursors and requests missing ranges. | No single coordinator; simple at 8 peers; matches ADR-001. | Leader election and claim recovery need care. | Recommended baseline. |
+| A. Direct LAN mesh with leader claims | Peers discover a bootstrap peer through mDNS, join with a competition code, then keep direct authenticated WebSocket connections to known peers. A stable elected leader atomically confirms bracket claims; anti-entropy exchanges per-owner cursors and requests missing ranges. | No single coordinator; simple at 8 peers; matches ADR-001. | Leader election and claim recovery need care. | Recommended post-v1 baseline. |
 | B. Bootstrap-only relay | One peer accepts all replication traffic and relays it to others. | Simplest initial transport. | Acts as a coordinator and becomes an availability dependency. | Rejected by `P2P-001`. |
 | C. Database replication | PostgreSQL replicates peer data directly. | Database-level synchronization. | Does not model ownership, command validation, or event conflict semantics; difficult offline lifecycle. | Rejected for Pilot. |
 
 ## Decision
 
-Pilot uses two logical network planes. The shared peer network connects desktop peers for discovery, consensus, replication,
-and operator traffic. Each peer separately exposes its court network to the mobile clients assigned to that court. The
-preferred physical deployment is Ethernet plus Wi-Fi or two Wi-Fi interfaces; a Wi-Fi-only peer backbone is allowed but is
-less reliable.
+This is the accepted post-v1 architecture. The v1 Pilot deliberately implements a single desktop peer and its court
+clients; peer-to-peer replication and leader claims are not v1 acceptance gates.
+
+The post-v1 deployment uses two logical network planes. The shared peer network connects desktop peers for discovery,
+consensus, replication, and operator traffic. Each peer separately exposes its court network to the mobile clients assigned
+to that court. The preferred physical deployment is Ethernet plus Wi-Fi or two Wi-Fi interfaces; a Wi-Fi-only peer backbone
+is allowed but is less reliable.
 
 Peers use direct authenticated WebSocket mesh replication. Desktop peers discover bootstrap peers through mDNS on the peer
 network, with a manual host/IP entry fallback. A peer joins only with an operator-created competition code and explicit
