@@ -118,7 +118,7 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - Compose Desktop shell и навигация между стартовым экраном и экраном устройств;
 - ввод фамилии и переключение русского/английского языка;
 - встроенный Ktor CIO server на `0.0.0.0:8080`;
-- `GET /` и заглушка `POST /score`;
+- `GET /` и versioned `GET /v1/metadata` с protocol version, capabilities, identity площадки, pairing policy и server time;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
@@ -127,7 +127,7 @@ Authoritative source для v1 Pilot — предоставленный «Про
 
 - модель соревнования и сеток;
 - pairing и реестр подключённых устройств;
-- рабочий сетевой контракт оценок;
+- pairing, WebSocket handshake, durable ACK и reconnect; `POST /score` удалён и не является API v1;
 - таймер, scoring и формулы дисциплин;
 - managed PostgreSQL provisioning, реальный lifecycle и clean-machine proof; durable journal migration и process
   supervision существуют только как Stage 1 JDBC spike;
@@ -136,7 +136,8 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - интерфейсы арбитра, наблюдателя и редактора сеток;
 - автоматические тестовые сценарии.
 
-Текущее `POST /score` не читает тело запроса и всегда отвечает `Score OK`. Оно не является API v1.
+`GET /v1/metadata` является первым публичным read-only endpoint API v1. Он не создаёт online state и не заменяет pairing;
+изменяющий anonymous endpoint отсутствует.
 
 ## 8. Целевая архитектура v1 Pilot
 
