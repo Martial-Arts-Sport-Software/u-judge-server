@@ -19,9 +19,13 @@ has neither a local PostgreSQL installation nor a running container runtime. `Ma
 child process, reports an occupied loopback port or startup failure, and stops only that child. Its tests exercise those
 lifecycle states with a disposable JVM fixture.
 
-This is partial evidence for the durable-journal adapter and process-supervision boundary. It does not demonstrate a real
-PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`, `NFR-010` and `P2P-010` remain
-Partial and Gate G1 remains open.
+`PostgresProvisioner` now invokes a configured `initdb` command for a missing data directory, requires the resulting
+`PG_VERSION` marker, reuses an initialized directory, and refuses to overwrite a nonempty unrecognized directory. Its JVM
+fixture tests do not execute a real PostgreSQL binary.
+
+This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. It does
+not demonstrate a real PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`,
+`NFR-010` and `P2P-010` remain Partial and Gate G1 remains open.
 
 ## Options
 

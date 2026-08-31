@@ -19,9 +19,11 @@ Desktop-приложение площадки и локальный server U'Jud
 
 Реализованы Compose Desktop shell, базовая навигация, Ktor CIO server на `0.0.0.0:8080`, mDNS-публикация `_u-judge._tcp` и CI на `push`/`pull_request`. CI валидирует Gradle Wrapper и whitespace в diff, затем собирает проект на JDK 21 через `./gradlew build`. Первый P2P spike подтвердил in-memory event journal с идемпотентной доставкой, диагностикой sequence gaps и сходимостью трёх peers после partition; решение описано в [ADR-001](docs/adr/ADR-001-event-envelope.md). Начат client protocol: `GET /v1/metadata` публикует версию, capabilities и identity площадки до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, сохраняет pending request в памяти и дедуплицирует retry по device ID. Anonymous `POST /score` удалён. Operator approval, credentials, WebSocket, durable ACK и reconnect ещё не реализованы. Турнирная модель, scoring, PostgreSQL lifecycle, production P2P transport, импорт и аудит также не реализованы.
 
-Начат PostgreSQL persistence spike: versioned JDBC migration сохраняет и восстанавливает envelope Stage 1, а
-`ManagedPostgres` супервизирует сконфигурированный дочерний процесс и сообщает конфликт loopback-порта, ошибку запуска или
-аварийный exit. Реальный PostgreSQL lifecycle, provisioning и clean-machine proof для Windows/macOS ещё не реализованы.
+Начат PostgreSQL persistence spike: versioned JDBC migration сохраняет и восстанавливает envelope Stage 1,
+`PostgresProvisioner` готовит configured data directory через `initdb` без перезаписи неизвестных данных до того, как
+`ManagedPostgres` супервизирует сконфигурированный дочерний процесс, и сообщает конфликт loopback-порта, ошибку запуска или
+аварийный exit. Реальный PostgreSQL lifecycle, bundled distribution и clean-machine proof для Windows/macOS ещё не
+реализованы.
 Решение и ограничения зафиксированы в [ADR-003](docs/adr/ADR-003-managed-postgresql.md).
 
 Подробное разделение текущего и целевого состояния находится в [описании проекта](docs/PROJECT.md).

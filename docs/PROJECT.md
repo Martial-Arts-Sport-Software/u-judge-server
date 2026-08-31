@@ -130,8 +130,8 @@ Authoritative source для v1 Pilot — предоставленный «Про
   валидируют фамилию и platform и дедуплицируются по device ID;
 - pairing, WebSocket handshake, durable ACK и reconnect; `POST /score` удалён и не является API v1;
 - таймер, scoring и формулы дисциплин;
-- managed PostgreSQL provisioning, реальный lifecycle и clean-machine proof; durable journal migration и process
-  supervision существуют только как Stage 1 JDBC spike;
+- bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
+  provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
 - импорт XLSX, история, аудит, экспорт и backup;
 - интерфейсы арбитра, наблюдателя и редактора сеток;
