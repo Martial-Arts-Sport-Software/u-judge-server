@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlinJvm)
+    alias(libs.plugins.kotlin.serialization)
     application
 }
 
@@ -10,6 +11,7 @@ kotlin {
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.h2)
+    testImplementation(libs.ktor.server.test.host)
 
     implementation(libs.kotlinx.coroutinesSwing)
 
