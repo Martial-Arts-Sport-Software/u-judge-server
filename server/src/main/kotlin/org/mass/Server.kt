@@ -6,12 +6,15 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.request.receive
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +23,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.time.Instant
+import java.util.UUID
 
 /** Metadata a mobile client uses to validate a server before pairing. */
 @Serializable
@@ -45,8 +49,68 @@ data class ServerMetadata(
     }
 }
 
+@Serializable
+data class PairingRequestCommand(
+    val deviceId: String,
+    val surname: String,
+    val platform: String,
+)
+
+@Serializable
+data class PendingPairingRequest(
+    val requestId: String,
+    val deviceId: String,
+    val surname: String,
+    val platform: String,
+    val state: String = "pending",
+)
+
+@Serializable
+data class PairingRequestError(val code: String)
+
+/** Retains unapproved judge devices until the operator approval slice is available. */
+class PairingRequests {
+    private val pendingByDeviceId = mutableMapOf<String, PendingPairingRequest>()
+
+    fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
+        val deviceId = command.deviceId.trim()
+        val surname = command.surname.trim()
+        val platform = command.platform.lowercase()
+        if (deviceId.isEmpty() || surname.isEmpty() || platform !in setOf("android", "ios")) {
+            return PairingSubmission.Rejected
+        }
+
+        val existing = pendingByDeviceId[deviceId]
+        if (existing != null) {
+            return PairingSubmission.Pending(existing, created = false)
+        }
+
+        val request = PendingPairingRequest(
+            requestId = UUID.randomUUID().toString(),
+            deviceId = deviceId,
+            surname = surname,
+            platform = platform,
+        )
+        pendingByDeviceId[deviceId] = request
+        PairingSubmission.Pending(request, created = true)
+    }
+
+    fun pending(): List<PendingPairingRequest> = synchronized(this) {
+        pendingByDeviceId.values.toList()
+    }
+}
+
+sealed interface PairingSubmission {
+    data class Pending(val request: PendingPairingRequest, val created: Boolean) : PairingSubmission
+
+    data object Rejected : PairingSubmission
+}
+
 /** Configures the HTTP protocol exposed by the local court server. */
-fun Application.module(metadata: ServerMetadata = ServerMetadata.local()) {
+fun Application.module(
+    metadata: ServerMetadata = ServerMetadata.local(),
+    pairingRequests: PairingRequests = PairingRequests(),
+) {
     install(ContentNegotiation) {
         json()
     }
@@ -57,6 +121,22 @@ fun Application.module(metadata: ServerMetadata = ServerMetadata.local()) {
         }
         get("/v1/metadata") {
             call.respond(metadata)
+        }
+        post("/v1/pairing-requests") {
+            when (val submission = pairingRequests.submit(call.receive())) {
+                is PairingSubmission.Pending -> {
+                    call.respond(
+                        if (submission.created) HttpStatusCode.Accepted else HttpStatusCode.OK,
+                        submission.request,
+                    )
+                }
+                PairingSubmission.Rejected -> {
+                    call.respond(HttpStatusCode.BadRequest, PairingRequestError("invalid_pairing_request"))
+                }
+            }
+        }
+        get("/v1/pairing-requests") {
+            call.respond(pairingRequests.pending())
         }
     }
 }
