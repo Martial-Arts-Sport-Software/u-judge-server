@@ -1,7 +1,7 @@
 # ADR-003: Managed PostgreSQL Persistence
 
-- Status: Proposed
-- Date: 2026-08-30
+- Status: Accepted
+- Date: 2026-08-31
 - Requirements: `NFR-004`, `NFR-009`, `NFR-010`, `P2P-010`
 
 ## Context
@@ -29,21 +29,16 @@ Windows/macOS installation, so `NFR-004`, `NFR-009`, `NFR-010` and `P2P-010` rem
 | C. Docker-managed PostgreSQL | U'Judge starts a local container. | Isolated database process. | Docker Desktop is an external prerequisite and is not suitable for clean Pilot machines. | Rejected for Pilot. |
 | D. Embedded alternative database | Replace PostgreSQL with an embedded database. | Simplifies distribution. | Violates the declared PostgreSQL requirement and may change production behavior. | Rejected without a requirement change. |
 
-## Product-Owner Decisions
+## Decision
 
-1. **Distribution:** approve bundled PostgreSQL for Windows and macOS, or explicitly change the Pilot requirement.
-2. **Data location:** approve an application-data directory outside the installer path. Specify whether operators can choose a
-   different directory during setup.
-3. **Port conflicts:** choose whether U'Judge selects an unused localhost port automatically or requires an operator-selected
-   port. The selected port must never be exposed as a LAN service.
-4. **Process ownership:** approve one PostgreSQL child process per U'Judge peer, supervised by the desktop application and
-   stopped on normal app exit.
-5. **Upgrade policy:** choose in-place PostgreSQL upgrade, export/import into a bundled version, or a Pilot rule that blocks
-   upgrades while preserving backup/restore. State the supported downgrade behavior.
-6. **Backup policy:** approve the backup location, retention, encryption-at-rest requirement, and whether a backup is required
-   before schema migration as well as before import/completed sessions.
-7. **Failure policy:** define the operator-visible behavior for database start failure, corrupted data directory, insufficient
-   disk space, and a port conflict.
+U'Judge bundles a tested PostgreSQL distribution for Windows and macOS. Each desktop peer initializes and supervises one
+localhost PostgreSQL child process, stops it on normal application exit, and stores its data outside the installer path in
+the operating system's application-data directory. The application automatically selects an unused localhost port.
+
+Before a schema migration, import, or completed session, U'Judge creates an encrypted backup and retains the seven newest
+backups. Backup encryption keys are held in OS secure storage. PostgreSQL upgrades create a backup, export the old cluster,
+and import it into the new bundled cluster; rollback restores the pre-upgrade backup. Database start, corruption, disk-space,
+and port-conflict failures present actionable recovery UI without silently discarding data.
 
 ## Required Acceptance Evidence
 
@@ -60,13 +55,13 @@ ADR-003 can be accepted only after the selected option proves on clean Windows a
 
 | Field | Approved value |
 | --- | --- |
-| PostgreSQL distribution | _Pending product-owner decision_ |
-| Data directory | _Pending product-owner decision_ |
-| Port-conflict policy | _Pending product-owner decision_ |
-| Process lifecycle | _Pending product-owner decision_ |
-| Upgrade and rollback policy | _Pending product-owner decision_ |
-| Backup and retention policy | _Pending product-owner decision_ |
-| Failure UX | _Pending product-owner decision_ |
+| PostgreSQL distribution | Bundled, tested Windows/macOS distribution. |
+| Data directory | OS application-data directory outside the installer path. |
+| Port-conflict policy | Automatically choose an unused localhost port. |
+| Process lifecycle | One supervised PostgreSQL child process per desktop peer; stop on normal app exit. |
+| Upgrade and rollback policy | Backup, export/import into the new bundled cluster; restore the pre-upgrade backup to roll back. |
+| Backup and retention policy | Encrypted automatic backup before migration, import, and completed session; retain seven newest backups; key in OS secure storage. |
+| Failure UX | Actionable recovery UI for start, corruption, disk-space, and port-conflict failures; never silently discard data. |
 
 ## Consequences
 

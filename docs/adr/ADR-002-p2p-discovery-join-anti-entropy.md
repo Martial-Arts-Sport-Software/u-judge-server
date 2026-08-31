@@ -1,7 +1,7 @@
 # ADR-002: P2P Discovery, Join, and Anti-Entropy
 
-- Status: Decision required
-- Date: 2026-08-30
+- Status: Accepted
+- Date: 2026-08-31
 - Requirements: `CMP-001`--`CMP-007`, `P2P-001`--`P2P-011`, `NFR-003`, `NFR-005`, `NFR-006`, `NFR-013`
 
 ## Context
@@ -31,26 +31,17 @@ It does not prove a network protocol, durable cursors, peer authorization, or br
 | B. Bootstrap-only relay | One peer accepts all replication traffic and relays it to others. | Simplest initial transport. | Acts as a coordinator and becomes an availability dependency. | Rejected by `P2P-001`. |
 | C. Database replication | PostgreSQL replicates peer data directly. | Database-level synchronization. | Does not model ownership, command validation, or event conflict semantics; difficult offline lifecycle. | Rejected for Pilot. |
 
-## Product-Owner Decisions
+## Decision
 
-Answer each item before ADR acceptance. The recommended baseline is provided only to make the choice concrete.
+Pilot uses direct authenticated WebSocket mesh replication. Desktop peers discover bootstrap peers through mDNS, with a
+manual host/IP entry fallback. A peer joins only with an operator-created competition code and explicit operator approval.
 
-1. **Peer identity:** approve a generated stable peer UUID plus a locally stored per-competition credential, or require an
-   alternative identity model? Recommended: generated UUID and credential; no user-account system in Pilot.
-2. **Competition join:** approve a one-time/operator-created competition code for peer enrollment? Specify whether a code
-   expires and whether an operator must approve every peer.
-3. **Discovery:** approve mDNS only as bootstrap discovery in the selected LAN, with a visible manual retry flow but no manual
-   IP entry? If manual IP is required, specify its Pilot UX and security constraints.
-4. **Topology:** approve direct authenticated WebSocket mesh for up to eight peers? Connections may be initiated by either
-   peer; no peer is special after join.
-5. **Anti-entropy:** approve a per-owner high-water cursor summary plus explicit missing-range requests and at-least-once
-   range replay? Full-journal exchange remains acceptable only for the spike, not the Pilot protocol.
-6. **Transport security:** choose one of the following:
-   - [ ] TLS with a locally managed certificate/trust flow.
-   - [ ] Authenticated plaintext only in the isolated Pilot LAN, documented as a Pilot limitation.
-   - [ ] Another model: _describe it_.
-7. **Peer removal:** define whether revocation immediately terminates connections and whether a revoked peer retains its local
-   historical copy. The system must reject its future events.
+Each desktop instance has a generated stable UUID for replication identity and a per-competition credential. During
+competition setup, the operator assigns the instance a display name and the responsible referee's name/surname. This
+assignment is competition metadata and an audit-journal record, not the technical peer ID.
+
+Peers exchange per-owner high-water cursors and replay only explicit missing sequence ranges. TLS with a locally managed
+certificate/trust flow protects all peer traffic. Revoking a peer immediately terminates its connections and rejects future
 
 ## Acceptance Evidence
 
@@ -66,10 +57,10 @@ ADR-002 can be accepted only when a multi-process test or prototype proves:
 
 | Field | Approved value |
 | --- | --- |
-| Peer identity | _Pending product-owner decision_ |
-| Join and approval flow | _Pending product-owner decision_ |
-| Discovery mechanism | _Pending product-owner decision_ |
-| Replication topology | _Pending product-owner decision_ |
-| Anti-entropy protocol | _Pending product-owner decision_ |
-| Transport security | _Pending product-owner decision_ |
-| Peer revocation behavior | _Pending product-owner decision_ |
+| Peer identity | Generated stable desktop-peer UUID and per-competition credential; competition-scoped operator assignment of display name and referee name/surname. |
+| Join and approval flow | Operator-created competition code plus explicit operator approval for every new peer. |
+| Discovery mechanism | mDNS bootstrap discovery with manual host/IP fallback. |
+| Replication topology | Direct authenticated WebSocket LAN mesh, maximum eight peers, no special peer after join. |
+| Anti-entropy protocol | Per-owner high-water cursors, explicit missing-range request, and at-least-once range replay. |
+| Transport security | TLS with locally managed certificate and trust flow. |
+| Peer revocation behavior | Immediately disconnect and reject future events; retain local historical copy without further replication authority. |
