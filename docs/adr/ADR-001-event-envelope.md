@@ -2,7 +2,7 @@
 
 - Status: Accepted for the Stage 1 P2P spike
 - Date: 2026-08-30
-- Requirements: `SYS-008`, `SYS-009`, `P2P-001`--`P2P-005`, `P2P-011`
+- Requirements: `SYS-008`, `SYS-009`, `P2P-001`--`P2P-005`, `P2P-008`, `P2P-011`, `NFR-002` baseline
 
 ## Context
 
@@ -41,3 +41,21 @@ will load the same envelope from PostgreSQL rather than process memory.
   fields must be added before domain commands are persisted or projected, per `SYS-007`, `AUD-001` and `P2P-006`.
 - This ADR does not choose mDNS discovery, transport, authentication or PostgreSQL packaging. Those choices remain in
   ADR-002 and ADR-003 after their respective spikes.
+
+## Measurement Baseline
+
+The in-memory spike reports `SynchronizationMetrics` for every bidirectional exchange: elapsed in-process convergence
+time, transmitted event count, envelope metadata bytes, and opaque payload bytes. Metadata counts the UTF-8 bytes of
+`id` and `ownerPeerId` plus eight bytes for `sequence`; payload is intentionally excluded from that value.
+
+The three-peer partition/reconnect fixture creates one event on each disconnected court and performs the existing three
+full-journal exchanges. Its deterministic transfer baseline is eight delivered envelopes, 408 metadata bytes, and 104
+payload bytes. On macOS (Darwin) with JDK 21, the fixture completed in 1 ms according to the JUnit report on 2026-08-31:
+
+```text
+./gradlew :server:test --tests org.mass.replication.InMemoryPeerJournalTest
+```
+
+This is an in-process lower-bound measurement, not evidence for the `NFR-002` LAN latency target. It excludes transport
+framing, discovery, serialization, persistence, network latency, and range-based anti-entropy. A production P2P protocol
+must repeat the measurement with those costs and expose `P2P-008` diagnostics to the operator.
