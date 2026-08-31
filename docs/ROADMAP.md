@@ -111,7 +111,8 @@ architecture. They are not v1 Pilot acceptance gates.
 ошибку запуска и аварийный exit. Тест использует JVM fixture, а не PostgreSQL; managed lifecycle реального сервера,
 clean-machine verification и Gate G1 не закрыты. Перед запуском supervised child `PostgresProvisioner` вызывает configured
 `initdb`, требует `PG_VERSION`, безопасно переиспользует готовый cluster и отказывается перезаписывать nonempty directory
-без PostgreSQL marker; его тест также использует JVM fixture. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
+без PostgreSQL marker; `ManagedPostgres.restart()` заменяет child после аварийного exit. Эти тесты также используют JVM
+fixture. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
 
 ### Realtime spike
 
