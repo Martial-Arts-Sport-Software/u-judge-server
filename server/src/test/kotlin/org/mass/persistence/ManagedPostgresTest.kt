@@ -2,6 +2,7 @@ package org.mass.persistence
 
 import java.net.ServerSocket
 import java.net.InetAddress
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -47,8 +48,8 @@ class ManagedPostgresTest {
     fun `reports unexpected child exit`() {
         val postgres = ManagedPostgres(javaCommand("-version", port = 54323))
 
-        postgres.start()
-        Thread.sleep(100)
+        val running = assertIs<PostgresState.Running>(postgres.start())
+        assertTrue(running.process.waitFor(5, TimeUnit.SECONDS))
 
         val failed = assertIs<PostgresState.Failed>(postgres.state)
         assertTrue(failed.diagnostic.contains("exited"))
