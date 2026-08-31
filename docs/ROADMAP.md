@@ -22,7 +22,7 @@ Pilot не считается production-ready до отдельного hardeni
 | Desktop     | Windows и macOS                                   |
 | Mobile      | Android и iPhone                                  |
 | Масштаб     | До 8 площадок, до 500 участников                  |
-| Сеть        | Изолированная LAN, без обязательного интернета    |
+| Сеть        | Изолированная LAN: общая peer-network и отдельные court-network |
 | Хранилище   | Управляемый приложением PostgreSQL на каждом peer |
 | Репликация  | Обязательная P2P-модель без центрального узла     |
 | Дисциплины  | Все шесть режимов U'Judge                         |
@@ -72,7 +72,7 @@ Pilot не считается production-ready до отдельного hardeni
 | Статус | ADR     | Архитектурное решение                             |
 |--------|---------|---------------------------------------------------|
 | [x]    | [ADR-001](adr/ADR-001-event-envelope.md) | Формат event envelope, sequence и idempotency     |
-| [x]    | [ADR-002](adr/ADR-002-p2p-discovery-join-anti-entropy.md) | P2P discovery, join и anti-entropy protocol       |
+| [x]    | [ADR-002](adr/ADR-002-p2p-discovery-join-anti-entropy.md) | P2P discovery, dual networks, leader claims и anti-entropy |
 | [x]    | [ADR-003](adr/ADR-003-managed-postgresql.md) | Управляемая установка PostgreSQL на Windows/macOS |
 | [x]    | [ADR-004](adr/ADR-004-http-websocket-contract.md) | HTTP/WebSocket contract и version negotiation     |
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
@@ -94,6 +94,10 @@ Pilot не считается production-ready до отдельного hardeni
 - [x] Восстановить сеть и получить одинаковый набор event IDs и проекции.
 - [x] Проверить duplicate delivery, restart и sequence gaps.
 - [x] Измерить объём метаданных и время сходимости.
+- [ ] Реализовать deterministic leader election по lowest stable UUID и majority quorum.
+- [ ] Атомарно подтверждать `TAKE` с leader term и membership view.
+- [ ] Проверить потерю leader: активные owners продолжают работу, новые claims блокируются до нового quorum.
+- [ ] Проверить разделение peer-network и court-network на Ethernet + Wi-Fi или двух Wi-Fi интерфейсах.
 
 ### PostgreSQL spike
 
@@ -195,7 +199,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Validation report с координатами ошибки.
 - Atomic import и backup before import.
 - Preview и исправление сетки до первого события.
-- Неизменяемое назначение сетки площадке.
+- Эксклюзивное назначение сетки площадке на время `IN_PROGRESS` через leader claim.
 - Текущий/следующий поединок.
 - Продвижение победителя и общий progress.
 - Репликация импортированных сеток и результатов.
@@ -306,6 +310,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Провести минимум одну Kerugi/Tanbon сетку.
 - Провести выступления всех технических режимов.
 - Выполнить контролируемый разрыв между peers.
+- Выполнить потерю leader и проверить безопасную переизбрание без split-brain claim.
 - Выполнить reconnect мобильного клиента с buffered events.
 - Сравнить UI, историю и ручной контрольный протокол.
 
@@ -321,7 +326,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Scoring всех дисциплин подтверждён экспертом.
 - P2P convergence подтверждена после partition и restart.
 - Нет известных способов потерять или дважды применить подтверждённое событие.
-- Сетка имеет одного неизменяемого владельца.
+- Сетка имеет не более одного владельца во время `IN_PROGRESS`; claim подтверждён leader quorum.
 - История объясняет каждое изменение результата.
 - XLSX/CSV совпадают с сохранённым состоянием.
 - Backup восстановлен на отдельном чистом окружении.
@@ -332,7 +337,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 | Риск                                        | Вероятность | Влияние     | Снижение риска                                                                  |
 |---------------------------------------------|-------------|-------------|---------------------------------------------------------------------------------|
-| P2P без coordinator не укладывается в срок  | Высокая     | Критическое | Spike в первые 2 недели, неизменяемое владение сеткой, перенос даты при провале |
+| P2P без coordinator не укладывается в срок  | Высокая     | Критическое | Spike в первые 2 недели, deterministic leader/quorum claim, перенос даты при провале |
 | Managed PostgreSQL усложняет installers     | Высокая     | Высокое     | Ранний Windows/macOS spike, миграции и backup до UI                             |
 | Нет реального XLSX                          | Высокая     | Высокое     | Получить обезличенный файл до этапа сеток                                       |
 | Один разработчик                            | Высокая     | Высокое     | Вертикальные slices, минимальные abstractions, запрет расширения scope          |
