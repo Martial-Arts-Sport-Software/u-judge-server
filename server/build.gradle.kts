@@ -9,6 +9,7 @@ kotlin {
 
 dependencies {
     testImplementation(kotlin("test"))
+    testImplementation(libs.h2)
 
     implementation(libs.kotlinx.coroutinesSwing)
 

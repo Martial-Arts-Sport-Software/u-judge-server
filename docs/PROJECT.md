@@ -123,7 +123,7 @@ Weapon Freestyle в U'Judge v1 остаётся одним общим режим
 - pairing и реестр подключённых устройств;
 - рабочий сетевой контракт оценок;
 - таймер, scoring и формулы дисциплин;
-- PostgreSQL schema, миграции и lifecycle;
+- managed PostgreSQL lifecycle и clean-machine proof; durable journal migration существует только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
 - импорт XLSX, история, аудит, экспорт и backup;
 - интерфейсы арбитра, наблюдателя и редактора сеток;
