@@ -45,6 +45,10 @@ storage; it remains valid until revocation or rotation. The realtime protocol us
 client and typed messages for handshake, pairing status, session snapshot, command/event, ACK, rejection, heartbeat,
 resync request/response, and server notice. TLS uses the local certificate/trust flow selected in ADR-002.
 
+The current server slice keeps approval in a transport-agnostic local operator application service. It transitions a pending
+request to accepted idempotently and issues an opaque reconnect credential, without exposing an anonymous LAN approval
+endpoint. Credential delivery to Android/iOS secure storage, revocation and WebSocket authentication remain unimplemented.
+
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
 clock offset and round-trip time.
