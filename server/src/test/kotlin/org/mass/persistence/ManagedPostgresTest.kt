@@ -3,6 +3,7 @@ package org.mass.persistence
 import java.net.ServerSocket
 import java.net.InetAddress
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -58,6 +59,33 @@ class ManagedPostgresTest {
     }
 
     @Test
+    fun `restarts a new child after an unexpected exit`() {
+        val root = createTempDirectory()
+        try {
+            val launchMarker = root.resolve("launches")
+            val postgres = ManagedPostgres(
+                javaCommand(
+                    "-cp",
+                    System.getProperty("java.class.path"),
+                    RestartingPostgresProcessFixture::class.java.name,
+                    launchMarker.toString(),
+                    port = 54325,
+                ),
+            )
+            val exited = assertIs<PostgresState.Running>(postgres.start())
+            assertTrue(exited.process.waitFor(5, TimeUnit.SECONDS))
+
+            val restarted = assertIs<PostgresState.Running>(postgres.restart())
+
+            assertTrue(restarted.process.isAlive)
+            assertTrue(restarted.process != exited.process)
+            assertEquals(PostgresState.Stopped, postgres.stop())
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `initializes the data directory before starting the supervised child`() {
         val root = createTempDirectory()
         try {
@@ -103,6 +131,18 @@ class ManagedPostgresTest {
 object ManagedPostgresProcessFixture {
     @JvmStatic
     fun main(args: Array<String>) {
+        Thread.sleep(60_000)
+    }
+}
+
+object RestartingPostgresProcessFixture {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val marker = Path.of(args.single())
+        if (Files.notExists(marker)) {
+            Files.writeString(marker, "started")
+            return
+        }
         Thread.sleep(60_000)
     }
 }

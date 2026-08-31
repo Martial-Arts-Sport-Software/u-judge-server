@@ -66,6 +66,11 @@ class ManagedPostgres(
         return PostgresState.Stopped.also { currentState = it }
     }
 
+    fun restart(): PostgresState {
+        stop()
+        return start()
+    }
+
     private fun refreshState(): PostgresState {
         val running = currentState as? PostgresState.Running ?: return currentState
         if (running.process.isAlive) return running
