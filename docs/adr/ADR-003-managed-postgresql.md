@@ -15,10 +15,13 @@ installations.
 The server has a JDBC-backed `JdbcPeerJournal` and versioned `V1__peer_journal.sql` migration. The store persists the
 ADR-001 envelope fields, preserves event-ID idempotency and owner/sequence uniqueness, and resumes the local sequence after
 the store is recreated. Its focused test runs against H2 in PostgreSQL compatibility mode because this development machine
-has neither a local PostgreSQL installation nor a running container runtime.
+has neither a local PostgreSQL installation nor a running container runtime. `ManagedPostgres` supervises a configured local
+child process, reports an occupied loopback port or startup failure, and stops only that child. Its tests exercise those
+lifecycle states with a disposable JVM fixture.
 
-This is evidence for a durable-journal adapter only. It does not demonstrate the PostgreSQL server lifecycle or a clean
-Windows/macOS installation, so `NFR-004`, `NFR-009`, `NFR-010` and `P2P-010` remain Partial and Gate G1 remains open.
+This is partial evidence for the durable-journal adapter and process-supervision boundary. It does not demonstrate a real
+PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`, `NFR-010` and `P2P-010` remain
+Partial and Gate G1 remains open.
 
 ## Decision pending
 

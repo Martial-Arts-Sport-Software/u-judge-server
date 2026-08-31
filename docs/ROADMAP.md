@@ -102,9 +102,10 @@ Pilot не считается production-ready до отдельного hardeni
 - [ ] Проверить чистую Windows и macOS machine.
 - [ ] Определить upgrade/backup strategy и размер installer.
 
-Текущее доказательство: начат durable-journal slice с versioned JDBC migration и restart/idempotency tests. Он покрывает
-только persistence adapter и не закрывает managed lifecycle, clean-machine verification или Gate G1; детали в
-[ADR-003](adr/ADR-003-managed-postgresql.md).
+Текущее доказательство: durable-journal slice с versioned JDBC migration и restart/idempotency tests дополнен
+`ManagedPostgres`, который супервизирует сконфигурированный дочерний процесс и диагностирует конфликт loopback-порта,
+ошибку запуска и аварийный exit. Тест использует JVM fixture, а не PostgreSQL; managed lifecycle реального сервера,
+clean-machine verification и Gate G1 не закрыты. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
 
 ### Realtime spike
 
