@@ -1,7 +1,7 @@
-# ADR-003: Managed PostgreSQL Persistence Spike
+# ADR-003: Managed PostgreSQL Persistence
 
-- Status: Proposed
-- Date: 2026-08-30
+- Status: Accepted
+- Date: 2026-08-31
 - Requirements: `NFR-004`, `NFR-009`, `NFR-010`, `P2P-010`
 
 ## Context
@@ -23,11 +23,48 @@ This is partial evidence for the durable-journal adapter and process-supervision
 PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`, `NFR-010` and `P2P-010` remain
 Partial and Gate G1 remains open.
 
-## Decision pending
+## Options
 
-The managed PostgreSQL distribution, data directory, process supervision, port-conflict handling, upgrade procedure and
-backup/restore tooling remain undecided. ADR-003 can be accepted only after the same migration and restart fixture runs
-against an application-managed PostgreSQL instance on clean macOS and Windows environments.
+| Option | Description | Advantages | Risks | Pilot fit |
+| --- | --- | --- | --- | --- |
+| A. Bundled PostgreSQL distribution | Desktop installer includes a tested PostgreSQL distribution; U'Judge initializes and supervises it as a child process. | Meets application-managed lifecycle; no separate user installation. | Larger installer; per-OS packaging, licensing, upgrade and port handling. | Recommended baseline. |
+| B. User-installed PostgreSQL | Operator installs and configures PostgreSQL before running U'Judge. | Smallest U'Judge installer. | Fails clean-install and application-managed lifecycle requirements. | Rejected by `NFR-010`. |
+| C. Docker-managed PostgreSQL | U'Judge starts a local container. | Isolated database process. | Docker Desktop is an external prerequisite and is not suitable for clean Pilot machines. | Rejected for Pilot. |
+| D. Embedded alternative database | Replace PostgreSQL with an embedded database. | Simplifies distribution. | Violates the declared PostgreSQL requirement and may change production behavior. | Rejected without a requirement change. |
+
+## Decision
+
+U'Judge bundles a tested PostgreSQL distribution for Windows and macOS. Each desktop peer initializes and supervises one
+localhost PostgreSQL child process, stops it on normal application exit, and stores its data outside the installer path in
+the operating system's application-data directory. The application automatically selects an unused localhost port.
+
+Before a schema migration, import, or completed session, U'Judge creates an encrypted backup and retains the seven newest
+backups. Backup encryption keys are held in OS secure storage. PostgreSQL upgrades create a backup, export the old cluster,
+and import it into the new bundled cluster; rollback restores the pre-upgrade backup. Database start, corruption, disk-space,
+and port-conflict failures present actionable recovery UI without silently discarding data.
+
+## Required Acceptance Evidence
+
+ADR-003 can be accepted only after the selected option proves on clean Windows and macOS machines:
+
+- initialize, start, stop, forced-stop recovery, and restart;
+- ordered schema migration from an earlier Pilot schema;
+- durable journal and cursor recovery after restart;
+- port-conflict diagnosis without data loss;
+- backup and restore into a clean data directory;
+- installer size, third-party license obligations, and upgrade/rollback limits.
+
+## Decision Record
+
+| Field | Approved value |
+| --- | --- |
+| PostgreSQL distribution | Bundled, tested Windows/macOS distribution. |
+| Data directory | OS application-data directory outside the installer path. |
+| Port-conflict policy | Automatically choose an unused localhost port. |
+| Process lifecycle | One supervised PostgreSQL child process per desktop peer; stop on normal app exit. |
+| Upgrade and rollback policy | Backup, export/import into the new bundled cluster; restore the pre-upgrade backup to roll back. |
+| Backup and retention policy | Encrypted automatic backup before migration, import, and completed session; retain seven newest backups; key in OS secure storage. |
+| Failure UX | Actionable recovery UI for start, corruption, disk-space, and port-conflict failures; never silently discard data. |
 
 ## Consequences
 
