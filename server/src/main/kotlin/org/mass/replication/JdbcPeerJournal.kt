@@ -44,10 +44,19 @@ class JdbcPeerJournal(
             .flatMap(::contiguousEvents)
             .map(JournalEvent::payload)
 
-    fun append(payload: String): JournalEvent = dataSource.connection.use { connection ->
+    fun append(payload: String): JournalEvent = append(UUID.randomUUID().toString(), payload)
+
+    fun append(id: String, payload: String): JournalEvent = dataSource.connection.use { connection ->
         connection.inTransaction {
+            val existing = findById(connection, id)
+            if (existing != null) {
+                require(existing.ownerPeerId == peerId && existing.payload == payload) {
+                    "Event ID $id conflicts with an existing event"
+                }
+                return@inTransaction existing
+            }
             val event = JournalEvent(
-                id = UUID.randomUUID().toString(),
+                id = id,
                 ownerPeerId = peerId,
                 sequence = nextSequence(connection),
                 payload = payload,

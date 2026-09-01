@@ -137,9 +137,12 @@ revoked и incompatible-version handshakes отклоняются. Integration t
 `POST /score` и revoke endpoint, а также rejection без создания pending state. Эти in-memory slices не заменяют secure
 credential delivery/storage, persistent device state, durable ACK, reconnect/resync, heartbeat или physical-device mDNS evidence.
 Authenticated `/v1/realtime` clients can now submit a bounded typed command envelope and receive an idempotent ACK keyed by
-event ID; malformed, oversized and post-revocation commands receive typed rejections. Receipts are in-memory only, so this
-is contract evidence for `NET-001`, `NET-003`, `NET-005`, `NFR-006`, `NFR-007` and `NFR-012`, not the durable ACK required
-before Gate G1 can close. Authenticated clients can also send `clock_sync` with an ISO-8601 UTC client send timestamp and
+event ID; malformed, oversized and post-revocation commands receive typed rejections. The default server remains in-memory,
+but a supplied `JdbcPeerJournal` appends each validated command before its ACK, uses the client event ID as the journal ID,
+and preserves identical retry ACKs after a `RealtimeCommands` recreation; a different envelope with that ID and a journal
+failure receive typed rejections. This is narrow evidence for the durable-ACK ordering and retry behavior, not Gate G1
+closure: no desktop datasource, client durable outbox, reconnect/resync, heartbeat, scoring or physical-device acceptance
+is wired. Authenticated clients can also send `clock_sync` with an ISO-8601 UTC client send timestamp and
 receive the echoed value plus UTC server receive/send timestamps; contract integration coverage verifies typed rejection of
 an invalid timestamp without preventing a later valid command. This is evidence for `NET-004`, `KER-003` and `NFR-012` only:
 the client still owns offset calculation, and artificial-delay, heartbeat, scoring and physical-device evidence remain open.
