@@ -115,8 +115,10 @@ clean-machine verification и Gate G1 не закрыты. Перед запус
 `initdb`, требует `PG_VERSION`, безопасно переиспользует готовый cluster и отказывается перезаписывать nonempty directory
 без PostgreSQL marker; `ManagedPostgres.restart()` заменяет child после аварийного exit. Эти тесты также используют JVM
 fixture. `PostgresCommand.withAvailableLoopbackPort()` выбирает свободный IPv4 loopback port (`127.0.0.1`) для нового command;
-порт освобождается до запуска child process, поэтому проверка занятости в `ManagedPostgres.start()` остаётся обязательной. Детали в
-[ADR-003](adr/ADR-003-managed-postgresql.md).
+порт освобождается до запуска child process, поэтому проверка занятости в `ManagedPostgres.start()` остаётся обязательной.
+`PostgresRuntimeConfiguration` из одного runtime config формирует platform-specific `initdb`/`postgres` commands,
+application-data cluster вне installation directory, port и JDBC URL; `ManagedPostgresRuntime` публикует URL только пока
+supervised child запущен. Это JVM-fixture evidence, не real PostgreSQL. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
 
 ### Realtime spike
 
