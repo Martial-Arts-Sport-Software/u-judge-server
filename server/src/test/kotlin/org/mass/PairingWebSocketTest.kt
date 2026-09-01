@@ -36,6 +36,137 @@ class PairingWebSocketTest {
     }
 
     @Test
+    fun `approved credential receives the original ACK when retrying a command`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-ack", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-1","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+        val firstAck = session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-1","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+        val retryAck = session.receiveJson()
+
+        assertEquals("command_ack", firstAck.getValue("type").jsonPrimitive.content)
+        assertEquals("event-1", firstAck.getValue("eventId").jsonPrimitive.content)
+        assertEquals(firstAck, retryAck)
+    }
+
+    @Test
+    fun `revoked credential cannot submit a command after handshake`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("android-revoked", "Ivanov", "android")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        pairingRequests.revoke(accepted.request.requestId)
+
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-revoked","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+
+        val rejection = session.receiveJson()
+        assertEquals("command_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_reconnect_credential", rejection.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `oversized command is rejected without closing an approved session`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-large", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("x".repeat(4_097)))
+
+        val rejection = session.receiveJson()
+        assertEquals("command_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("command_too_large", rejection.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `command with a non-string payload type is rejected`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-invalid", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-invalid","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":{}}}""",
+            ),
+        )
+
+        val rejection = session.receiveJson()
+        assertEquals("command_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_command", rejection.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `command with a boolean payload type is rejected`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-boolean", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-boolean","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":true}}""",
+            ),
+        )
+
+        val rejection = session.receiveJson()
+        assertEquals("command_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_command", rejection.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
     fun `unknown credential receives a typed rejected handshake`() = testApplication {
         application {
             module(pairingRequests = PairingRequests())
