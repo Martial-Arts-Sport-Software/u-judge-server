@@ -124,9 +124,11 @@ fixture. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
 Текущее доказательство: `GET /v1/metadata` публикует version, capabilities, identity площадки, pairing policy и server
 time до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, создаёт pending request и дедуплицирует retry
 по device ID. Локальный operator application service переводит pending request в accepted и выдаёт opaque reconnect
-credential без anonymous LAN approval endpoint. Integration tests подтверждают JSON contract, отсутствие anonymous
-`POST /score` и rejection без создания pending state. Эти slices не заменяют secure credential delivery/storage, WebSocket
-handshake, durable ACK, reconnect или physical-device mDNS evidence.
+credential без anonymous LAN approval endpoint. Локальный operator service также идемпотентно отзывает принятое устройство:
+сохранённый reconnect credential становится inactive, а request identity решения сохраняется. Integration tests подтверждают JSON
+contract, отсутствие anonymous `POST /score` и revoke endpoint, а также rejection без создания pending state. Эти slices не
+заменяют secure credential delivery/storage, authenticated transport, WebSocket handshake, durable ACK, reconnect или
+physical-device mDNS evidence.
 
 ### Gate G1
 

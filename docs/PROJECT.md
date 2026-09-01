@@ -127,8 +127,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
 
 - модель соревнования и сеток;
 - operator rejection, secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory
-  operator service одобряет валидный pending request и выдаёт reconnect credential без anonymous LAN write endpoint;
-- pairing, WebSocket handshake, durable ACK и reconnect; `POST /score` удалён и не является API v1;
+  operator service одобряет или идемпотентно отзывает валидный pairing request, выдаёт reconnect credential и помечает его
+  inactive после отзыва без anonymous LAN write endpoint;
+- pairing, authenticated transport, WebSocket handshake, durable ACK и reconnect; `POST /score` удалён и не является API v1;
 - таймер, scoring и формулы дисциплин;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
