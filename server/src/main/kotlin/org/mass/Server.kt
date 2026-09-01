@@ -114,6 +114,23 @@ data class RealtimeHandshakeAccepted(val type: String)
 data class RealtimeHandshakeRejected(val type: String, val code: String)
 
 @Serializable
+data class ClockSyncRequest(
+    val type: String,
+    val clientSendTimestamp: String,
+)
+
+@Serializable
+data class ClockSyncResponse(
+    val type: String,
+    val clientSendTimestamp: String,
+    val serverReceiveTimestamp: String,
+    val serverSendTimestamp: String,
+)
+
+@Serializable
+data class ClockSyncRejected(val type: String, val code: String)
+
+@Serializable
 data class RealtimeCommandRequest(
     val type: String,
     val eventId: String,
@@ -339,6 +356,32 @@ fun Application.module(
                 }
                 if (commandText.length > 4_096) {
                     send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", "command_too_large"))))
+                    continue
+                }
+                val serverReceiveTimestamp = Instant.now().toString()
+                val messageType = runCatching {
+                    ((Json.parseToJsonElement(commandText) as? JsonObject)?.get("type") as? JsonPrimitive)
+                        ?.takeIf(JsonPrimitive::isString)
+                        ?.content
+                }.getOrNull()
+                val clockSync = runCatching { Json.decodeFromString<ClockSyncRequest>(commandText) }.getOrNull()
+                if (messageType == "clock_sync") {
+                    if (clockSync == null || runCatching { Instant.parse(clockSync.clientSendTimestamp) }.isFailure) {
+                        send(Frame.Text(Json.encodeToString(ClockSyncRejected("clock_sync_rejected", "invalid_clock_sync_timestamp"))))
+                    } else {
+                        send(
+                            Frame.Text(
+                                Json.encodeToString(
+                                    ClockSyncResponse(
+                                        type = "clock_sync_response",
+                                        clientSendTimestamp = clockSync.clientSendTimestamp,
+                                        serverReceiveTimestamp = serverReceiveTimestamp,
+                                        serverSendTimestamp = Instant.now().toString(),
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
                     continue
                 }
                 val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
