@@ -51,8 +51,8 @@ revokes that credential idempotently, without exposing anonymous LAN decision en
 `GET /v1/pairing-status/{requestId}` addresses a typed `pairing_status` projection by opaque request ID. The response has
 state, device ID and a rejection code only when rejected; it never exposes a surname or reconnect credential. `/v1/realtime`
 accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
-incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state, client replay,
-active-session snapshots and heartbeat remain unimplemented.
+incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state, reconnect/resync
+and heartbeat scheduling, timeout/disconnected transitions remain unimplemented.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
@@ -66,7 +66,9 @@ a desktop datasource, authorize or apply scoring.
 An authenticated connection also accepts `clock_sync` with an ISO-8601 UTC client send timestamp. Its typed response echoes
 that timestamp with server receive and send timestamps in UTC, giving the client the timestamps required for its own
 four-timestamp offset calculation. An invalid client timestamp receives a typed rejection and does not close the connection.
-This exchange does not implement heartbeat, telemetry, scoring, or coincidence evaluation.
+An authenticated connection also accepts a strictly typed `heartbeat` request and returns `heartbeat_ack`; a malformed
+heartbeat receives `heartbeat_rejected` with `invalid_heartbeat` and does not close the session. This server-only exchange
+does not schedule heartbeats or implement timeout/disconnected transitions, telemetry, scoring, or coincidence evaluation.
 
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
@@ -107,7 +109,7 @@ ADR-004 can be accepted only after contract/integration tests prove:
 | Version/capability rule | Same protocol major version plus all required capabilities. |
 | Pairing and revocation policy | Explicit operator approval for every new device; revoked devices cannot write. |
 | Credential lifecycle | Reconnect credential in platform secure storage, valid until revocation or rotation. |
-| Realtime message families | Handshake, pairing status, session snapshot, command/event, ACK, rejection, clock sync request/response/rejection, heartbeat, resync request/response, server notice. |
+| Realtime message families | Handshake, pairing status, session snapshot, command/event, ACK, rejection, clock sync request/response/rejection, heartbeat/ack/rejection, resync request/response, server notice. |
 | Durable ACK rule | Terminal ACK after durable journal commit only. |
 | Reconnect/resync rule | Cursor-based resync and current active-session snapshot before scoring controls re-enable. |
 | Clock-offset method and bound | `clock_sync` echoes the ISO-8601 UTC client send timestamp with UTC server receive/send timestamps; the client calculates the four-timestamp offset/round-trip estimate. The telemetry-validated quality threshold does not change the `1000 ms` coincidence window. |

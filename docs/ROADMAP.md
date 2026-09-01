@@ -145,15 +145,14 @@ but a supplied `JdbcPeerJournal` appends each validated command before its ACK, 
 and preserves identical retry ACKs after a `RealtimeCommands` recreation; a different envelope with that ID and a journal
 failure receive typed rejections. Pairing status/rejection contract tests are narrow evidence for `DEV-004`, `DEV-005`,
 `NET-005`, `NFR-006` and `NFR-012`, not Gate G1 closure: no desktop datasource, client durable outbox, reconnect/resync,
-heartbeat, scoring or physical-device acceptance is wired. Authenticated clients can also send `clock_sync` with an ISO-8601
+heartbeat scheduling, scoring or physical-device acceptance is wired. Authenticated clients can also send `clock_sync` with an ISO-8601
 UTC client send timestamp and
 receive the echoed value plus UTC server receive/send timestamps; contract integration coverage verifies typed rejection of
 an invalid timestamp without preventing a later valid command. This is evidence for `NET-004`, `KER-003` and `NFR-012` only:
-the client still owns offset calculation, and artificial-delay, heartbeat, scoring and physical-device evidence remain open.
-Authenticated clients with a configured `JdbcPeerJournal` can request typed persisted command events after an event-ID cursor;
-the response preserves journal order and advances to its last returned event. Unknown or malformed cursors, absent journals and
-journal failures are typed rejections. This server-only evidence covers the persisted resync boundary for `NET-003`, `NFR-004`
-and `NFR-012`; default in-memory operation, client replay, active-session snapshots and desktop datasource wiring remain open.
+the client still owns offset calculation, and artificial-delay, heartbeat scheduling/timeouts, scoring and physical-device evidence remain open.
+Authenticated clients can send a strictly typed `heartbeat` and receive `heartbeat_ack`; malformed heartbeats receive
+`heartbeat_rejected` without closing the session. This server-only contract evidence covers `NFR-012`; client scheduling,
+timeout/disconnected transitions, reconnect and device evidence remain open.
 
 ### Gate G1
 

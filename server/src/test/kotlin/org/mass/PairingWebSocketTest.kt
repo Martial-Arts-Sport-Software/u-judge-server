@@ -186,6 +186,55 @@ class PairingWebSocketTest {
     }
 
     @Test
+    fun `authenticated heartbeat receives a typed acknowledgement`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-heartbeat", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"heartbeat"}"""))
+
+        val acknowledgement = session.receiveJson()
+        assertEquals("heartbeat_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `malformed heartbeat is rejected without closing an authenticated session`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("android-heartbeat", "Ivanov", "android")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"heartbeat","unexpected":true}"""))
+
+        val rejection = session.receiveJson()
+        assertEquals("heartbeat_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_heartbeat", rejection.getValue("code").jsonPrimitive.content)
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-after-heartbeat-rejection","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+
+        val acknowledgement = session.receiveJson()
+        assertEquals("command_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+    }
+
+    @Test
     fun `clock sync echoes the client timestamp and rejects an invalid timestamp without closing the session`() = testApplication {
         val pairingRequests = PairingRequests()
         val pending = assertIs<PairingSubmission.Pending>(
