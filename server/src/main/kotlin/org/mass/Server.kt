@@ -129,7 +129,11 @@ data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
 @Serializable
 data class RealtimeCommandRejected(val type: String, val code: String)
 
-class RealtimeCommands {
+class RealtimeCommands(private val maximumReceipts: Int = 1_024) {
+    init {
+        require(maximumReceipts > 0)
+    }
+
     private val acknowledgementsByEventId = mutableMapOf<String, Pair<RealtimeCommandRequest, RealtimeCommandAcknowledgement>>()
 
     fun accept(command: RealtimeCommandRequest): RealtimeCommandOutcome = synchronized(this) {
@@ -151,6 +155,9 @@ class RealtimeCommands {
             } else {
                 RealtimeCommandOutcome.Rejected("event_id_conflict")
             }
+        }
+        if (acknowledgementsByEventId.size >= maximumReceipts) {
+            return RealtimeCommandOutcome.Rejected("command_receipt_limit_reached")
         }
 
         val acknowledgement = RealtimeCommandAcknowledgement("command_ack", command.eventId)
@@ -314,7 +321,12 @@ fun Application.module(
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
             while (true) {
-                val commandText = (incoming.receiveCatching().getOrNull() as? Frame.Text)?.readText() ?: break
+                val frame = incoming.receiveCatching().getOrNull() ?: break
+                val commandText = when (frame) {
+                    is Frame.Text -> frame.readText()
+                    is Frame.Close -> break
+                    else -> continue
+                }
                 if (!pairingRequests.isReconnectCredentialActive(reconnectCredential)) {
                     send(
                         Frame.Text(

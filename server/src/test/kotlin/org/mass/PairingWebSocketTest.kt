@@ -62,10 +62,74 @@ class PairingWebSocketTest {
             ),
         )
         val retryAck = session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-1","sequence":2,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+        val conflict = session.receiveJson()
 
         assertEquals("command_ack", firstAck.getValue("type").jsonPrimitive.content)
         assertEquals("event-1", firstAck.getValue("eventId").jsonPrimitive.content)
         assertEquals(firstAck, retryAck)
+        assertEquals("command_rejected", conflict.getValue("type").jsonPrimitive.content)
+        assertEquals("event_id_conflict", conflict.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `command after a ping is processed`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-ping", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Ping(byteArrayOf()))
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-after-ping","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+
+        val acknowledgement = session.receiveJson()
+        assertEquals("command_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `new command is rejected when the receipt limit is reached`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-limit", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests, realtimeCommands = RealtimeCommands(maximumReceipts = 1))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-first","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+        session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-second","sequence":2,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+
+        val rejection = session.receiveJson()
+        assertEquals("command_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("command_receipt_limit_reached", rejection.getValue("code").jsonPrimitive.content)
     }
 
     @Test
