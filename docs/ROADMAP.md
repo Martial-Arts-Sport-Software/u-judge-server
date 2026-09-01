@@ -138,7 +138,7 @@ opaque reconnect credential только при принятии, без anonymo
 versioned WebSocket handshake только для active reconnect credential и возвращает typed accepted/rejected response; unknown,
 revoked и incompatible-version handshakes отклоняются. Integration tests подтверждают JSON contract, отсутствие anonymous
 `POST /score` и revoke endpoint, а также rejection без создания pending state. Эти in-memory slices не заменяют secure
-credential delivery/storage, persistent device state, durable ACK, reconnect/resync, heartbeat или physical-device mDNS evidence.
+credential delivery/storage, persistent device state, client durable outbox/replay, heartbeat или physical-device mDNS evidence.
 Authenticated `/v1/realtime` clients can now submit a bounded typed command envelope and receive an idempotent ACK keyed by
 event ID; malformed, oversized and post-revocation commands receive typed rejections. The default server remains in-memory,
 but a supplied `JdbcPeerJournal` appends each validated command before its ACK, uses the client event ID as the journal ID,
@@ -150,6 +150,10 @@ UTC client send timestamp and
 receive the echoed value plus UTC server receive/send timestamps; contract integration coverage verifies typed rejection of
 an invalid timestamp without preventing a later valid command. This is evidence for `NET-004`, `KER-003` and `NFR-012` only:
 the client still owns offset calculation, and artificial-delay, heartbeat, scoring and physical-device evidence remain open.
+Authenticated clients with a configured `JdbcPeerJournal` can request typed persisted command events after an event-ID cursor;
+the response preserves journal order and advances to its last returned event. Unknown or malformed cursors, absent journals and
+journal failures are typed rejections. This server-only evidence covers the persisted resync boundary for `NET-003`, `NFR-004`
+and `NFR-012`; default in-memory operation, client replay, active-session snapshots and desktop datasource wiring remain open.
 
 ### Gate G1
 

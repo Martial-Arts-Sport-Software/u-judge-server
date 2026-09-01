@@ -14,11 +14,128 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import java.time.Instant
 
 class PairingWebSocketTest {
+    @Test
+    fun `journal configured realtime endpoint returns typed ordered events after a resync cursor`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-resync", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val dataSource = JdbcDataSource().apply {
+            setURL("jdbc:h2:mem:realtime-endpoint-resync;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+        }
+        val journal = JdbcPeerJournal("court-1", dataSource)
+        RealtimeCommands(journal = journal).accept(command("event-1", sequence = 1))
+        val commands = RealtimeCommands(journal = journal)
+        commands.accept(command("event-1", sequence = 1))
+        commands.accept(command("event-2", sequence = 2))
+        application {
+            module(pairingRequests = pairingRequests, realtimeCommands = commands)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"resync_request","cursor":"event-1"}"""))
+
+        val response = session.receiveJson()
+        assertEquals("resync_response", response.getValue("type").jsonPrimitive.content)
+        assertEquals("event-2", response.getValue("cursor").jsonPrimitive.content)
+        val events = response.getValue("events").jsonArray
+        assertEquals(1, events.size)
+        assertEquals("event-2", events[0].jsonObject.getValue("id").jsonPrimitive.content)
+        assertEquals("court-1", events[0].jsonObject.getValue("ownerPeerId").jsonPrimitive.content)
+        assertEquals(2, events[0].jsonObject.getValue("journalSequence").jsonPrimitive.long)
+        assertEquals("command", events[0].jsonObject.getValue("command").jsonObject.getValue("type").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `realtime endpoint rejects unknown and malformed resync cursors`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-invalid-resync", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val dataSource = JdbcDataSource().apply {
+            setURL("jdbc:h2:mem:realtime-endpoint-invalid-resync;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+        }
+        val commands = RealtimeCommands(journal = JdbcPeerJournal("court-1", dataSource))
+        commands.accept(command("event-1", sequence = 1))
+        application {
+            module(pairingRequests = pairingRequests, realtimeCommands = commands)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"resync_request","cursor":"unknown-event"}"""))
+
+        val unknownCursor = session.receiveJson()
+        assertEquals("resync_rejected", unknownCursor.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_resync_cursor", unknownCursor.getValue("code").jsonPrimitive.content)
+        session.send(Frame.Text("""{"type":"resync_request","cursor":{}}"""))
+
+        val malformedCursor = session.receiveJson()
+        assertEquals("resync_rejected", malformedCursor.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_resync_cursor", malformedCursor.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `realtime endpoint rejects resync when no journal is configured`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-no-resync", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"resync_request","cursor":null}"""))
+
+        val rejection = session.receiveJson()
+        assertEquals("resync_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("resync_unavailable", rejection.getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `realtime endpoint rejects resync when the journal is unavailable`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-unavailable-resync", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val dataSource = JdbcDataSource().apply {
+            setURL("jdbc:h2:mem:realtime-endpoint-unavailable-resync;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+        }
+        val journal = JdbcPeerJournal("court-1", dataSource)
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { it.execute("DROP ALL OBJECTS") }
+        }
+        application {
+            module(pairingRequests = pairingRequests, realtimeCommands = RealtimeCommands(journal = journal))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"resync_request","cursor":null}"""))
+
+        val rejection = session.receiveJson()
+        assertEquals("resync_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("journal_unavailable", rejection.getValue("code").jsonPrimitive.content)
+    }
+
     @Test
     fun `journal configured realtime endpoint acknowledges a command after it is persisted`() = testApplication {
         val pairingRequests = PairingRequests()
@@ -379,4 +496,13 @@ class PairingWebSocketTest {
     private suspend fun WebSocketSession.receiveJson() = Json.parseToJsonElement(
         (incoming.receive() as Frame.Text).readText(),
     ).jsonObject
+
+    private fun command(eventId: String, sequence: Long) = RealtimeCommandRequest(
+        type = "command",
+        eventId = eventId,
+        sequence = sequence,
+        clientTimestamp = "2026-09-01T10:00:00Z",
+        sessionId = "session-1",
+        payload = Json.parseToJsonElement("""{"type":"attention"}""").jsonObject,
+    )
 }

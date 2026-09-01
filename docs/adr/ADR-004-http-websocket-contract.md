@@ -51,8 +51,8 @@ revokes that credential idempotently, without exposing anonymous LAN decision en
 `GET /v1/pairing-status/{requestId}` addresses a typed `pairing_status` projection by opaque request ID. The response has
 state, device ID and a rejection code only when rejected; it never exposes a surname or reconnect credential. `/v1/realtime`
 accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
-incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state, reconnect/resync
-and heartbeat remain unimplemented.
+incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state, client replay,
+active-session snapshots and heartbeat remain unimplemented.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
@@ -71,6 +71,12 @@ This exchange does not implement heartbeat, telemetry, scoring, or coincidence e
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
 clock offset and round-trip time.
+
+An authenticated connection can request `resync_request` from an optional `JdbcPeerJournal` with a nullable event-ID cursor.
+It returns a typed, journal-order `resync_response` containing only persisted commands after that cursor and advances the cursor
+to the final returned event. Unknown or malformed cursors, an unconfigured journal and journal failures receive typed rejections.
+The default in-memory command handler intentionally does not provide resync; client replay and active-session snapshots remain
+outside this server-only slice.
 
 For Kerugi, the default coincidence window is `1000 ms`. For the same participant, all valid score candidates in one window
 resolve deterministically to the minimum candidate score, regardless of arrival order. For example, `1`-point and `2`-point
