@@ -44,7 +44,9 @@ Pilot не считается production-ready до отдельного hardeni
 
 Статус сверяется только с влитыми в `main` изменениями и их тестами/CI. Частично выполненный этап не закрывает gate.
 
-- [ ] Gate G0: baseline частично готов; требуется подтверждённый baseline обоих репозиториев.
+- [x] Gate G0: baseline обоих репозиториев подтверждён. Server CI и `./gradlew build --no-daemon` подтверждают
+  воспроизводимую Java 21 сборку; client baseline закрыт merged [PR #38](https://github.com/Martial-Arts-Sport-Software/u-judge-client/pull/38)
+  с Android/shared tests и iOS framework compilation. Physical-device acceptance остаётся доказательством G1 и последующих gates.
 - [ ] Gate G1: single-peer PostgreSQL и mobile realtime spikes не готовы; P2P остаётся post-v1.
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
