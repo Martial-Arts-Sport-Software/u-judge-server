@@ -13,6 +13,15 @@ import kotlin.test.assertTrue
 
 class ManagedPostgresTest {
     @Test
+    fun `creates a command with an available loopback port`() {
+        val command = PostgresCommand.withAvailableLoopbackPort(listOf("postgres"))
+
+        ServerSocket(command.port, 1, InetAddress.getByName("127.0.0.1")).use { socket ->
+            assertEquals(command.port, socket.localPort)
+        }
+    }
+
+    @Test
     fun `starts configured process and stops only supervised child`() {
         val postgres = ManagedPostgres(waitingCommand(port = 54321))
 
@@ -27,7 +36,7 @@ class ManagedPostgresTest {
 
     @Test
     fun `reports occupied configured port without starting process`() {
-        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { socket ->
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { socket ->
             val postgres = ManagedPostgres(waitingCommand(port = socket.localPort))
 
             val state = postgres.start()

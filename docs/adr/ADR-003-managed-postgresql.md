@@ -24,6 +24,10 @@ lifecycle states with a disposable JVM fixture.
 fixture tests do not execute a real PostgreSQL binary. `ManagedPostgres.restart()` replaces an unexpectedly exited child
 with a new supervised process after repeating the provisioning/start path.
 
+`PostgresCommand.withAvailableLoopbackPort()` obtains an available IPv4 loopback (`127.0.0.1`) port for a new command. It
+does not reserve that port across child-process launch, so `ManagedPostgres.start()` continues to diagnose an occupied port
+immediately before launching PostgreSQL.
+
 This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. It does
 not demonstrate a real PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`,
 `NFR-010` and `P2P-010` remain Partial and Gate G1 remains open.
