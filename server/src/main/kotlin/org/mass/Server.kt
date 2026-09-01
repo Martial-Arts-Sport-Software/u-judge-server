@@ -555,6 +555,18 @@ fun Application.module(
                     }
                     continue
                 }
+                if (messageType == "resync_request") {
+                    val request = runCatching { Json.decodeFromString<RealtimeResyncRequest>(commandText) }.getOrNull()
+                    val outcome = request?.let { realtimeCommands.resync(it.cursor) }
+                        ?: RealtimeResyncOutcome.Rejected("invalid_resync_cursor")
+                    when (outcome) {
+                        is RealtimeResyncOutcome.Resynced -> send(Frame.Text(Json.encodeToString(outcome.response)))
+                        is RealtimeResyncOutcome.Rejected -> {
+                            send(Frame.Text(Json.encodeToString(RealtimeResyncRejected("resync_rejected", outcome.code))))
+                        }
+                    }
+                    continue
+                }
                 val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
                 val outcome = command?.let(realtimeCommands::accept) ?: RealtimeCommandOutcome.Rejected("invalid_command")
                 when (outcome) {
