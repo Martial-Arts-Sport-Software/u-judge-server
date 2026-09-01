@@ -163,6 +163,19 @@ data class ClockSyncResponse(
 data class ClockSyncRejected(val type: String, val code: String)
 
 @Serializable
+data class HeartbeatRequest(val type: String) {
+    init {
+        require(type == "heartbeat")
+    }
+}
+
+@Serializable
+data class HeartbeatAcknowledgement(val type: String)
+
+@Serializable
+data class HeartbeatRejected(val type: String, val code: String)
+
+@Serializable
 data class RealtimeCommandRequest(
     val type: String,
     val eventId: String,
@@ -472,6 +485,15 @@ fun Application.module(
                                 ),
                             ),
                         )
+                    }
+                    continue
+                }
+                if (messageType == "heartbeat") {
+                    val heartbeat = runCatching { Json.decodeFromString<HeartbeatRequest>(commandText) }.getOrNull()
+                    if (heartbeat == null) {
+                        send(Frame.Text(Json.encodeToString(HeartbeatRejected("heartbeat_rejected", "invalid_heartbeat"))))
+                    } else {
+                        send(Frame.Text(Json.encodeToString(HeartbeatAcknowledgement("heartbeat_ack"))))
                     }
                     continue
                 }
