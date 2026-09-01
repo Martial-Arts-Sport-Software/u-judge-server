@@ -102,6 +102,37 @@ data class RevokedPairingRequest(
 data class PairingRequestError(val code: String)
 
 @Serializable
+enum class PairingStatusState {
+    @kotlinx.serialization.SerialName("pending")
+    PENDING,
+
+    @kotlinx.serialization.SerialName("accepted")
+    ACCEPTED,
+
+    @kotlinx.serialization.SerialName("rejected")
+    REJECTED,
+}
+
+@Serializable
+enum class PairingStatusCode {
+    @kotlinx.serialization.SerialName("operator_rejected")
+    OPERATOR_REJECTED,
+}
+
+@Serializable
+data class PairingStatus(
+    val type: String = "pairing_status",
+    val state: PairingStatusState,
+    val deviceId: String,
+    val code: PairingStatusCode? = null,
+) {
+    init {
+        require(type == "pairing_status")
+        require((state == PairingStatusState.REJECTED) == (code != null))
+    }
+}
+
+@Serializable
 data class RealtimeHandshakeRequest(
     val type: String,
     val protocolVersion: String,
@@ -208,6 +239,7 @@ sealed interface RealtimeCommandOutcome {
 class PairingRequests {
     private val pendingByDeviceId = mutableMapOf<String, PendingPairingRequest>()
     private val acceptedByRequestId = mutableMapOf<String, AcceptedPairingRequest>()
+    private val rejectedByRequestId = mutableMapOf<String, PairingStatus>()
     private val revokedByRequestId = mutableMapOf<String, RevokedPairingRequest>()
 
     fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
@@ -256,6 +288,22 @@ class PairingRequests {
         PairingApproval.Accepted(accepted, created = true)
     }
 
+    fun reject(requestId: String): PairingRejection = synchronized(this) {
+        rejectedByRequestId[requestId]?.let {
+            return PairingRejection.Rejected(it, created = false)
+        }
+        val pendingEntry = pendingByDeviceId.entries.firstOrNull { it.value.requestId == requestId }
+            ?: return PairingRejection.UnknownRequest
+        pendingByDeviceId.remove(pendingEntry.key)
+        val status = PairingStatus(
+            state = PairingStatusState.REJECTED,
+            deviceId = pendingEntry.value.deviceId,
+            code = PairingStatusCode.OPERATOR_REJECTED,
+        )
+        rejectedByRequestId[requestId] = status
+        PairingRejection.Rejected(status, created = true)
+    }
+
     fun revoke(requestId: String): PairingRevocation = synchronized(this) {
         revokedByRequestId[requestId]?.let {
             return PairingRevocation.Revoked(it, created = false)
@@ -278,6 +326,16 @@ class PairingRequests {
         }
     }
 
+    fun status(requestId: String): PairingStatus? = synchronized(this) {
+        pendingByDeviceId.values.firstOrNull { it.requestId == requestId }?.let {
+            return PairingStatus(state = PairingStatusState.PENDING, deviceId = it.deviceId)
+        }
+        acceptedByRequestId[requestId]?.let {
+            return PairingStatus(state = PairingStatusState.ACCEPTED, deviceId = it.deviceId)
+        }
+        rejectedByRequestId[requestId]
+    }
+
     private fun newReconnectCredential(): String = ByteArray(32).also(SecureRandom()::nextBytes).let {
         Base64.getUrlEncoder().withoutPadding().encodeToString(it)
     }
@@ -295,6 +353,12 @@ sealed interface PairingApproval {
     data object UnknownRequest : PairingApproval
 }
 
+sealed interface PairingRejection {
+    data class Rejected(val status: PairingStatus, val created: Boolean) : PairingRejection
+
+    data object UnknownRequest : PairingRejection
+}
+
 sealed interface PairingRevocation {
     data class Revoked(val request: RevokedPairingRequest, val created: Boolean) : PairingRevocation
 
@@ -308,7 +372,10 @@ fun Application.module(
     realtimeCommands: RealtimeCommands = RealtimeCommands(),
 ) {
     install(ContentNegotiation) {
-        json()
+        json(Json {
+            encodeDefaults = true
+            explicitNulls = false
+        })
     }
     install(WebSockets)
 
@@ -334,6 +401,15 @@ fun Application.module(
         }
         get("/v1/pairing-requests") {
             call.respond(pairingRequests.pending())
+        }
+        get("/v1/pairing-status/{requestId}") {
+            val requestId = requireNotNull(call.parameters["requestId"])
+            val status = pairingRequests.status(requestId)
+            if (status == null) {
+                call.respond(HttpStatusCode.NotFound)
+            } else {
+                call.respond(status)
+            }
         }
         webSocket("/v1/realtime") {
             val handshake = (incoming.receiveCatching().getOrNull() as? Frame.Text)

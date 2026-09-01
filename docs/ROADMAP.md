@@ -129,9 +129,12 @@ supervised child запущен. Это JVM-fixture evidence, не real PostgreS
 
 Текущее доказательство: `GET /v1/metadata` публикует version, capabilities, identity площадки, pairing policy и server
 time до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, создаёт pending request и дедуплицирует retry
-по device ID. Локальный operator application service переводит pending request в accepted и выдаёт opaque reconnect
-credential без anonymous LAN approval endpoint. Локальный operator service также идемпотентно отзывает принятое устройство:
-сохранённый reconnect credential становится inactive, а request identity решения сохраняется. `/v1/realtime` принимает
+по device ID. Локальный operator application service идемпотентно переводит pending request в accepted или rejected и выдаёт
+opaque reconnect credential только при принятии, без anonymous LAN decision endpoint. Public
+`GET /v1/pairing-status/{requestId}` возвращает typed pending/accepted/rejected status по opaque request ID; response не
+содержит surname или reconnect credential, а rejection code присутствует только для rejected. Локальный operator service
+также идемпотентно отзывает принятое устройство: сохранённый reconnect credential становится inactive, а request identity
+решения сохраняется. `/v1/realtime` принимает
 versioned WebSocket handshake только для active reconnect credential и возвращает typed accepted/rejected response; unknown,
 revoked и incompatible-version handshakes отклоняются. Integration tests подтверждают JSON contract, отсутствие anonymous
 `POST /score` и revoke endpoint, а также rejection без создания pending state. Эти in-memory slices не заменяют secure
@@ -140,9 +143,10 @@ Authenticated `/v1/realtime` clients can now submit a bounded typed command enve
 event ID; malformed, oversized and post-revocation commands receive typed rejections. The default server remains in-memory,
 but a supplied `JdbcPeerJournal` appends each validated command before its ACK, uses the client event ID as the journal ID,
 and preserves identical retry ACKs after a `RealtimeCommands` recreation; a different envelope with that ID and a journal
-failure receive typed rejections. This is narrow evidence for the durable-ACK ordering and retry behavior, not Gate G1
-closure: no desktop datasource, client durable outbox, reconnect/resync, heartbeat, scoring or physical-device acceptance
-is wired. Authenticated clients can also send `clock_sync` with an ISO-8601 UTC client send timestamp and
+failure receive typed rejections. Pairing status/rejection contract tests are narrow evidence for `DEV-004`, `DEV-005`,
+`NET-005`, `NFR-006` and `NFR-012`, not Gate G1 closure: no desktop datasource, client durable outbox, reconnect/resync,
+heartbeat, scoring or physical-device acceptance is wired. Authenticated clients can also send `clock_sync` with an ISO-8601
+UTC client send timestamp and
 receive the echoed value plus UTC server receive/send timestamps; contract integration coverage verifies typed rejection of
 an invalid timestamp without preventing a later valid command. This is evidence for `NET-004`, `KER-003` and `NFR-012` only:
 the client still owns offset calculation, and artificial-delay, heartbeat, scoring and physical-device evidence remain open.

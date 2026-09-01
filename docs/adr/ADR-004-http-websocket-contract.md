@@ -45,11 +45,14 @@ storage; it remains valid until revocation or rotation. The realtime protocol us
 client and typed messages for handshake, pairing status, session snapshot, command/event, ACK, rejection, heartbeat,
 resync request/response, and server notice. TLS uses the local certificate/trust flow selected in ADR-002.
 
-The current server slice keeps approval in a transport-agnostic local operator application service. It transitions a pending
-request to accepted idempotently, issues an opaque reconnect credential and revokes that credential idempotently, without
-exposing an anonymous LAN approval endpoint. `/v1/realtime` accepts a versioned WebSocket handshake only for an active
-credential and emits a typed rejection for unknown, revoked and incompatible-version requests. Credential delivery to
-Android/iOS secure storage, persistent device state, reconnect/resync and heartbeat remain unimplemented.
+The current server slice keeps approval and rejection in a transport-agnostic local operator application service. It
+transitions a pending request to accepted or rejected idempotently, issues an opaque reconnect credential for acceptance and
+revokes that credential idempotently, without exposing anonymous LAN decision endpoints. Public
+`GET /v1/pairing-status/{requestId}` addresses a typed `pairing_status` projection by opaque request ID. The response has
+state, device ID and a rejection code only when rejected; it never exposes a surname or reconnect credential. `/v1/realtime`
+accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
+incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state, reconnect/resync
+and heartbeat remain unimplemented.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
