@@ -16,12 +16,20 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import io.ktor.server.websocket.WebSockets
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readText
+import io.ktor.websocket.send
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.security.SecureRandom
 import java.util.Base64
@@ -89,6 +97,19 @@ data class RevokedPairingRequest(
 
 @Serializable
 data class PairingRequestError(val code: String)
+
+@Serializable
+data class RealtimeHandshakeRequest(
+    val type: String,
+    val protocolVersion: String,
+    val reconnectCredential: String,
+)
+
+@Serializable
+data class RealtimeHandshakeAccepted(val type: String)
+
+@Serializable
+data class RealtimeHandshakeRejected(val type: String, val code: String)
 
 /** Retains pending judge devices and local operator approval decisions. */
 class PairingRequests {
@@ -195,6 +216,7 @@ fun Application.module(
     install(ContentNegotiation) {
         json()
     }
+    install(WebSockets)
 
     routing {
         get("/") {
@@ -218,6 +240,23 @@ fun Application.module(
         }
         get("/v1/pairing-requests") {
             call.respond(pairingRequests.pending())
+        }
+        webSocket("/v1/realtime") {
+            val handshake = (incoming.receiveCatching().getOrNull() as? Frame.Text)
+                ?.readText()
+                ?.let { runCatching { Json.decodeFromString<RealtimeHandshakeRequest>(it) }.getOrNull() }
+            val rejectionCode = when {
+                handshake == null || handshake.type != "handshake" -> "invalid_handshake"
+                handshake.protocolVersion != metadata.protocolVersion -> "unsupported_protocol_version"
+                !pairingRequests.isReconnectCredentialActive(handshake.reconnectCredential) -> "invalid_reconnect_credential"
+                else -> null
+            }
+            if (rejectionCode != null) {
+                send(Frame.Text(Json.encodeToString(RealtimeHandshakeRejected("handshake_rejected", rejectionCode))))
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, rejectionCode))
+                return@webSocket
+            }
+            send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
         }
     }
 }
