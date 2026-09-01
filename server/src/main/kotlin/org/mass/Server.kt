@@ -32,6 +32,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import org.mass.replication.JdbcPeerJournal
 import java.time.Instant
 import java.security.SecureRandom
 import java.util.Base64
@@ -146,7 +147,10 @@ data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
 @Serializable
 data class RealtimeCommandRejected(val type: String, val code: String)
 
-class RealtimeCommands(private val maximumReceipts: Int = 1_024) {
+class RealtimeCommands(
+    private val maximumReceipts: Int = 1_024,
+    private val journal: JdbcPeerJournal? = null,
+) {
     init {
         require(maximumReceipts > 0)
     }
@@ -171,6 +175,17 @@ class RealtimeCommands(private val maximumReceipts: Int = 1_024) {
                 RealtimeCommandOutcome.Acknowledged(existing.second)
             } else {
                 RealtimeCommandOutcome.Rejected("event_id_conflict")
+            }
+        }
+        if (journal != null) {
+            val acknowledgement = RealtimeCommandAcknowledgement("command_ack", command.eventId)
+            return try {
+                journal.append(command.eventId, Json.encodeToString(command))
+                RealtimeCommandOutcome.Acknowledged(acknowledgement)
+            } catch (_: IllegalArgumentException) {
+                RealtimeCommandOutcome.Rejected("event_id_conflict")
+            } catch (_: Exception) {
+                RealtimeCommandOutcome.Rejected("journal_unavailable")
             }
         }
         if (acknowledgementsByEventId.size >= maximumReceipts) {

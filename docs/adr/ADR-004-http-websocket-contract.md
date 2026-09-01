@@ -49,13 +49,16 @@ The current server slice keeps approval in a transport-agnostic local operator a
 request to accepted idempotently, issues an opaque reconnect credential and revokes that credential idempotently, without
 exposing an anonymous LAN approval endpoint. `/v1/realtime` accepts a versioned WebSocket handshake only for an active
 credential and emits a typed rejection for unknown, revoked and incompatible-version requests. Credential delivery to
-Android/iOS secure storage, persistent device state, durable ACK, reconnect/resync and heartbeat remain unimplemented.
+Android/iOS secure storage, persistent device state, reconnect/resync and heartbeat remain unimplemented.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
-ID and typed payload. Its in-memory receipt store returns the original typed ACK when the identical event ID is retried,
-rejects malformed or oversized payloads, and rechecks a credential before every command so post-handshake revocation blocks
-writes. The temporary store retains at most 1,024 receipts and rejects new IDs at that limit while continuing to acknowledge
-known retries. This validates the command/ACK contract only: a receipt is not durable and does not authorize or apply scoring.
+ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
+post-handshake revocation blocks writes. Without a journal, its in-memory receipt store returns the original typed ACK when
+the identical event ID is retried, retains at most 1,024 receipts, and rejects new IDs at that limit while continuing to
+acknowledge known retries. When configured with `JdbcPeerJournal`, a validated command is appended before its ACK, using the
+client event ID as the journal ID. A recreated command handler returns an ACK for an identical persisted envelope, rejects a
+different envelope with the same ID, and returns a typed rejection if persistence fails. This optional adapter does not wire
+a desktop datasource, authorize or apply scoring.
 
 An authenticated connection also accepts `clock_sync` with an ISO-8601 UTC client send timestamp. Its typed response echoes
 that timestamp with server receive and send timestamps in UTC, giving the client the timestamps required for its own

@@ -7,6 +7,8 @@ import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import io.ktor.server.testing.testApplication
+import org.h2.jdbcx.JdbcDataSource
+import org.mass.replication.JdbcPeerJournal
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -17,6 +19,35 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.time.Instant
 
 class PairingWebSocketTest {
+    @Test
+    fun `journal configured realtime endpoint acknowledges a command after it is persisted`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-durable", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val dataSource = JdbcDataSource().apply {
+            setURL("jdbc:h2:mem:realtime-endpoint-journal;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+        }
+        val journal = JdbcPeerJournal("court-1", dataSource)
+        application {
+            module(pairingRequests = pairingRequests, realtimeCommands = RealtimeCommands(journal = journal))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-durable","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+
+        val acknowledgement = session.receiveJson()
+        assertEquals("command_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+        assertEquals(setOf("event-durable"), journal.eventIds)
+    }
+
     @Test
     fun `approved credential receives an accepted handshake`() = testApplication {
         val pairingRequests = PairingRequests()
