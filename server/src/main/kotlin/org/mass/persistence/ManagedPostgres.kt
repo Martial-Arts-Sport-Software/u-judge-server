@@ -88,7 +88,7 @@ class ManagedPostgres(
     }
 
     private fun isPortAvailable(port: Int): Boolean = try {
-        ServerSocket(port, 1, InetAddress.getLoopbackAddress()).use { true }
+        ServerSocket(port, 1, InetAddress.getByName("127.0.0.1")).use { true }
     } catch (_: IOException) {
         false
     }

@@ -36,7 +36,7 @@ class ManagedPostgresTest {
 
     @Test
     fun `reports occupied configured port without starting process`() {
-        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { socket ->
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { socket ->
             val postgres = ManagedPostgres(waitingCommand(port = socket.localPort))
 
             val state = postgres.start()
