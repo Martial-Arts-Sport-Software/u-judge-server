@@ -57,6 +57,11 @@ rejects malformed or oversized payloads, and rechecks a credential before every 
 writes. The temporary store retains at most 1,024 receipts and rejects new IDs at that limit while continuing to acknowledge
 known retries. This validates the command/ACK contract only: a receipt is not durable and does not authorize or apply scoring.
 
+An authenticated connection also accepts `clock_sync` with an ISO-8601 UTC client send timestamp. Its typed response echoes
+that timestamp with server receive and send timestamps in UTC, giving the client the timestamps required for its own
+four-timestamp offset calculation. An invalid client timestamp receives a typed rejection and does not close the connection.
+This exchange does not implement heartbeat, telemetry, scoring, or coincidence evaluation.
+
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
 clock offset and round-trip time.
@@ -76,6 +81,8 @@ ADR-004 can be accepted only after contract/integration tests prove:
 - duplicate event retry returns the original terminal outcome without a second application;
 - disconnect/reconnect performs resync before controls re-enable;
 - malformed or oversized HTTP/WebSocket payloads are rejected with typed error codes.
+- clock sync echoes a valid client send timestamp with UTC server receive/send timestamps, and an invalid timestamp is rejected
+  without preventing a later valid command on the authenticated connection.
 - score candidates for the same participant in either arrival order and within `1000 ms` resolve to their minimum score,
   with all candidates and the resolution retained for audit; this includes a `1`-point plus `2`-point conflict resolving to
   `1` point.
@@ -88,9 +95,9 @@ ADR-004 can be accepted only after contract/integration tests prove:
 | Version/capability rule | Same protocol major version plus all required capabilities. |
 | Pairing and revocation policy | Explicit operator approval for every new device; revoked devices cannot write. |
 | Credential lifecycle | Reconnect credential in platform secure storage, valid until revocation or rotation. |
-| Realtime message families | Handshake, pairing status, session snapshot, command/event, ACK, rejection, heartbeat, resync request/response, server notice. |
+| Realtime message families | Handshake, pairing status, session snapshot, command/event, ACK, rejection, clock sync request/response/rejection, heartbeat, resync request/response, server notice. |
 | Durable ACK rule | Terminal ACK after durable journal commit only. |
 | Reconnect/resync rule | Cursor-based resync and current active-session snapshot before scoring controls re-enable. |
-| Clock-offset method and bound | Four-timestamp offset/round-trip estimate; quality threshold is telemetry-validated and does not change the `1000 ms` coincidence window. |
+| Clock-offset method and bound | `clock_sync` echoes the ISO-8601 UTC client send timestamp with UTC server receive/send timestamps; the client calculates the four-timestamp offset/round-trip estimate. The telemetry-validated quality threshold does not change the `1000 ms` coincidence window. |
 | Kerugi coincidence conflict | Same-participant score candidates in one `1000 ms` window resolve to the minimum score, regardless of arrival order; retain all candidates and the resolution for audit. |
 | Transport security | TLS with locally managed certificate and trust flow. |

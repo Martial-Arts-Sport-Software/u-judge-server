@@ -137,7 +137,10 @@ credential delivery/storage, persistent device state, durable ACK, reconnect/res
 Authenticated `/v1/realtime` clients can now submit a bounded typed command envelope and receive an idempotent ACK keyed by
 event ID; malformed, oversized and post-revocation commands receive typed rejections. Receipts are in-memory only, so this
 is contract evidence for `NET-001`, `NET-003`, `NET-005`, `NFR-006`, `NFR-007` and `NFR-012`, not the durable ACK required
-before Gate G1 can close.
+before Gate G1 can close. Authenticated clients can also send `clock_sync` with an ISO-8601 UTC client send timestamp and
+receive the echoed value plus UTC server receive/send timestamps; contract integration coverage verifies typed rejection of
+an invalid timestamp without preventing a later valid command. This is evidence for `NET-004`, `KER-003` and `NFR-012` only:
+the client still owns offset calculation, and artificial-delay, heartbeat, scoring and physical-device evidence remain open.
 
 ### Gate G1
 

@@ -10,9 +10,11 @@ import io.ktor.server.testing.testApplication
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Instant
 
 class PairingWebSocketTest {
     @Test
@@ -33,6 +35,54 @@ class PairingWebSocketTest {
             "handshake_accepted",
             session.receiveJson().getValue("type").jsonPrimitive.content,
         )
+    }
+
+    @Test
+    fun `clock sync echoes the client timestamp and rejects an invalid timestamp without closing the session`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-clock", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text("""{"type":"clock_sync","clientSendTimestamp":"not-a-timestamp"}"""))
+
+        val rejection = session.receiveJson()
+        assertEquals("clock_sync_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_clock_sync_timestamp", rejection.getValue("code").jsonPrimitive.content)
+        session.send(Frame.Text("""{"type":"clock_sync","clientSendTimestamp":123}"""))
+
+        val malformedTimestampRejection = session.receiveJson()
+        assertEquals("clock_sync_rejected", malformedTimestampRejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_clock_sync_timestamp", malformedTimestampRejection.getValue("code").jsonPrimitive.content)
+
+        session.send(Frame.Text("""{"type":"clock_sync","clientSendTimestamp":"2026-09-01T10:00:00Z"}"""))
+
+        val response = session.receiveJson()
+        assertEquals("clock_sync_response", response.getValue("type").jsonPrimitive.content)
+        assertEquals("2026-09-01T10:00:00Z", response.getValue("clientSendTimestamp").jsonPrimitive.content)
+        val serverReceiveTimestampText = response.getValue("serverReceiveTimestamp").jsonPrimitive.content
+        val serverSendTimestampText = response.getValue("serverSendTimestamp").jsonPrimitive.content
+        assertTrue(serverReceiveTimestampText.endsWith("Z"))
+        assertTrue(serverSendTimestampText.endsWith("Z"))
+        val serverReceiveTimestamp = Instant.parse(serverReceiveTimestampText)
+        val serverSendTimestamp = Instant.parse(serverSendTimestampText)
+        assertTrue(!serverSendTimestamp.isBefore(serverReceiveTimestamp))
+
+        session.send(
+            Frame.Text(
+                """{"type":"command","eventId":"event-after-clock-rejection","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
+            ),
+        )
+
+        val acknowledgement = session.receiveJson()
+        assertEquals("command_ack", acknowledgement.getValue("type").jsonPrimitive.content)
     }
 
     @Test
