@@ -36,6 +36,41 @@ class PairingApprovalTest {
     }
 
     @Test
+    fun `operator rejection transitions a pending device to rejected idempotently`() {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("android-9", "Volkov", "android")),
+        )
+
+        val rejection = assertIs<PairingRejection.Rejected>(pairingRequests.reject(pending.request.requestId))
+        val repeatedRejection = assertIs<PairingRejection.Rejected>(pairingRequests.reject(pending.request.requestId))
+
+        assertTrue(rejection.created)
+        assertEquals(
+            PairingStatus(
+                state = PairingStatusState.REJECTED,
+                deviceId = "android-9",
+                code = PairingStatusCode.OPERATOR_REJECTED,
+            ),
+            rejection.status,
+        )
+        assertEquals(rejection.status, repeatedRejection.status)
+        assertEquals(false, repeatedRejection.created)
+        assertEquals(emptyList(), pairingRequests.pending())
+    }
+
+    @Test
+    fun `unknown operator rejection does not alter pending state`() {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-9", "Kuznetsova", "ios")),
+        )
+
+        assertEquals(PairingRejection.UnknownRequest, pairingRequests.reject("unknown-request"))
+        assertEquals(listOf(pending.request), pairingRequests.pending())
+    }
+
+    @Test
     fun `operator revocation makes an accepted reconnect credential inactive`() {
         val pairingRequests = PairingRequests()
         val pending = assertIs<PairingSubmission.Pending>(

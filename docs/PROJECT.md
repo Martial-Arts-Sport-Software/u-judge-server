@@ -126,9 +126,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
 ### 7.2. Не реализовано в server
 
 - модель соревнования и сеток;
-- operator rejection, secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory
-  operator service одобряет или идемпотентно отзывает валидный pairing request, выдаёт reconnect credential и помечает его
-  inactive после отзыва без anonymous LAN write endpoint;
+- secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
+  идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
+  и помечает его inactive после отзыва без anonymous LAN decision endpoint;
 - secure credential delivery/storage, persistent device registry, durable ACK, reconnect/resync и heartbeat; in-memory
   WebSocket handshake проверяет active reconnect credential и отклоняет unknown/revoked credentials; `POST /score` удалён и
   не является API v1;
@@ -140,8 +140,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - интерфейсы арбитра, наблюдателя и редактора сеток;
 - автоматические тестовые сценарии.
 
-`GET /v1/metadata` является первым публичным read-only endpoint API v1. Он не создаёт online state и не заменяет pairing;
-изменяющий anonymous endpoint отсутствует.
+`GET /v1/metadata` и `GET /v1/pairing-status/{requestId}` являются публичными read-only endpoints API v1. Status response
+не создаёт online state и содержит только typed state, device ID и rejection code при отклонении, без surname и reconnect
+credential; изменяющие anonymous decision endpoints отсутствуют.
 
 ## 8. Целевая архитектура v1 Pilot
 
