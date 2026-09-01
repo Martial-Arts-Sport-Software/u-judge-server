@@ -8,10 +8,73 @@ import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ManagedPostgresTest {
+    @Test
+    fun `runtime configuration keeps cluster outside installation and exposes JDBC URL only while running`() {
+        val root = createTempDirectory()
+        try {
+            val configuration = PostgresRuntimeConfiguration(
+                installationDirectory = root.resolve("installation"),
+                applicationDataDirectory = root.resolve("application-data"),
+                port = 54326,
+                platform = PostgresPlatform.Windows,
+            )
+            val managedPostgres = ManagedPostgres(waitingCommand(port = configuration.port))
+            val runtime = ManagedPostgresRuntime(configuration, managedPostgres)
+
+            assertEquals(
+                listOf(
+                    root.resolve("installation/postgresql/bin/initdb.exe").toString(),
+                    "-D",
+                    root.resolve("application-data/postgres").toString(),
+                ),
+                configuration.initdbCommand,
+            )
+            assertEquals(
+                listOf(
+                    root.resolve("installation/postgresql/bin/postgres.exe").toString(),
+                    "-D",
+                    root.resolve("application-data/postgres").toString(),
+                    "-h",
+                    "127.0.0.1",
+                    "-p",
+                    "54326",
+                ),
+                configuration.postgresCommand.arguments,
+            )
+            assertEquals(null, runtime.jdbcUrl)
+
+            assertIs<PostgresState.Running>(runtime.start())
+            assertEquals("jdbc:postgresql://127.0.0.1:54326/u_judge", runtime.jdbcUrl)
+
+            assertEquals(PostgresState.Stopped, runtime.stop())
+            assertEquals(null, runtime.jdbcUrl)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `runtime configuration rejects a cluster inside the installation directory`() {
+        val root = createTempDirectory()
+        try {
+            assertFailsWith<IllegalArgumentException> {
+                PostgresRuntimeConfiguration(
+                    installationDirectory = root.resolve("installation"),
+                    applicationDataDirectory = root.resolve("installation/application-data"),
+                    port = 54326,
+                    platform = PostgresPlatform.MacOs,
+                )
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `creates a command with an available loopback port`() {
         val command = PostgresCommand.withAvailableLoopbackPort(listOf("postgres"))
