@@ -34,4 +34,36 @@ class PairingApprovalTest {
         assertEquals(PairingApproval.UnknownRequest, approval)
         assertEquals(emptyList(), pairingRequests.pending())
     }
+
+    @Test
+    fun `operator revocation makes an accepted reconnect credential inactive`() {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("android-4", "Sidorov", "android")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+
+        val revocation = assertIs<PairingRevocation.Revoked>(pairingRequests.revoke(accepted.request.requestId))
+        val repeatedRevocation = assertIs<PairingRevocation.Revoked>(pairingRequests.revoke(accepted.request.requestId))
+
+        assertTrue(revocation.created)
+        assertEquals("revoked", revocation.request.state)
+        assertEquals(accepted.request.reconnectCredential, revocation.request.reconnectCredential)
+        assertEquals(false, pairingRequests.isReconnectCredentialActive(accepted.request.reconnectCredential))
+        assertEquals(false, repeatedRevocation.created)
+    }
+
+    @Test
+    fun `unknown operator revocation does not alter accepted credentials`() {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-4", "Smirnova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+
+        val revocation = pairingRequests.revoke("unknown-request")
+
+        assertEquals(PairingRevocation.UnknownRequest, revocation)
+        assertTrue(pairingRequests.isReconnectCredentialActive(accepted.request.reconnectCredential))
+    }
 }

@@ -78,12 +78,23 @@ data class AcceptedPairingRequest(
 )
 
 @Serializable
+data class RevokedPairingRequest(
+    val requestId: String,
+    val deviceId: String,
+    val surname: String,
+    val platform: String,
+    val reconnectCredential: String,
+    val state: String = "revoked",
+)
+
+@Serializable
 data class PairingRequestError(val code: String)
 
 /** Retains pending judge devices and local operator approval decisions. */
 class PairingRequests {
     private val pendingByDeviceId = mutableMapOf<String, PendingPairingRequest>()
     private val acceptedByRequestId = mutableMapOf<String, AcceptedPairingRequest>()
+    private val revokedByRequestId = mutableMapOf<String, RevokedPairingRequest>()
 
     fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
         val deviceId = command.deviceId.trim()
@@ -131,6 +142,28 @@ class PairingRequests {
         PairingApproval.Accepted(accepted, created = true)
     }
 
+    fun revoke(requestId: String): PairingRevocation = synchronized(this) {
+        revokedByRequestId[requestId]?.let {
+            return PairingRevocation.Revoked(it, created = false)
+        }
+        val accepted = acceptedByRequestId[requestId] ?: return PairingRevocation.UnknownRequest
+        val revoked = RevokedPairingRequest(
+            requestId = accepted.requestId,
+            deviceId = accepted.deviceId,
+            surname = accepted.surname,
+            platform = accepted.platform,
+            reconnectCredential = accepted.reconnectCredential,
+        )
+        revokedByRequestId[requestId] = revoked
+        PairingRevocation.Revoked(revoked, created = true)
+    }
+
+    fun isReconnectCredentialActive(reconnectCredential: String): Boolean = synchronized(this) {
+        acceptedByRequestId.values.any { accepted ->
+            accepted.reconnectCredential == reconnectCredential && accepted.requestId !in revokedByRequestId
+        }
+    }
+
     private fun newReconnectCredential(): String = ByteArray(32).also(SecureRandom()::nextBytes).let {
         Base64.getUrlEncoder().withoutPadding().encodeToString(it)
     }
@@ -146,6 +179,12 @@ sealed interface PairingApproval {
     data class Accepted(val request: AcceptedPairingRequest, val created: Boolean) : PairingApproval
 
     data object UnknownRequest : PairingApproval
+}
+
+sealed interface PairingRevocation {
+    data class Revoked(val request: RevokedPairingRequest, val created: Boolean) : PairingRevocation
+
+    data object UnknownRequest : PairingRevocation
 }
 
 /** Configures the HTTP protocol exposed by the local court server. */

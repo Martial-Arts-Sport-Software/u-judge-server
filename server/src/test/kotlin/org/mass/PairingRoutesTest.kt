@@ -77,4 +77,15 @@ class PairingRoutesTest {
         assertEquals("invalid_pairing_request", body.getValue("code").jsonPrimitive.content)
         assertEquals(0, Json.parseToJsonElement(requests.bodyAsText()).jsonArray.size)
     }
+
+    @Test
+    fun `pairing revocation has no anonymous HTTP endpoint`() = testApplication {
+        application {
+            module(pairingRequests = PairingRequests())
+        }
+
+        val response = client.post("/v1/pairing-requests/request-1/revoke")
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
 }
