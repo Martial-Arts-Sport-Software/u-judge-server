@@ -14,6 +14,13 @@ data class PostgresCommand(
         require(arguments.isNotEmpty())
         require(port in 1..65535)
     }
+
+    companion object {
+        fun withAvailableLoopbackPort(arguments: List<String>): PostgresCommand =
+            ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { socket ->
+                PostgresCommand(arguments, socket.localPort)
+            }
+    }
 }
 
 sealed interface PostgresState {
