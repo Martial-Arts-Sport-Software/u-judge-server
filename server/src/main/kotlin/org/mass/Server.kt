@@ -30,6 +30,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.time.Instant
 import java.security.SecureRandom
 import java.util.Base64
@@ -110,6 +112,65 @@ data class RealtimeHandshakeAccepted(val type: String)
 
 @Serializable
 data class RealtimeHandshakeRejected(val type: String, val code: String)
+
+@Serializable
+data class RealtimeCommandRequest(
+    val type: String,
+    val eventId: String,
+    val sequence: Long,
+    val clientTimestamp: String,
+    val sessionId: String,
+    val payload: JsonObject,
+)
+
+@Serializable
+data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
+
+@Serializable
+data class RealtimeCommandRejected(val type: String, val code: String)
+
+class RealtimeCommands(private val maximumReceipts: Int = 1_024) {
+    init {
+        require(maximumReceipts > 0)
+    }
+
+    private val acknowledgementsByEventId = mutableMapOf<String, Pair<RealtimeCommandRequest, RealtimeCommandAcknowledgement>>()
+
+    fun accept(command: RealtimeCommandRequest): RealtimeCommandOutcome = synchronized(this) {
+        if (
+            command.type != "command" ||
+            command.eventId.isBlank() ||
+            command.sequence < 1 ||
+            command.sessionId.isBlank() ||
+            (command.payload["type"] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content?.isNotBlank() != true ||
+            runCatching { Instant.parse(command.clientTimestamp) }.isFailure
+        ) {
+            return RealtimeCommandOutcome.Rejected("invalid_command")
+        }
+
+        val existing = acknowledgementsByEventId[command.eventId]
+        if (existing != null) {
+            return if (existing.first == command) {
+                RealtimeCommandOutcome.Acknowledged(existing.second)
+            } else {
+                RealtimeCommandOutcome.Rejected("event_id_conflict")
+            }
+        }
+        if (acknowledgementsByEventId.size >= maximumReceipts) {
+            return RealtimeCommandOutcome.Rejected("command_receipt_limit_reached")
+        }
+
+        val acknowledgement = RealtimeCommandAcknowledgement("command_ack", command.eventId)
+        acknowledgementsByEventId[command.eventId] = command to acknowledgement
+        RealtimeCommandOutcome.Acknowledged(acknowledgement)
+    }
+}
+
+sealed interface RealtimeCommandOutcome {
+    data class Acknowledged(val acknowledgement: RealtimeCommandAcknowledgement) : RealtimeCommandOutcome
+
+    data class Rejected(val code: String) : RealtimeCommandOutcome
+}
 
 /** Retains pending judge devices and local operator approval decisions. */
 class PairingRequests {
@@ -212,6 +273,7 @@ sealed interface PairingRevocation {
 fun Application.module(
     metadata: ServerMetadata = ServerMetadata.local(),
     pairingRequests: PairingRequests = PairingRequests(),
+    realtimeCommands: RealtimeCommands = RealtimeCommands(),
 ) {
     install(ContentNegotiation) {
         json()
@@ -256,7 +318,38 @@ fun Application.module(
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, rejectionCode))
                 return@webSocket
             }
+            val reconnectCredential = requireNotNull(handshake).reconnectCredential
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
+            while (true) {
+                val frame = incoming.receiveCatching().getOrNull() ?: break
+                val commandText = when (frame) {
+                    is Frame.Text -> frame.readText()
+                    is Frame.Close -> break
+                    else -> continue
+                }
+                if (!pairingRequests.isReconnectCredentialActive(reconnectCredential)) {
+                    send(
+                        Frame.Text(
+                            Json.encodeToString(
+                                RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential"),
+                            ),
+                        ),
+                    )
+                    continue
+                }
+                if (commandText.length > 4_096) {
+                    send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", "command_too_large"))))
+                    continue
+                }
+                val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
+                val outcome = command?.let(realtimeCommands::accept) ?: RealtimeCommandOutcome.Rejected("invalid_command")
+                when (outcome) {
+                    is RealtimeCommandOutcome.Acknowledged -> send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                    is RealtimeCommandOutcome.Rejected -> {
+                        send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
+                    }
+                }
+            }
         }
     }
 }

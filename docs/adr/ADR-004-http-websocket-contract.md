@@ -51,6 +51,12 @@ exposing an anonymous LAN approval endpoint. `/v1/realtime` accepts a versioned 
 credential and emits a typed rejection for unknown, revoked and incompatible-version requests. Credential delivery to
 Android/iOS secure storage, persistent device state, durable ACK, reconnect/resync and heartbeat remain unimplemented.
 
+The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
+ID and typed payload. Its in-memory receipt store returns the original typed ACK when the identical event ID is retried,
+rejects malformed or oversized payloads, and rechecks a credential before every command so post-handshake revocation blocks
+writes. The temporary store retains at most 1,024 receipts and rejects new IDs at that limit while continuing to acknowledge
+known retries. This validates the command/ACK contract only: a receipt is not durable and does not authorize or apply scoring.
+
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
 clock offset and round-trip time.
