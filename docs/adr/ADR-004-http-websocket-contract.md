@@ -74,6 +74,12 @@ An event receives a terminal ACK only after durable journal commit. After reconn
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
 clock offset and round-trip time.
 
+An authenticated connection can request `resync_request` from an optional `JdbcPeerJournal` with a nullable event-ID cursor.
+It returns a typed, journal-order `resync_response` containing only persisted commands after that cursor and advances the cursor
+to the final returned event. Unknown or malformed cursors, an unconfigured journal and journal failures receive typed rejections.
+The default in-memory command handler intentionally does not provide resync; client replay and active-session snapshots remain
+outside this server-only slice.
+
 For Kerugi, the default coincidence window is `1000 ms`. For the same participant, all valid score candidates in one window
 resolve deterministically to the minimum candidate score, regardless of arrival order. For example, `1`-point and `2`-point
 candidates resolve to `1` point. All source events and the resolution remain available to audit. The clock-quality threshold

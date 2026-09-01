@@ -191,6 +191,27 @@ data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
 @Serializable
 data class RealtimeCommandRejected(val type: String, val code: String)
 
+@Serializable
+data class RealtimeResyncRequest(val type: String, val cursor: String?)
+
+@Serializable
+data class RealtimeResyncEvent(
+    val id: String,
+    val ownerPeerId: String,
+    val journalSequence: Long,
+    val command: RealtimeCommandRequest,
+)
+
+@Serializable
+data class RealtimeResyncResponse(
+    val type: String,
+    val cursor: String?,
+    val events: List<RealtimeResyncEvent>,
+)
+
+@Serializable
+data class RealtimeResyncRejected(val type: String, val code: String)
+
 class RealtimeCommands(
     private val maximumReceipts: Int = 1_024,
     private val journal: JdbcPeerJournal? = null,
@@ -240,12 +261,49 @@ class RealtimeCommands(
         acknowledgementsByEventId[command.eventId] = command to acknowledgement
         RealtimeCommandOutcome.Acknowledged(acknowledgement)
     }
+
+    fun resync(cursor: String?): RealtimeResyncOutcome = synchronized(this) {
+        val configuredJournal = journal ?: return RealtimeResyncOutcome.Rejected("resync_unavailable")
+        try {
+            val events = configuredJournal.events
+            val cursorIndex = when (cursor) {
+                null -> -1
+                else -> events.indexOfFirst { it.id == cursor }
+            }
+            if (cursorIndex == -1 && cursor != null) {
+                return RealtimeResyncOutcome.Rejected("invalid_resync_cursor")
+            }
+            val resyncedEvents = events.drop(cursorIndex + 1).map { event ->
+                RealtimeResyncEvent(
+                    id = event.id,
+                    ownerPeerId = event.ownerPeerId,
+                    journalSequence = event.sequence,
+                    command = Json.decodeFromString(event.payload),
+                )
+            }
+            RealtimeResyncOutcome.Resynced(
+                RealtimeResyncResponse(
+                    type = "resync_response",
+                    cursor = resyncedEvents.lastOrNull()?.id ?: cursor,
+                    events = resyncedEvents,
+                ),
+            )
+        } catch (_: Exception) {
+            RealtimeResyncOutcome.Rejected("journal_unavailable")
+        }
+    }
 }
 
 sealed interface RealtimeCommandOutcome {
     data class Acknowledged(val acknowledgement: RealtimeCommandAcknowledgement) : RealtimeCommandOutcome
 
     data class Rejected(val code: String) : RealtimeCommandOutcome
+}
+
+sealed interface RealtimeResyncOutcome {
+    data class Resynced(val response: RealtimeResyncResponse) : RealtimeResyncOutcome
+
+    data class Rejected(val code: String) : RealtimeResyncOutcome
 }
 
 /** Retains pending judge devices and local operator approval decisions. */
@@ -494,6 +552,18 @@ fun Application.module(
                         send(Frame.Text(Json.encodeToString(HeartbeatRejected("heartbeat_rejected", "invalid_heartbeat"))))
                     } else {
                         send(Frame.Text(Json.encodeToString(HeartbeatAcknowledgement("heartbeat_ack"))))
+                    }
+                    continue
+                }
+                if (messageType == "resync_request") {
+                    val request = runCatching { Json.decodeFromString<RealtimeResyncRequest>(commandText) }.getOrNull()
+                    val outcome = request?.let { realtimeCommands.resync(it.cursor) }
+                        ?: RealtimeResyncOutcome.Rejected("invalid_resync_cursor")
+                    when (outcome) {
+                        is RealtimeResyncOutcome.Resynced -> send(Frame.Text(Json.encodeToString(outcome.response)))
+                        is RealtimeResyncOutcome.Rejected -> {
+                            send(Frame.Text(Json.encodeToString(RealtimeResyncRejected("resync_rejected", outcome.code))))
+                        }
                     }
                     continue
                 }

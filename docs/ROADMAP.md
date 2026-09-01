@@ -138,7 +138,7 @@ opaque reconnect credential только при принятии, без anonymo
 versioned WebSocket handshake только для active reconnect credential и возвращает typed accepted/rejected response; unknown,
 revoked и incompatible-version handshakes отклоняются. Integration tests подтверждают JSON contract, отсутствие anonymous
 `POST /score` и revoke endpoint, а также rejection без создания pending state. Эти in-memory slices не заменяют secure
-credential delivery/storage, persistent device state, durable ACK, reconnect/resync, heartbeat или physical-device mDNS evidence.
+credential delivery/storage, persistent device state, client durable outbox/replay, heartbeat или physical-device mDNS evidence.
 Authenticated `/v1/realtime` clients can now submit a bounded typed command envelope and receive an idempotent ACK keyed by
 event ID; malformed, oversized and post-revocation commands receive typed rejections. The default server remains in-memory,
 but a supplied `JdbcPeerJournal` appends each validated command before its ACK, uses the client event ID as the journal ID,
