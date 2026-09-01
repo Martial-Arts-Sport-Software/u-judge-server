@@ -125,10 +125,11 @@ fixture. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
 time до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, создаёт pending request и дедуплицирует retry
 по device ID. Локальный operator application service переводит pending request в accepted и выдаёт opaque reconnect
 credential без anonymous LAN approval endpoint. Локальный operator service также идемпотентно отзывает принятое устройство:
-сохранённый reconnect credential становится inactive, а request identity решения сохраняется. Integration tests подтверждают JSON
-contract, отсутствие anonymous `POST /score` и revoke endpoint, а также rejection без создания pending state. Эти slices не
-заменяют secure credential delivery/storage, authenticated transport, WebSocket handshake, durable ACK, reconnect или
-physical-device mDNS evidence.
+сохранённый reconnect credential становится inactive, а request identity решения сохраняется. `/v1/realtime` принимает
+versioned WebSocket handshake только для active reconnect credential и возвращает typed accepted/rejected response; unknown,
+revoked и incompatible-version handshakes отклоняются. Integration tests подтверждают JSON contract, отсутствие anonymous
+`POST /score` и revoke endpoint, а также rejection без создания pending state. Эти in-memory slices не заменяют secure
+credential delivery/storage, persistent device state, durable ACK, reconnect/resync, heartbeat или physical-device mDNS evidence.
 
 ### Gate G1
 

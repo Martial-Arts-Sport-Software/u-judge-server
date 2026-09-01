@@ -46,8 +46,10 @@ client and typed messages for handshake, pairing status, session snapshot, comma
 resync request/response, and server notice. TLS uses the local certificate/trust flow selected in ADR-002.
 
 The current server slice keeps approval in a transport-agnostic local operator application service. It transitions a pending
-request to accepted idempotently and issues an opaque reconnect credential, without exposing an anonymous LAN approval
-endpoint. Credential delivery to Android/iOS secure storage, revocation and WebSocket authentication remain unimplemented.
+request to accepted idempotently, issues an opaque reconnect credential and revokes that credential idempotently, without
+exposing an anonymous LAN approval endpoint. `/v1/realtime` accepts a versioned WebSocket handshake only for an active
+credential and emits a typed rejection for unknown, revoked and incompatible-version requests. Credential delivery to
+Android/iOS secure storage, persistent device state, durable ACK, reconnect/resync and heartbeat remain unimplemented.
 
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
