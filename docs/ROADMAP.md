@@ -112,8 +112,8 @@ architecture. They are not v1 Pilot acceptance gates.
 clean-machine verification и Gate G1 не закрыты. Перед запуском supervised child `PostgresProvisioner` вызывает configured
 `initdb`, требует `PG_VERSION`, безопасно переиспользует готовый cluster и отказывается перезаписывать nonempty directory
 без PostgreSQL marker; `ManagedPostgres.restart()` заменяет child после аварийного exit. Эти тесты также используют JVM
-fixture. `PostgresCommand.withAvailableLoopbackPort()` выбирает свободный loopback port для нового command; порт освобождается
-до запуска child process, поэтому проверка занятости в `ManagedPostgres.start()` остаётся обязательной. Детали в
+fixture. `PostgresCommand.withAvailableLoopbackPort()` выбирает свободный IPv4 loopback port (`127.0.0.1`) для нового command;
+порт освобождается до запуска child process, поэтому проверка занятости в `ManagedPostgres.start()` остаётся обязательной. Детали в
 [ADR-003](adr/ADR-003-managed-postgresql.md).
 
 ### Realtime spike

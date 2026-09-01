@@ -17,7 +17,7 @@ data class PostgresCommand(
 
     companion object {
         fun withAvailableLoopbackPort(arguments: List<String>): PostgresCommand =
-            ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { socket ->
+            ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { socket ->
                 PostgresCommand(arguments, socket.localPort)
             }
     }

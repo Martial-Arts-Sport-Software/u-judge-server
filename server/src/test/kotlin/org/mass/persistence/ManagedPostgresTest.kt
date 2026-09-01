@@ -16,7 +16,7 @@ class ManagedPostgresTest {
     fun `creates a command with an available loopback port`() {
         val command = PostgresCommand.withAvailableLoopbackPort(listOf("postgres"))
 
-        ServerSocket(command.port, 1, InetAddress.getLoopbackAddress()).use { socket ->
+        ServerSocket(command.port, 1, InetAddress.getByName("127.0.0.1")).use { socket ->
             assertEquals(command.port, socket.localPort)
         }
     }
