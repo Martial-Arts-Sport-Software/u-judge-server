@@ -152,7 +152,12 @@ an invalid timestamp without preventing a later valid command. This is evidence 
 the client still owns offset calculation, and artificial-delay, heartbeat scheduling/timeouts, scoring and physical-device evidence remain open.
 Authenticated clients can send a strictly typed `heartbeat` and receive `heartbeat_ack`; malformed heartbeats receive
 `heartbeat_rejected` without closing the session. This server-only contract evidence covers `NFR-012`; client scheduling,
-timeout/disconnected transitions, reconnect and device evidence remain open.
+client-side disconnected transition, reconnect and device evidence remain open.
+
+An authenticated realtime socket now closes with `heartbeat_timeout` after a configurable interval without a valid heartbeat.
+Each valid heartbeat renews the deadline; malformed input does not. Focused tracker and Ktor contract tests cover expiry and
+renewal. This is partial server-only evidence for `NET-006` and `NFR-012`; client heartbeat scheduling, persistent device
+connection state, reconnect UX and physical-device evidence remain open.
 
 ### Gate G1
 

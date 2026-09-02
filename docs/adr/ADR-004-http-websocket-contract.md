@@ -51,8 +51,8 @@ revokes that credential idempotently, without exposing anonymous LAN decision en
 `GET /v1/pairing-status/{requestId}` addresses a typed `pairing_status` projection by opaque request ID. The response has
 state, device ID and a rejection code only when rejected; it never exposes a surname or reconnect credential. `/v1/realtime`
 accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
-incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state, reconnect/resync
-and heartbeat scheduling, timeout/disconnected transitions remain unimplemented.
+incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state and client
+heartbeat scheduling remain unimplemented.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
@@ -67,8 +67,10 @@ An authenticated connection also accepts `clock_sync` with an ISO-8601 UTC clien
 that timestamp with server receive and send timestamps in UTC, giving the client the timestamps required for its own
 four-timestamp offset calculation. An invalid client timestamp receives a typed rejection and does not close the connection.
 An authenticated connection also accepts a strictly typed `heartbeat` request and returns `heartbeat_ack`; a malformed
-heartbeat receives `heartbeat_rejected` with `invalid_heartbeat` and does not close the session. This server-only exchange
-does not schedule heartbeats or implement timeout/disconnected transitions, telemetry, scoring, or coincidence evaluation.
+heartbeat receives `heartbeat_rejected` with `invalid_heartbeat` and does not close the session. The server closes an idle
+authenticated socket with `heartbeat_timeout` after its configurable deadline; a valid heartbeat renews that deadline. This
+server-only exchange does not schedule client heartbeats, persist device connection state, provide reconnect UX, telemetry,
+scoring, or coincidence evaluation.
 
 An event receives a terminal ACK only after durable journal commit. After reconnect, cursor-based resync completes and the
 active session snapshot is current before scoring controls re-enable. A four-timestamp exchange estimates the client/server
