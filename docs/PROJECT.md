@@ -125,7 +125,7 @@ Authoritative source для v1 Pilot — предоставленный «Про
 
 ### 7.2. Не реализовано в server
 
-- модель соревнования и сеток;
+- модель соревнования и сеток за пределами typed UUID IDs competition, peer, court, bracket, session, judge, device и event;
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
   и помечает его inactive после отзыва без anonymous LAN decision endpoint. Он также проецирует approved device ID, platform

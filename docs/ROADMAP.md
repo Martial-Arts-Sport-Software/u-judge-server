@@ -183,6 +183,11 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 - Разделить UI state, application services, transport и persistence.
 - Добавить structured logging и health/diagnostic state.
 
+Текущее доказательство: transport-agnostic domain boundary содержит отдельные validated UUID value types для competition,
+peer, court, bracket, session, judge, device и event. Focused unit tests подтверждают canonical UUID generation и rejection
+malformed/noncanonical values. Это partial evidence для `SYS-008` и `SYS-007`; domain commands, event envelope wiring,
+persistence, projections и audit payload остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
