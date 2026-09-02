@@ -18,9 +18,83 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import java.time.Duration
 import java.time.Instant
 
 class PairingWebSocketTest {
+    @Test
+    fun `authenticated realtime session closes after a missed heartbeat deadline`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-timeout", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests, heartbeatTimeout = Duration.ofMillis(50))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+
+        assertEquals(
+            "heartbeat_timeout",
+            withTimeout(5_000) { session.closeReason.await() }?.message,
+        )
+    }
+
+    @Test
+    fun `valid heartbeat renews the realtime session deadline`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-heartbeat-renewal", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests, heartbeatTimeout = Duration.ofMillis(200))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        delay(100)
+        session.send(Frame.Text("""{"type":"heartbeat"}"""))
+        assertEquals("heartbeat_ack", session.receiveJson().getValue("type").jsonPrimitive.content)
+        delay(150)
+
+        assertTrue(!session.closeReason.isCompleted)
+        assertEquals(
+            "heartbeat_timeout",
+            withTimeout(5_000) { session.closeReason.await() }?.message,
+        )
+    }
+
+    @Test
+    fun `malformed heartbeat does not renew the realtime session deadline`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-malformed-heartbeat", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests, heartbeatTimeout = Duration.ofMillis(200))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        delay(100)
+        session.send(Frame.Text("""{"type":"heartbeat","unexpected":true}"""))
+        assertEquals("heartbeat_rejected", session.receiveJson().getValue("type").jsonPrimitive.content)
+
+        assertEquals(
+            "heartbeat_timeout",
+            withTimeout(5_000) { session.closeReason.await() }?.message,
+        )
+    }
+
     @Test
     fun `journal configured realtime endpoint returns typed ordered events after a resync cursor`() = testApplication {
         val pairingRequests = PairingRequests()
