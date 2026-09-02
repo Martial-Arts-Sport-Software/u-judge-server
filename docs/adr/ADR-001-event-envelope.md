@@ -37,8 +37,10 @@ will load the same envelope from PostgreSQL rather than process memory.
   sequence-gap detection without applying the out-of-order event.
 - Anti-entropy currently exchanges the full in-memory journal. Range requests, durable cursors and a network protocol remain
   future work under `P2P-004`, `P2P-010` and the Stage 2 persistence scope.
-- The envelope does not yet carry competition, bracket, session, author, timestamp or ownership validation fields. Those
-  fields must be added before domain commands are persisted or projected, per `SYS-007`, `AUD-001` and `P2P-006`.
+- The Stage 1 journal envelope does not carry competition, bracket, session, author or timestamp fields. The G2 domain
+  boundary now defines a separate validated `DomainEvent` with typed IDs for competition, peer, court, bracket, session,
+  judge, device and event; source, author, UTC timestamp, type and raw payload. A persistence slice must map it into a
+  versioned journal schema before domain commands are persisted or projected, per `SYS-007`, `AUD-001` and `P2P-006`.
 - This ADR does not choose mDNS discovery, transport, authentication or PostgreSQL packaging. Those choices remain in
   ADR-002 and ADR-003 after their respective spikes.
 

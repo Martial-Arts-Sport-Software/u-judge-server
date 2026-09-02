@@ -188,6 +188,10 @@ peer, court, bracket, session, judge, device и event. Focused unit tests под
 malformed/noncanonical values. Это partial evidence для `SYS-008` и `SYS-007`; domain commands, event envelope wiring,
 persistence, projections и audit payload остаются открыты.
 
+`DomainEvent` сохраняет typed IDs всех этих сущностей, validated source и author, UTC timestamp, event type и raw payload.
+Focused unit tests покрывают complete audit context и rejection blank fields. Это partial evidence для `SYS-007`, `AUD-001`,
+`AUD-004` и `SYS-008`; JDBC schema, journal adapter, commands, projections и scoring остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
