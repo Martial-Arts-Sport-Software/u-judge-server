@@ -128,7 +128,8 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - модель соревнования и сеток;
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
-  и помечает его inactive после отзыва без anonymous LAN decision endpoint;
+  и помечает его inactive после отзыва без anonymous LAN decision endpoint. Он также проецирует approved device ID, platform
+  и in-memory `connected`/`disconnected` state для будущего desktop operator UI;
 - secure credential delivery/storage, persistent device registry, client heartbeat scheduling и reconnect UX; WebSocket
   handshake проверяет active reconnect credential и отклоняет unknown/revoked credentials. Authenticated `heartbeat`
   получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
