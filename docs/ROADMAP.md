@@ -159,6 +159,12 @@ Each valid heartbeat renews the deadline; malformed input does not. Focused trac
 renewal. This is partial server-only evidence for `NET-006` and `NFR-012`; client heartbeat scheduling, persistent device
 connection state, reconnect UX and physical-device evidence remain open.
 
+The local operator pairing service now projects approved device ID, platform and `connected`/`disconnected` state without
+surname or reconnect credential. Authenticated WebSocket handshake marks the device connected; socket close, including
+`heartbeat_timeout`, marks it disconnected. Unit and Ktor contract tests cover these transitions and exclude pending/rejected
+requests. This is partial in-memory evidence for `DEV-005`, `NET-006` and `NFR-012`; persistent registry, desktop UI,
+client scheduling, reconnect UX and physical-device evidence remain open.
+
 ### Gate G1
 
 Single-peer PostgreSQL and client reconnect are confirmed by working prototypes. P2P is explicitly deferred from v1 Pilot;
