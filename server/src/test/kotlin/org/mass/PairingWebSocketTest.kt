@@ -4,6 +4,7 @@ import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import io.ktor.server.testing.testApplication
@@ -24,6 +25,34 @@ import java.time.Duration
 import java.time.Instant
 
 class PairingWebSocketTest {
+    @Test
+    fun `authenticated websocket updates the operator device connection projection`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-connection", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+
+        assertEquals(
+            listOf(OperatorDeviceConnection("ios-connection", "ios", DeviceConnectionState.CONNECTED)),
+            pairingRequests.operatorDevices(),
+        )
+
+        session.close()
+        withTimeout(5_000) {
+            while (pairingRequests.operatorDevices().single().connectionState != DeviceConnectionState.DISCONNECTED) {
+                delay(10)
+            }
+        }
+    }
+
     @Test
     fun `authenticated realtime session closes after a missed heartbeat deadline`() = testApplication {
         val pairingRequests = PairingRequests()

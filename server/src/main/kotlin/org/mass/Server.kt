@@ -135,6 +135,22 @@ data class PairingStatus(
 }
 
 @Serializable
+enum class DeviceConnectionState {
+    @kotlinx.serialization.SerialName("connected")
+    CONNECTED,
+
+    @kotlinx.serialization.SerialName("disconnected")
+    DISCONNECTED,
+}
+
+@Serializable
+data class OperatorDeviceConnection(
+    val deviceId: String,
+    val platform: String,
+    val connectionState: DeviceConnectionState,
+)
+
+@Serializable
 data class RealtimeHandshakeRequest(
     val type: String,
     val protocolVersion: String,
@@ -314,6 +330,7 @@ class PairingRequests {
     private val acceptedByRequestId = mutableMapOf<String, AcceptedPairingRequest>()
     private val rejectedByRequestId = mutableMapOf<String, PairingStatus>()
     private val revokedByRequestId = mutableMapOf<String, RevokedPairingRequest>()
+    private val connectionsByCredential = mutableMapOf<String, Int>()
 
     fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
         val deviceId = command.deviceId.trim()
@@ -390,6 +407,7 @@ class PairingRequests {
             reconnectCredential = accepted.reconnectCredential,
         )
         revokedByRequestId[requestId] = revoked
+        connectionsByCredential.remove(accepted.reconnectCredential)
         PairingRevocation.Revoked(revoked, created = true)
     }
 
@@ -397,6 +415,40 @@ class PairingRequests {
         acceptedByRequestId.values.any { accepted ->
             accepted.reconnectCredential == reconnectCredential && accepted.requestId !in revokedByRequestId
         }
+    }
+
+    fun connected(reconnectCredential: String) = synchronized(this) {
+        if (isReconnectCredentialActive(reconnectCredential)) {
+            connectionsByCredential.merge(reconnectCredential, 1, Int::plus)
+        }
+    }
+
+    fun disconnected(reconnectCredential: String) = synchronized(this) {
+        val connections = connectionsByCredential[reconnectCredential] ?: return@synchronized
+        if (connections == 1) {
+            connectionsByCredential.remove(reconnectCredential)
+        } else {
+            connectionsByCredential[reconnectCredential] = connections - 1
+        }
+    }
+
+    fun operatorDevices(): List<OperatorDeviceConnection> = synchronized(this) {
+        acceptedByRequestId.values
+            .asSequence()
+            .filter { it.requestId !in revokedByRequestId }
+            .map {
+                OperatorDeviceConnection(
+                    deviceId = it.deviceId,
+                    platform = it.platform,
+                    connectionState = if (connectionsByCredential[it.reconnectCredential] != null) {
+                        DeviceConnectionState.CONNECTED
+                    } else {
+                        DeviceConnectionState.DISCONNECTED
+                    },
+                )
+            }
+            .sortedBy(OperatorDeviceConnection::deviceId)
+            .toList()
     }
 
     fun status(requestId: String): PairingStatus? = synchronized(this) {
@@ -501,6 +553,7 @@ fun Application.module(
                 return@webSocket
             }
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
+            pairingRequests.connected(reconnectCredential)
             val heartbeatTracker = RealtimeHeartbeatTracker(heartbeatTimeout)
             heartbeatTracker.connected(reconnectCredential)
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
@@ -595,6 +648,7 @@ fun Application.module(
             } finally {
                 timeoutJob.cancel()
                 heartbeatTracker.disconnected(reconnectCredential)
+                pairingRequests.disconnected(reconnectCredential)
             }
         }
     }

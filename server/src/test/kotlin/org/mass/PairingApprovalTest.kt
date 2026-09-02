@@ -7,6 +7,46 @@ import kotlin.test.assertTrue
 
 class PairingApprovalTest {
     @Test
+    fun `operator device projection tracks an approved device connection`() {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-connection", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+
+        assertEquals(
+            listOf(OperatorDeviceConnection("ios-connection", "ios", DeviceConnectionState.DISCONNECTED)),
+            pairingRequests.operatorDevices(),
+        )
+
+        pairingRequests.connected(accepted.request.reconnectCredential)
+
+        assertEquals(
+            listOf(OperatorDeviceConnection("ios-connection", "ios", DeviceConnectionState.CONNECTED)),
+            pairingRequests.operatorDevices(),
+        )
+
+        pairingRequests.disconnected(accepted.request.reconnectCredential)
+
+        assertEquals(
+            listOf(OperatorDeviceConnection("ios-connection", "ios", DeviceConnectionState.DISCONNECTED)),
+            pairingRequests.operatorDevices(),
+        )
+    }
+
+    @Test
+    fun `operator device projection excludes pending and rejected requests`() {
+        val pairingRequests = PairingRequests()
+        pairingRequests.submit(PairingRequestCommand("ios-pending", "Petrova", "ios"))
+        val rejected = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("android-rejected", "Ivanov", "android")),
+        )
+        pairingRequests.reject(rejected.request.requestId)
+
+        assertEquals(emptyList(), pairingRequests.operatorDevices())
+    }
+
+    @Test
     fun `operator approval accepts a pending device and issues one reconnect credential`() {
         val pairingRequests = PairingRequests()
         val pending = assertIs<PairingSubmission.Pending>(
