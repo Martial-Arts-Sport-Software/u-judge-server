@@ -129,10 +129,11 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
   и помечает его inactive после отзыва без anonymous LAN decision endpoint;
-- secure credential delivery/storage, persistent device registry, durable ACK, reconnect/resync и heartbeat scheduling;
-  in-memory WebSocket handshake проверяет active reconnect credential и отклоняет unknown/revoked credentials. Authenticated
-  `heartbeat` получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; timeout и
-  disconnected transition не реализованы. `POST /score` удалён и не является API v1;
+- secure credential delivery/storage, persistent device registry, client heartbeat scheduling и reconnect UX; WebSocket
+  handshake проверяет active reconnect credential и отклоняет unknown/revoked credentials. Authenticated `heartbeat`
+  получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
+  idle socket с `heartbeat_timeout`, но client scheduling, persistent device state и physical-device evidence не реализованы.
+  Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
 - таймер, scoring и формулы дисциплин;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;

@@ -27,12 +27,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.mass.replication.JdbcPeerJournal
+import java.time.Duration
 import java.time.Instant
 import java.security.SecureRandom
 import java.util.Base64
@@ -441,6 +443,7 @@ fun Application.module(
     metadata: ServerMetadata = ServerMetadata.local(),
     pairingRequests: PairingRequests = PairingRequests(),
     realtimeCommands: RealtimeCommands = RealtimeCommands(),
+    heartbeatTimeout: Duration = Duration.ofSeconds(30),
 ) {
     install(ContentNegotiation) {
         json(Json {
@@ -498,83 +501,100 @@ fun Application.module(
                 return@webSocket
             }
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
+            val heartbeatTracker = RealtimeHeartbeatTracker(heartbeatTimeout)
+            heartbeatTracker.connected(reconnectCredential)
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
-            while (true) {
-                val frame = incoming.receiveCatching().getOrNull() ?: break
-                val commandText = when (frame) {
-                    is Frame.Text -> frame.readText()
-                    is Frame.Close -> break
-                    else -> continue
+            fun scheduleHeartbeatTimeout() = launch {
+                delay(heartbeatTimeout.toMillis())
+                if (reconnectCredential in heartbeatTracker.expireInactive()) {
+                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "heartbeat_timeout"))
                 }
-                if (!pairingRequests.isReconnectCredentialActive(reconnectCredential)) {
-                    send(
-                        Frame.Text(
-                            Json.encodeToString(
-                                RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential"),
-                            ),
-                        ),
-                    )
-                    continue
-                }
-                if (commandText.length > 4_096) {
-                    send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", "command_too_large"))))
-                    continue
-                }
-                val serverReceiveTimestamp = Instant.now().toString()
-                val messageType = runCatching {
-                    ((Json.parseToJsonElement(commandText) as? JsonObject)?.get("type") as? JsonPrimitive)
-                        ?.takeIf(JsonPrimitive::isString)
-                        ?.content
-                }.getOrNull()
-                val clockSync = runCatching { Json.decodeFromString<ClockSyncRequest>(commandText) }.getOrNull()
-                if (messageType == "clock_sync") {
-                    if (clockSync == null || runCatching { Instant.parse(clockSync.clientSendTimestamp) }.isFailure) {
-                        send(Frame.Text(Json.encodeToString(ClockSyncRejected("clock_sync_rejected", "invalid_clock_sync_timestamp"))))
-                    } else {
+            }
+            var timeoutJob = scheduleHeartbeatTimeout()
+            try {
+                while (true) {
+                    val frame = incoming.receiveCatching().getOrNull() ?: break
+                    val commandText = when (frame) {
+                        is Frame.Text -> frame.readText()
+                        is Frame.Close -> break
+                        else -> continue
+                    }
+                    if (!pairingRequests.isReconnectCredentialActive(reconnectCredential)) {
                         send(
                             Frame.Text(
                                 Json.encodeToString(
-                                    ClockSyncResponse(
-                                        type = "clock_sync_response",
-                                        clientSendTimestamp = clockSync.clientSendTimestamp,
-                                        serverReceiveTimestamp = serverReceiveTimestamp,
-                                        serverSendTimestamp = Instant.now().toString(),
-                                    ),
+                                    RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential"),
                                 ),
                             ),
                         )
+                        continue
                     }
-                    continue
-                }
-                if (messageType == "heartbeat") {
-                    val heartbeat = runCatching { Json.decodeFromString<HeartbeatRequest>(commandText) }.getOrNull()
-                    if (heartbeat == null) {
-                        send(Frame.Text(Json.encodeToString(HeartbeatRejected("heartbeat_rejected", "invalid_heartbeat"))))
-                    } else {
-                        send(Frame.Text(Json.encodeToString(HeartbeatAcknowledgement("heartbeat_ack"))))
+                    if (commandText.length > 4_096) {
+                        send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", "command_too_large"))))
+                        continue
                     }
-                    continue
-                }
-                if (messageType == "resync_request") {
-                    val request = runCatching { Json.decodeFromString<RealtimeResyncRequest>(commandText) }.getOrNull()
-                    val outcome = request?.let { realtimeCommands.resync(it.cursor) }
-                        ?: RealtimeResyncOutcome.Rejected("invalid_resync_cursor")
+                    val serverReceiveTimestamp = Instant.now().toString()
+                    val messageType = runCatching {
+                        ((Json.parseToJsonElement(commandText) as? JsonObject)?.get("type") as? JsonPrimitive)
+                            ?.takeIf(JsonPrimitive::isString)
+                            ?.content
+                    }.getOrNull()
+                    val clockSync = runCatching { Json.decodeFromString<ClockSyncRequest>(commandText) }.getOrNull()
+                    if (messageType == "clock_sync") {
+                        if (clockSync == null || runCatching { Instant.parse(clockSync.clientSendTimestamp) }.isFailure) {
+                            send(Frame.Text(Json.encodeToString(ClockSyncRejected("clock_sync_rejected", "invalid_clock_sync_timestamp"))))
+                        } else {
+                            send(
+                                Frame.Text(
+                                    Json.encodeToString(
+                                        ClockSyncResponse(
+                                            type = "clock_sync_response",
+                                            clientSendTimestamp = clockSync.clientSendTimestamp,
+                                            serverReceiveTimestamp = serverReceiveTimestamp,
+                                            serverSendTimestamp = Instant.now().toString(),
+                                        ),
+                                    ),
+                                ),
+                            )
+                        }
+                        continue
+                    }
+                    if (messageType == "heartbeat") {
+                        val heartbeat = runCatching { Json.decodeFromString<HeartbeatRequest>(commandText) }.getOrNull()
+                        if (heartbeat == null) {
+                            send(Frame.Text(Json.encodeToString(HeartbeatRejected("heartbeat_rejected", "invalid_heartbeat"))))
+                        } else {
+                            heartbeatTracker.heartbeat(reconnectCredential)
+                            timeoutJob.cancel()
+                            timeoutJob = scheduleHeartbeatTimeout()
+                            send(Frame.Text(Json.encodeToString(HeartbeatAcknowledgement("heartbeat_ack"))))
+                        }
+                        continue
+                    }
+                    if (messageType == "resync_request") {
+                        val request = runCatching { Json.decodeFromString<RealtimeResyncRequest>(commandText) }.getOrNull()
+                        val outcome = request?.let { realtimeCommands.resync(it.cursor) }
+                            ?: RealtimeResyncOutcome.Rejected("invalid_resync_cursor")
+                        when (outcome) {
+                            is RealtimeResyncOutcome.Resynced -> send(Frame.Text(Json.encodeToString(outcome.response)))
+                            is RealtimeResyncOutcome.Rejected -> {
+                                send(Frame.Text(Json.encodeToString(RealtimeResyncRejected("resync_rejected", outcome.code))))
+                            }
+                        }
+                        continue
+                    }
+                    val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
+                    val outcome = command?.let(realtimeCommands::accept) ?: RealtimeCommandOutcome.Rejected("invalid_command")
                     when (outcome) {
-                        is RealtimeResyncOutcome.Resynced -> send(Frame.Text(Json.encodeToString(outcome.response)))
-                        is RealtimeResyncOutcome.Rejected -> {
-                            send(Frame.Text(Json.encodeToString(RealtimeResyncRejected("resync_rejected", outcome.code))))
+                        is RealtimeCommandOutcome.Acknowledged -> send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                        is RealtimeCommandOutcome.Rejected -> {
+                            send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
                         }
                     }
-                    continue
                 }
-                val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
-                val outcome = command?.let(realtimeCommands::accept) ?: RealtimeCommandOutcome.Rejected("invalid_command")
-                when (outcome) {
-                    is RealtimeCommandOutcome.Acknowledged -> send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
-                    is RealtimeCommandOutcome.Rejected -> {
-                        send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
-                    }
-                }
+            } finally {
+                timeoutJob.cancel()
+                heartbeatTracker.disconnected(reconnectCredential)
             }
         }
     }
