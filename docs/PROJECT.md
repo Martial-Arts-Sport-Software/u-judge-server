@@ -125,8 +125,10 @@ Authoritative source для v1 Pilot — предоставленный «Про
 
 ### 7.2. Не реализовано в server
 
-- модель соревнования и сеток за пределами typed UUID IDs и in-memory `DomainEvent` audit envelope для competition, peer,
-  court, bracket, session, judge, device и event;
+- модель соревнования и сеток за пределами typed UUID IDs, transport-agnostic `DomainCommand` и in-memory `DomainEvent`
+  audit envelope для competition, peer, court, bracket, session, judge, device и event; `DomainCommand` принимает полный
+  typed audit context и преобразуется в event только с назначенными event ID и UTC timestamp, но sequence, durable journal,
+  projections и scoring ещё не реализованы;
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
   и помечает его inactive после отзыва без anonymous LAN decision endpoint. Он также проецирует approved device ID, platform

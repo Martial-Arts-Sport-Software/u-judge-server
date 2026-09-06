@@ -192,6 +192,12 @@ persistence, projections и audit payload остаются открыты.
 Focused unit tests покрывают complete audit context и rejection blank fields. Это partial evidence для `SYS-007`, `AUD-001`,
 `AUD-004` и `SYS-008`; JDBC schema, journal adapter, commands, projections и scoring остаются открыты.
 
+`DomainCommand` задаёт transport-agnostic границу изменяющего действия: он хранит typed контекст соревнования, ownership,
+сессии, судьи и устройства, source, author, type и payload, валидирует mutable audit fields и преобразуется в `DomainEvent`
+только с назначенными event ID и UTC timestamp. Focused unit tests покрывают перенос полного контекста и rejection blank
+fields. Это partial evidence для `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; назначение sequence, durable journal,
+projections, transport wiring и scoring остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
