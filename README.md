@@ -21,7 +21,7 @@ Desktop-приложение площадки и локальный server U'Jud
 
 Read-only `GET /v1/health` возвращает typed liveness status `healthy` и не раскрывает данные pairing или credentials. Structured logging, persistence readiness и desktop diagnostics ещё не реализованы.
 
-Начата lifecycle projection: immutable `SessionProjection` валидирует переходы `prepared`, `running`, `paused`, `completed` и `cancelled`, а также rebuilds ordered history. Event journal wiring, persistence, timer и scoring ещё не реализованы.
+Начата lifecycle projection: immutable `SessionProjection` валидирует переходы `prepared`, `running`, `paused`, `completed` и `cancelled`, а также rebuilds ordered history. Transport-agnostic `SessionLifecycleJournal` принимает lifecycle command только от local owner активной сетки, append-ит sequenced event до замены projection и возвращает исходный результат при повторной доставке event ID. Durable journal, rebuild из persisted events, transport wiring, timer и scoring ещё не реализованы.
 
 `BracketOwnership` закрепляет сетку за единственным local peer при `IN_PROGRESS`; P2P claims и ownership transfer не входят в v1 Pilot.
 
