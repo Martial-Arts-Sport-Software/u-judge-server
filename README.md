@@ -23,6 +23,8 @@ Read-only `GET /v1/health` возвращает typed liveness status `healthy` 
 
 Начата lifecycle projection: immutable `SessionProjection` валидирует переходы `prepared`, `running`, `paused`, `completed` и `cancelled`, а также rebuilds ordered history. Event journal wiring, persistence, timer и scoring ещё не реализованы.
 
+`BracketOwnership` закрепляет сетку за единственным local peer при `IN_PROGRESS`; P2P claims и ownership transfer не входят в v1 Pilot.
+
 Начат PostgreSQL persistence spike: versioned JDBC migration сохраняет и восстанавливает envelope Stage 1,
 `PostgresProvisioner` готовит configured data directory через `initdb` без перезаписи неизвестных данных до того, как
 `ManagedPostgres` супервизирует сконфигурированный дочерний процесс, и сообщает конфликт loopback-порта, ошибку запуска или
