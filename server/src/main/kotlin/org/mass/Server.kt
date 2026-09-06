@@ -64,6 +64,10 @@ data class ServerMetadata(
     }
 }
 
+/** Read-only liveness status for local operator diagnostics. */
+@Serializable
+data class HealthStatus(val status: String = "healthy")
+
 @Serializable
 data class PairingRequestCommand(
     val deviceId: String,
@@ -508,6 +512,9 @@ fun Application.module(
     routing {
         get("/") {
             call.respondText("JudgeServer OK")
+        }
+        get("/v1/health") {
+            call.respond(HealthStatus())
         }
         get("/v1/metadata") {
             call.respond(metadata)
