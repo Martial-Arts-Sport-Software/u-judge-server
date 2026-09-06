@@ -216,6 +216,10 @@ event journal wiring, persistence, timer, bracket ownership и scoring оста�
 reconnect credential. Focused unit test подтверждает сохранение IDs. Это partial evidence для `NFR-008` и `SYS-007`;
 logging backend, persistence readiness и desktop diagnostics остаются открыты.
 
+`SequencedDomainEvent` вводит positive logical sequence внутри typed owner peer, а `DomainEventOrder` детерминированно
+сортирует записи и отклоняет owner/sequence conflicts. Unit tests покрывают order, conflict и non-positive sequence. Это
+partial evidence для `SYS-009`, `SYS-008` и `AUD-001`; persistent sequencing, replication и transport wiring открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
