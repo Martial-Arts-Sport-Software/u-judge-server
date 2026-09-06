@@ -212,6 +212,10 @@ event journal wiring, persistence, timer, bracket ownership и scoring оста�
 Это partial evidence для `CMP-005`, `CMP-006` и `SES-002`; P2P claims, ownership transfer, persistence и transport wiring
 остаются post-v1 или открытыми задачами.
 
+`SequencedDomainEvent` вводит positive logical sequence внутри typed owner peer, а `DomainEventOrder` детерминированно
+сортирует записи и отклоняет owner/sequence conflicts. Unit tests покрывают order, conflict и non-positive sequence. Это
+partial evidence для `SYS-009`, `SYS-008` и `AUD-001`; persistent sequencing, replication и transport wiring открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
