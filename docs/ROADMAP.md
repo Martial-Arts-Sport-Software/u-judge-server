@@ -207,6 +207,11 @@ Projection immutable, отвергает недопустимый переход
 transition history. Unit tests покрывают valid, invalid и terminal transitions. Это partial evidence для `SES-001`;
 event journal wiring, persistence, timer, bracket ownership и scoring остаются открыты.
 
+`BracketOwnership` назначает сетке один immutable local `PeerId` и допускает переход `prepared → in_progress` только от
+этого owner. Focused unit tests подтверждают принятие команды owner и rejection чужой команды без изменения projection.
+Это partial evidence для `CMP-005`, `CMP-006` и `SES-002`; P2P claims, ownership transfer, persistence и transport wiring
+остаются post-v1 или открытыми задачами.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

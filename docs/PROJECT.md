@@ -121,6 +121,7 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - `GET /` и versioned `GET /v1/metadata` с protocol version, capabilities, identity площадки, pairing policy и server time;
 - read-only `GET /v1/health` с typed liveness status без персональных данных или credentials;
 - transport-agnostic immutable `SessionProjection` для lifecycle `prepared`, `running`, `paused`, `completed`, `cancelled`;
+- transport-agnostic `BracketOwnership` с immutable local owner для v1 `IN_PROGRESS` workflow;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
