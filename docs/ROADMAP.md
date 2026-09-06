@@ -198,6 +198,10 @@ Focused unit tests покрывают complete audit context и rejection blank 
 fields. Это partial evidence для `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; назначение sequence, durable journal,
 projections, transport wiring и scoring остаются открыты.
 
+Read-only `GET /v1/health` публикует typed liveness status `healthy` для локальной диагностики без pairing identity,
+персональных данных или credentials. Ktor contract test фиксирует JSON response. Это partial evidence для `NFR-008`;
+structured logging, persistence readiness и desktop diagnostics остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
