@@ -220,6 +220,14 @@ logging backend, persistence readiness и desktop diagnostics остаются �
 сортирует записи и отклоняет owner/sequence conflicts. Unit tests покрывают order, conflict и non-positive sequence. Это
 partial evidence для `SYS-009`, `SYS-008` и `AUD-001`; persistent sequencing, replication и transport wiring открыты.
 
+`SessionLifecycleJournal` применяет transport-agnostic lifecycle command только для `IN_PROGRESS` local bracket owner,
+сначала append-ит sequenced event, затем заменяет immutable `SessionProjection`. Re-delivery того же event ID возвращает
+исходный результат, повторное использование ID для другого command и invalid/foreign lifecycle commands не меняют журнал
+или projection; `PeerEventSequence` допускает одну возрастающую sequence для нескольких session journals владельца. Focused
+unit tests покрывают accepted, foreign, invalid, duplicate и conflicting-ID cases. Это partial evidence для `SES-001`,
+`SES-002`, `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; durable journal, rebuild из persisted events, transport wiring,
+timer и scoring остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

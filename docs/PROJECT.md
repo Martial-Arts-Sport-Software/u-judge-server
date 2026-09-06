@@ -124,16 +124,18 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - transport-agnostic `BracketOwnership` с immutable local owner для v1 `IN_PROGRESS` workflow;
 - privacy-safe `DiagnosticContext` с stable IDs без персональных данных и credentials;
 - typed `SequencedDomainEvent` и deterministic per-peer order для доменных событий;
+- transport-agnostic `SessionLifecycleJournal`, который атомарно append-ит owner lifecycle event с общей peer sequence и
+  обновляет immutable session projection; duplicate event ID возвращает исходный результат;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
 
 ### 7.2. Не реализовано в server
 
-- модель соревнования и сеток за пределами typed UUID IDs, transport-agnostic `DomainCommand` и in-memory `DomainEvent`
-  audit envelope для competition, peer, court, bracket, session, judge, device и event; `DomainCommand` принимает полный
-  typed audit context и преобразуется в event только с назначенными event ID и UTC timestamp, но sequence, durable journal,
-  projections и scoring ещё не реализованы;
+- модель соревнования и сеток за пределами typed UUID IDs, transport-agnostic `DomainCommand` и in-memory lifecycle journal
+  для competition, peer, court, bracket, session, judge, device и event; `DomainCommand` принимает полный typed audit context
+  и преобразуется в event только с назначенными event ID и UTC timestamp, но durable journal, rebuild из persisted events,
+  transport wiring и scoring ещё не реализованы;
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
   и помечает его inactive после отзыва без anonymous LAN decision endpoint. Он также проецирует approved device ID, platform
