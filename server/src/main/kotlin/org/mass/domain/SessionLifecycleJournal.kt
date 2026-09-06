@@ -59,16 +59,44 @@ class SessionLifecycleJournal(
     private fun rejected(reason: String, event: DomainEvent) =
         SessionLifecycleResult.Rejected(reason, event.diagnosticContext())
 
-    private fun stateFor(type: String): SessionState? = when (type) {
-        "session_started", "session_resumed" -> SessionState.RUNNING
-        "session_paused" -> SessionState.PAUSED
-        "session_completed" -> SessionState.COMPLETED
-        "session_cancelled" -> SessionState.CANCELLED
-        else -> null
-    }
-
     private fun sameCommand(existing: DomainEvent, candidate: DomainEvent): Boolean =
         existing.copy(occurredAt = candidate.occurredAt) == candidate
+
+    companion object {
+        fun rebuild(
+            ownership: BracketOwnership,
+            sessionId: SessionId,
+            events: Collection<SequencedDomainEvent>,
+        ): SessionProjection {
+            val eventsById = linkedMapOf<EventId, SequencedDomainEvent>()
+            events.forEach { candidate ->
+                val existing = eventsById.putIfAbsent(candidate.event.eventId, candidate)
+                require(existing == null || existing == candidate) {
+                    "Event ID is already assigned to a different event"
+                }
+            }
+            val orderedEvents = DomainEventOrder.order(eventsById.values)
+            require(ownership.state == BracketState.IN_PROGRESS) {
+                "Only the in-progress bracket owner can change its session"
+            }
+            require(orderedEvents.all { event ->
+                event.event.bracketId == ownership.bracketId &&
+                    event.event.sessionId == sessionId &&
+                    event.ownerPeerId == ownership.ownerPeerId
+            }) { "Event does not belong to this owned session" }
+            return SessionProjection.rebuild(sessionId, orderedEvents.map { event ->
+                stateFor(event.event.type) ?: error("Unsupported session lifecycle event")
+            })
+        }
+
+        private fun stateFor(type: String): SessionState? = when (type) {
+            "session_started", "session_resumed" -> SessionState.RUNNING
+            "session_paused" -> SessionState.PAUSED
+            "session_completed" -> SessionState.COMPLETED
+            "session_cancelled" -> SessionState.CANCELLED
+            else -> null
+        }
+    }
 }
 
 class PeerEventSequence(private val ownerPeerId: PeerId) {

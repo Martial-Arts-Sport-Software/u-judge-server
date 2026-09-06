@@ -134,8 +134,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
 
 - модель соревнования и сеток за пределами typed UUID IDs, transport-agnostic `DomainCommand` и in-memory lifecycle journal
   для competition, peer, court, bracket, session, judge, device и event; `DomainCommand` принимает полный typed audit context
-  и преобразуется в event только с назначенными event ID и UTC timestamp, но durable journal, rebuild из persisted events,
-  transport wiring и scoring ещё не реализованы;
+  и преобразуется в event только с назначенными event ID и UTC timestamp. `SessionLifecycleJournal` может rebuild immutable
+  projection из sequenced in-memory lifecycle events с deterministic order и idempotent duplicate delivery, но durable
+  journal, rebuild из persisted events, transport wiring и scoring ещё не реализованы;
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
   и помечает его inactive после отзыва без anonymous LAN decision endpoint. Он также проецирует approved device ID, platform

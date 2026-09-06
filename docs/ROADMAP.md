@@ -224,9 +224,11 @@ partial evidence для `SYS-009`, `SYS-008` и `AUD-001`; persistent sequencing
 сначала append-ит sequenced event, затем заменяет immutable `SessionProjection`. Re-delivery того же event ID возвращает
 исходный результат, повторное использование ID для другого command и invalid/foreign lifecycle commands не меняют журнал
 или projection; `PeerEventSequence` допускает одну возрастающую sequence для нескольких session journals владельца. Focused
-unit tests покрывают accepted, foreign, invalid, duplicate и conflicting-ID cases. Это partial evidence для `SES-001`,
-`SES-002`, `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; durable journal, rebuild из persisted events, transport wiring,
-timer и scoring остаются открыты.
+unit tests покрывают accepted, foreign, invalid, duplicate и conflicting-ID cases. `SessionLifecycleJournal.rebuild()`
+детерминированно применяет logical order sequenced lifecycle events, пропускает идентичную повторную доставку event ID и
+отклоняет конфликтующий ID, lifecycle вне `IN_PROGRESS` ownership и недопустимый порядок переходов. Это partial evidence
+для `SES-001`, `SES-002`, `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; durable journal, rebuild из persisted events,
+transport wiring, timer и scoring остаются открыты.
 
 ### Client
 
