@@ -212,6 +212,10 @@ event journal wiring, persistence, timer, bracket ownership и scoring оста�
 Это partial evidence для `CMP-005`, `CMP-006` и `SES-002`; P2P claims, ownership transfer, persistence и transport wiring
 остаются post-v1 или открытыми задачами.
 
+`DiagnosticContext` производен из `DomainEvent` и содержит только stable entity IDs, без author, surname, payload или
+reconnect credential. Focused unit test подтверждает сохранение IDs. Это partial evidence для `NFR-008` и `SYS-007`;
+logging backend, persistence readiness и desktop diagnostics остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
