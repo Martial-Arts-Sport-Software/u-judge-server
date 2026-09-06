@@ -21,6 +21,8 @@ Desktop-приложение площадки и локальный server U'Jud
 
 Read-only `GET /v1/health` возвращает typed liveness status `healthy` и не раскрывает данные pairing или credentials. Structured logging, persistence readiness и desktop diagnostics ещё не реализованы.
 
+Начата lifecycle projection: immutable `SessionProjection` валидирует переходы `prepared`, `running`, `paused`, `completed` и `cancelled`, а также rebuilds ordered history. Event journal wiring, persistence, timer и scoring ещё не реализованы.
+
 Начат PostgreSQL persistence spike: versioned JDBC migration сохраняет и восстанавливает envelope Stage 1,
 `PostgresProvisioner` готовит configured data directory через `initdb` без перезаписи неизвестных данных до того, как
 `ManagedPostgres` супервизирует сконфигурированный дочерний процесс, и сообщает конфликт loopback-порта, ошибку запуска или

@@ -202,6 +202,11 @@ Read-only `GET /v1/health` публикует typed liveness status `healthy` д
 персональных данных или credentials. Ktor contract test фиксирует JSON response. Это partial evidence для `NFR-008`;
 structured logging, persistence readiness и desktop diagnostics остаются открыты.
 
+`SessionProjection` задаёт transport-agnostic lifecycle `prepared`, `running`, `paused`, `completed` и `cancelled`.
+Projection immutable, отвергает недопустимый переход без изменения текущего state и детерминированно rebuilds ordered
+transition history. Unit tests покрывают valid, invalid и terminal transitions. Это partial evidence для `SES-001`;
+event journal wiring, persistence, timer, bracket ownership и scoring остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
