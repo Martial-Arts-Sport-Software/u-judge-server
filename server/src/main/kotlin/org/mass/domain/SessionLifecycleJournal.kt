@@ -14,16 +14,24 @@ sealed interface SessionLifecycleResult {
     ) : SessionLifecycleResult
 }
 
+interface SessionLifecycleEventJournal {
+    fun apply(command: DomainCommand, eventId: EventId): SessionLifecycleResult
+
+    fun events(): List<SequencedDomainEvent>
+
+    fun projection(): SessionProjection
+}
+
 class SessionLifecycleJournal(
     private val ownership: BracketOwnership,
     private val sessionId: SessionId,
     private val sequence: PeerEventSequence = PeerEventSequence(ownership.ownerPeerId),
     private val now: () -> Instant = Instant::now,
-) {
+) : SessionLifecycleEventJournal {
     private val eventsById = linkedMapOf<EventId, SequencedDomainEvent>()
     private var currentProjection = SessionProjection.initial(sessionId)
 
-    fun apply(command: DomainCommand, eventId: EventId): SessionLifecycleResult {
+    override fun apply(command: DomainCommand, eventId: EventId): SessionLifecycleResult {
         val event = command.toEvent(eventId, now())
         eventsById[eventId]?.let { existing ->
             return if (sameCommand(existing.event, event)) {
@@ -52,9 +60,9 @@ class SessionLifecycleJournal(
         return SessionLifecycleResult.Applied(sequencedEvent, currentProjection)
     }
 
-    fun events(): List<SequencedDomainEvent> = eventsById.values.toList()
+    override fun events(): List<SequencedDomainEvent> = eventsById.values.toList()
 
-    fun projection(): SessionProjection = currentProjection
+    override fun projection(): SessionProjection = currentProjection
 
     private fun rejected(reason: String, event: DomainEvent) =
         SessionLifecycleResult.Rejected(reason, event.diagnosticContext())
