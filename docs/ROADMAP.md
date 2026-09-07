@@ -230,6 +230,10 @@ unit tests покрывают accepted, foreign, invalid, duplicate и conflicti
 для `SES-001`, `SES-002`, `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; durable journal, rebuild из persisted events,
 transport wiring, timer и scoring остаются открыты.
 
+`JdbcSessionLifecycleJournal` сохраняет полный sequenced lifecycle event envelope в versioned JDBC migration до обновления
+проекции и при создании заново rebuilds projection из сохранённых событий. JDBC/H2 integration test подтверждает recovery
+после recreation; duplicate/conflict, transport wiring, реальный PostgreSQL lifecycle и Gate G2 остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
