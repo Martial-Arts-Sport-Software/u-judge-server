@@ -13,6 +13,7 @@ import org.mass.domain.JudgeId
 import org.mass.domain.PeerId
 import org.mass.domain.SessionId
 import org.mass.domain.SessionLifecycleJournal
+import org.mass.domain.SessionLifecycleEventJournal
 import org.mass.domain.SessionLifecycleResult
 import org.mass.domain.SessionProjection
 import org.mass.domain.SessionState
@@ -28,7 +29,7 @@ class JdbcSessionLifecycleJournal(
     private val ownership: BracketOwnership,
     private val sessionId: SessionId,
     private val now: () -> Instant = Instant::now,
-) {
+) : SessionLifecycleEventJournal {
     private var currentProjection: SessionProjection
 
     init {
@@ -37,7 +38,7 @@ class JdbcSessionLifecycleJournal(
     }
 
     @Synchronized
-    fun apply(command: DomainCommand, eventId: EventId): SessionLifecycleResult {
+    override fun apply(command: DomainCommand, eventId: EventId): SessionLifecycleResult {
         val event = command.toEvent(eventId, now())
         findById(eventId)?.let { existing ->
             return if (sameCommand(existing.event, event)) {
@@ -63,7 +64,7 @@ class JdbcSessionLifecycleJournal(
         return SessionLifecycleResult.Applied(sequencedEvent, currentProjection)
     }
 
-    fun events(): List<SequencedDomainEvent> = dataSource.connection.use { connection ->
+    override fun events(): List<SequencedDomainEvent> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             "SELECT * FROM session_lifecycle_events WHERE bracket_id = ? AND session_id = ? " +
                 "ORDER BY owner_peer_id, sequence, event_id",
@@ -76,7 +77,7 @@ class JdbcSessionLifecycleJournal(
         }
     }
 
-    fun projection(): SessionProjection = currentProjection
+    override fun projection(): SessionProjection = currentProjection
 
     private fun append(event: DomainEvent): SequencedDomainEvent = dataSource.connection.use { connection ->
         connection.inTransaction {

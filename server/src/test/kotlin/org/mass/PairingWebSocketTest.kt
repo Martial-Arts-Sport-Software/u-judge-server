@@ -10,6 +10,12 @@ import io.ktor.websocket.send
 import io.ktor.server.testing.testApplication
 import org.h2.jdbcx.JdbcDataSource
 import org.mass.replication.JdbcPeerJournal
+import org.mass.domain.BracketId
+import org.mass.domain.BracketOwnership
+import org.mass.domain.PeerId
+import org.mass.domain.SessionId
+import org.mass.domain.SessionLifecycleJournal
+import org.mass.domain.SessionState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -25,6 +31,94 @@ import java.time.Duration
 import java.time.Instant
 
 class PairingWebSocketTest {
+    @Test
+    fun `authenticated owner lifecycle command updates the projection before its idempotent ACK`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-lifecycle", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val ownerPeerId = "00000000-0000-4000-8000-000000000001"
+        val bracketId = "00000000-0000-4000-8000-000000000002"
+        val sessionId = "00000000-0000-4000-8000-000000000003"
+        val journal = SessionLifecycleJournal(
+            BracketOwnership.assign(BracketId(bracketId), PeerId(ownerPeerId)).start(PeerId(ownerPeerId)),
+            SessionId(sessionId),
+        )
+        application {
+            module(
+                pairingRequests = pairingRequests,
+                lifecycleCommands = RealtimeSessionLifecycleCommands(journal),
+            )
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        val command = """{"type":"session_lifecycle_command","eventId":"00000000-0000-4000-8000-000000000004","competitionId":"00000000-0000-4000-8000-000000000005","peerId":"$ownerPeerId","courtId":"00000000-0000-4000-8000-000000000006","bracketId":"$bracketId","sessionId":"$sessionId","judgeId":"00000000-0000-4000-8000-000000000007","deviceId":"00000000-0000-4000-8000-000000000008","source":"operator","author":"operator-1","eventType":"session_started","payload":"{}"}"""
+        session.send(Frame.Text(command))
+
+        val acknowledgement = session.receiveJson()
+        assertEquals("session_lifecycle_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+        assertEquals("00000000-0000-4000-8000-000000000004", acknowledgement.getValue("eventId").jsonPrimitive.content)
+        assertEquals("running", acknowledgement.getValue("state").jsonPrimitive.content)
+        assertEquals(SessionState.RUNNING, journal.projection().state)
+        assertEquals(1, journal.events().size)
+
+        session.send(Frame.Text(command))
+
+        assertEquals(acknowledgement, session.receiveJson())
+        assertEquals(1, journal.events().size)
+    }
+
+    @Test
+    fun `authenticated realtime rejects an invalid lifecycle event ID without changing the session`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-invalid-lifecycle", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val journal = lifecycleJournal()
+        application {
+            module(pairingRequests = pairingRequests, lifecycleCommands = RealtimeSessionLifecycleCommands(journal))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text(lifecycleCommand(eventId = "not-a-uuid")))
+
+        val rejection = session.receiveJson()
+        assertEquals("session_lifecycle_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("invalid_lifecycle_command", rejection.getValue("code").jsonPrimitive.content)
+        assertEquals(SessionState.PREPARED, journal.projection().state)
+        assertEquals(emptyList(), journal.events())
+    }
+
+    @Test
+    fun `authenticated realtime rejects a foreign lifecycle owner without changing the session`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("ios-foreign-lifecycle", "Petrova", "ios")),
+        )
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+        val journal = lifecycleJournal()
+        application {
+            module(pairingRequests = pairingRequests, lifecycleCommands = RealtimeSessionLifecycleCommands(journal))
+        }
+
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+        session.send(Frame.Text(lifecycleCommand(peerId = "00000000-0000-4000-8000-000000000009")))
+
+        val rejection = session.receiveJson()
+        assertEquals("session_lifecycle_rejected", rejection.getValue("type").jsonPrimitive.content)
+        assertEquals("lifecycle_command_rejected", rejection.getValue("code").jsonPrimitive.content)
+        assertEquals(SessionState.PREPARED, journal.projection().state)
+        assertEquals(emptyList(), journal.events())
+    }
+
     @Test
     fun `authenticated websocket updates the operator device connection projection`() = testApplication {
         val pairingRequests = PairingRequests()
@@ -657,4 +751,17 @@ class PairingWebSocketTest {
         sessionId = "session-1",
         payload = Json.parseToJsonElement("""{"type":"attention"}""").jsonObject,
     )
+
+    private fun lifecycleJournal(): SessionLifecycleJournal {
+        val ownerPeerId = PeerId("00000000-0000-4000-8000-000000000001")
+        return SessionLifecycleJournal(
+            BracketOwnership.assign(BracketId("00000000-0000-4000-8000-000000000002"), ownerPeerId).start(ownerPeerId),
+            SessionId("00000000-0000-4000-8000-000000000003"),
+        )
+    }
+
+    private fun lifecycleCommand(
+        eventId: String = "00000000-0000-4000-8000-000000000004",
+        peerId: String = "00000000-0000-4000-8000-000000000001",
+    ) = """{"type":"session_lifecycle_command","eventId":"$eventId","competitionId":"00000000-0000-4000-8000-000000000005","peerId":"$peerId","courtId":"00000000-0000-4000-8000-000000000006","bracketId":"00000000-0000-4000-8000-000000000002","sessionId":"00000000-0000-4000-8000-000000000003","judgeId":"00000000-0000-4000-8000-000000000007","deviceId":"00000000-0000-4000-8000-000000000008","source":"operator","author":"operator-1","eventType":"session_started","payload":"{}"}"""
 }

@@ -234,6 +234,15 @@ transport wiring, timer и scoring остаются открыты.
 проекции и при создании заново rebuilds projection из сохранённых событий. JDBC/H2 integration test подтверждает recovery
 после recreation; duplicate/conflict, transport wiring, реальный PostgreSQL lifecycle и Gate G2 остаются открыты.
 
+Authenticated `/v1/realtime` now accepts typed `session_lifecycle_command` only through a configured
+`SessionLifecycleEventJournal`. The command carries the complete validated domain audit context, event ID, event type and raw
+payload; an owner command returns `session_lifecycle_ack` only after the journal applies the event and the projection changes.
+An identical retry returns the original ACK without another transition, while malformed IDs and foreign-owner commands receive
+typed rejection without changing the journal or projection. Both in-memory and JDBC lifecycle journals implement this boundary,
+so the latter persists before ACK when supplied. Focused Ktor contract tests are partial evidence for `SES-001`, `SES-002`,
+`SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003` and `NFR-012`; the default server still has no desktop
+datasource or separate operator authorization, and client outbox/reconnect, real PostgreSQL and Gate G2 remain open.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

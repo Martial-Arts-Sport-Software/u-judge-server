@@ -82,6 +82,14 @@ to the final returned event. Unknown or malformed cursors, an unconfigured journ
 The default in-memory command handler intentionally does not provide resync; client replay and active-session snapshots remain
 outside this server-only slice.
 
+An authenticated connection can also send `session_lifecycle_command` with the complete typed domain audit context, an event ID,
+event type, and raw payload. The transport validates every ID and mutable audit field before delegating to a configured
+`SessionLifecycleEventJournal`. Only an applied owner command returns `session_lifecycle_ack` with the resulting projection
+state; invalid, foreign-owner, conflicting, and unavailable commands receive `session_lifecycle_rejected`. Re-delivery returns
+the original ACK without a second transition. The journal boundary is implemented by both in-memory and JDBC lifecycle journals,
+so a supplied JDBC journal commits the event before the ACK. The default server does not yet configure a desktop datasource or
+authorize an operator role separately from the paired realtime credential.
+
 For Kerugi, the default coincidence window is `1000 ms`. For the same participant, all valid score candidates in one window
 resolve deterministically to the minimum candidate score, regardless of arrival order. For example, `1`-point and `2`-point
 candidates resolve to `1` point. All source events and the resolution remain available to audit. The clock-quality threshold
@@ -97,6 +105,8 @@ ADR-004 can be accepted only after contract/integration tests prove:
 - duplicate event retry returns the original terminal outcome without a second application;
 - disconnect/reconnect performs resync before controls re-enable;
 - malformed or oversized HTTP/WebSocket payloads are rejected with typed error codes.
+- a lifecycle command is accepted only after its owner journal applies the event, and retries, malformed IDs, and foreign owners
+  cannot change the session projection twice or at all.
 - clock sync echoes a valid client send timestamp with UTC server receive/send timestamps, and an invalid timestamp is rejected
   without preventing a later valid command on the authenticated connection.
 - score candidates for the same participant in either arrival order and within `1000 ms` resolve to their minimum score,
@@ -111,7 +121,7 @@ ADR-004 can be accepted only after contract/integration tests prove:
 | Version/capability rule | Same protocol major version plus all required capabilities. |
 | Pairing and revocation policy | Explicit operator approval for every new device; revoked devices cannot write. |
 | Credential lifecycle | Reconnect credential in platform secure storage, valid until revocation or rotation. |
-| Realtime message families | Handshake, pairing status, session snapshot, command/event, ACK, rejection, clock sync request/response/rejection, heartbeat/ack/rejection, resync request/response, server notice. |
+| Realtime message families | Handshake, pairing status, session snapshot, command/event, lifecycle command/ack/rejection, clock sync request/response/rejection, heartbeat/ack/rejection, resync request/response, server notice. |
 | Durable ACK rule | Terminal ACK after durable journal commit only. |
 | Reconnect/resync rule | Cursor-based resync and current active-session snapshot before scoring controls re-enable. |
 | Clock-offset method and bound | `clock_sync` echoes the ISO-8601 UTC client send timestamp with UTC server receive/send timestamps; the client calculates the four-timestamp offset/round-trip estimate. The telemetry-validated quality threshold does not change the `1000 ms` coincidence window. |

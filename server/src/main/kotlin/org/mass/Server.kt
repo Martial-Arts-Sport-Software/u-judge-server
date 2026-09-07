@@ -34,6 +34,18 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.mass.replication.JdbcPeerJournal
+import org.mass.domain.BracketId
+import org.mass.domain.CompetitionId
+import org.mass.domain.CourtId
+import org.mass.domain.DeviceId
+import org.mass.domain.DomainCommand
+import org.mass.domain.EventId
+import org.mass.domain.EventSource
+import org.mass.domain.JudgeId
+import org.mass.domain.PeerId
+import org.mass.domain.SessionId
+import org.mass.domain.SessionLifecycleEventJournal
+import org.mass.domain.SessionLifecycleResult
 import java.time.Duration
 import java.time.Instant
 import java.security.SecureRandom
@@ -212,6 +224,78 @@ data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
 
 @Serializable
 data class RealtimeCommandRejected(val type: String, val code: String)
+
+@Serializable
+data class RealtimeSessionLifecycleCommandRequest(
+    val type: String,
+    val eventId: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val source: String,
+    val author: String,
+    val eventType: String,
+    val payload: String,
+)
+
+@Serializable
+data class RealtimeSessionLifecycleAcknowledgement(val type: String, val eventId: String, val state: String)
+
+@Serializable
+data class RealtimeSessionLifecycleRejected(val type: String, val code: String)
+
+class RealtimeSessionLifecycleCommands(private val journal: SessionLifecycleEventJournal) {
+    fun accept(request: RealtimeSessionLifecycleCommandRequest): RealtimeSessionLifecycleOutcome {
+        val command = try {
+            require(request.type == "session_lifecycle_command")
+            DomainCommand(
+                competitionId = CompetitionId(request.competitionId),
+                peerId = PeerId(request.peerId),
+                courtId = CourtId(request.courtId),
+                bracketId = BracketId(request.bracketId),
+                sessionId = SessionId(request.sessionId),
+                judgeId = JudgeId(request.judgeId),
+                deviceId = DeviceId(request.deviceId),
+                source = EventSource(request.source),
+                author = request.author,
+                type = request.eventType,
+                payload = request.payload,
+            )
+        } catch (_: IllegalArgumentException) {
+            return RealtimeSessionLifecycleOutcome.Rejected("invalid_lifecycle_command")
+        }
+        val eventId = try {
+            EventId(request.eventId)
+        } catch (_: IllegalArgumentException) {
+            return RealtimeSessionLifecycleOutcome.Rejected("invalid_lifecycle_command")
+        }
+        val result = try {
+            journal.apply(command, eventId)
+        } catch (_: Exception) {
+            return RealtimeSessionLifecycleOutcome.Rejected("lifecycle_unavailable")
+        }
+        return when (result) {
+            is SessionLifecycleResult.Applied -> RealtimeSessionLifecycleOutcome.Acknowledged(
+                RealtimeSessionLifecycleAcknowledgement(
+                    type = "session_lifecycle_ack",
+                    eventId = result.event.event.eventId.value,
+                    state = result.projection.state.name.lowercase(),
+                ),
+            )
+            is SessionLifecycleResult.Rejected -> RealtimeSessionLifecycleOutcome.Rejected("lifecycle_command_rejected")
+        }
+    }
+}
+
+sealed interface RealtimeSessionLifecycleOutcome {
+    data class Acknowledged(val acknowledgement: RealtimeSessionLifecycleAcknowledgement) : RealtimeSessionLifecycleOutcome
+
+    data class Rejected(val code: String) : RealtimeSessionLifecycleOutcome
+}
 
 @Serializable
 data class RealtimeResyncRequest(val type: String, val cursor: String?)
@@ -499,6 +583,7 @@ fun Application.module(
     metadata: ServerMetadata = ServerMetadata.local(),
     pairingRequests: PairingRequests = PairingRequests(),
     realtimeCommands: RealtimeCommands = RealtimeCommands(),
+    lifecycleCommands: RealtimeSessionLifecycleCommands? = null,
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
 ) {
     install(ContentNegotiation) {
@@ -639,6 +724,31 @@ fun Application.module(
                             is RealtimeResyncOutcome.Resynced -> send(Frame.Text(Json.encodeToString(outcome.response)))
                             is RealtimeResyncOutcome.Rejected -> {
                                 send(Frame.Text(Json.encodeToString(RealtimeResyncRejected("resync_rejected", outcome.code))))
+                            }
+                        }
+                        continue
+                    }
+                    if (messageType == "session_lifecycle_command") {
+                        val request = runCatching {
+                            Json.decodeFromString<RealtimeSessionLifecycleCommandRequest>(commandText)
+                        }.getOrNull()
+                        val outcome = request?.let { lifecycleCommands?.accept(it) }
+                            ?: RealtimeSessionLifecycleOutcome.Rejected("lifecycle_unavailable")
+                        when (outcome) {
+                            is RealtimeSessionLifecycleOutcome.Acknowledged -> {
+                                send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                            }
+                            is RealtimeSessionLifecycleOutcome.Rejected -> {
+                                send(
+                                    Frame.Text(
+                                        Json.encodeToString(
+                                            RealtimeSessionLifecycleRejected(
+                                                "session_lifecycle_rejected",
+                                                outcome.code,
+                                            ),
+                                        ),
+                                    ),
+                                )
                             }
                         }
                         continue
