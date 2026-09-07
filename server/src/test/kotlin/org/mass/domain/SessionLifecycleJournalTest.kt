@@ -59,6 +59,18 @@ class SessionLifecycleJournalTest {
     }
 
     @Test
+    fun `returns the original projection when an earlier event is redelivered after a later transition`() {
+        val journal = journal()
+        val started = assertIs<SessionLifecycleResult.Applied>(journal.apply(command(type = "session_started"), eventId(4)))
+        journal.apply(command(type = "session_paused"), eventId(5))
+
+        val duplicate = assertIs<SessionLifecycleResult.Applied>(journal.apply(command(type = "session_started"), eventId(4)))
+
+        assertEquals(started, duplicate)
+        assertEquals(SessionState.PAUSED, journal.projection().state)
+    }
+
+    @Test
     fun `rejects a different command reusing an accepted event id`() {
         val journal = journal()
 

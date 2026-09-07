@@ -41,6 +41,19 @@ class JdbcSessionLifecycleJournalTest {
         assertEquals(listOf(started.event.event.eventId, eventId(5)), restartedProcess.events().map { it.event.eventId })
     }
 
+    @Test
+    fun `returns the original projection when an earlier persisted event is redelivered`() {
+        val journal = journal(dataSource("lifecycle-idempotency"))
+        val started = assertIs<SessionLifecycleResult.Applied>(journal.apply(command("session_started"), eventId(4)))
+        journal.apply(command("session_paused"), eventId(5))
+
+        val duplicate = assertIs<SessionLifecycleResult.Applied>(journal.apply(command("session_started"), eventId(4)))
+
+        assertEquals(SessionState.RUNNING, duplicate.projection.state)
+        assertEquals(started.event, duplicate.event)
+        assertEquals(SessionState.PAUSED, journal.projection().state)
+    }
+
     private fun journal(dataSource: JdbcDataSource) = JdbcSessionLifecycleJournal(
         dataSource = dataSource,
         ownership = ownership,
