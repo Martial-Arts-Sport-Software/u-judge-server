@@ -162,9 +162,7 @@ class JdbcPeerJournal(
     )
 }
 
-private object JournalSchema {
-    private const val migrationVersion = 1
-
+internal object JournalSchema {
     fun migrate(dataSource: DataSource) {
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
@@ -172,29 +170,39 @@ private object JournalSchema {
                     "CREATE TABLE IF NOT EXISTS u_judge_schema_migrations (version INTEGER PRIMARY KEY)",
                 )
             }
-            if (isApplied(connection)) return
-            connection.inTransaction {
-                val statements = checkNotNull(JournalSchema::class.java.getResourceAsStream("/db/migration/V1__peer_journal.sql"))
-                    .bufferedReader()
-                    .use { it.readText() }
-                    .split(';')
-                    .map(String::trim)
-                    .filter(String::isNotEmpty)
-                connection.createStatement().use { statement -> statements.forEach(statement::executeUpdate) }
-                connection.prepareStatement("INSERT INTO u_judge_schema_migrations (version) VALUES (?)").use { statement ->
-                    statement.setInt(1, migrationVersion)
-                    statement.executeUpdate()
+            migrations.forEach { migration ->
+                if (!isApplied(connection, migration.version)) {
+                    connection.inTransaction {
+                        val statements = checkNotNull(JournalSchema::class.java.getResourceAsStream(migration.resourcePath))
+                            .bufferedReader()
+                            .use { it.readText() }
+                            .split(';')
+                            .map(String::trim)
+                            .filter(String::isNotEmpty)
+                        connection.createStatement().use { statement -> statements.forEach(statement::executeUpdate) }
+                        connection.prepareStatement("INSERT INTO u_judge_schema_migrations (version) VALUES (?)").use { statement ->
+                            statement.setInt(1, migration.version)
+                            statement.executeUpdate()
+                        }
+                    }
                 }
             }
         }
     }
 
-    private fun isApplied(connection: Connection): Boolean = connection.prepareStatement(
+    private fun isApplied(connection: Connection, migrationVersion: Int): Boolean = connection.prepareStatement(
         "SELECT 1 FROM u_judge_schema_migrations WHERE version = ?",
     ).use { statement ->
         statement.setInt(1, migrationVersion)
         statement.executeQuery().use { it.next() }
     }
+
+    private data class Migration(val version: Int, val resourcePath: String)
+
+    private val migrations = listOf(
+        Migration(1, "/db/migration/V1__peer_journal.sql"),
+        Migration(2, "/db/migration/V2__session_lifecycle_events.sql"),
+    )
 
     private fun Connection.inTransaction(block: () -> Unit) {
         val originalAutoCommit = autoCommit
