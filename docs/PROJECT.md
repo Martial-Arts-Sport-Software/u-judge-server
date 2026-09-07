@@ -128,6 +128,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
   обновляет immutable session projection; duplicate event ID возвращает исходный результат;
 - `JdbcSessionLifecycleJournal`, сохраняющий полный lifecycle event envelope до обновления проекции и восстанавливающий
   immutable projection из JDBC journal после recreation в integration-тесте;
+- authenticated realtime `session_lifecycle_command`, который валидирует полный domain audit context и получает ACK только
+  после применения owner event через общий in-memory/JDBC lifecycle journal; retry не меняет projection второй раз, а
+  malformed и foreign-owner commands получают typed rejection;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
@@ -138,7 +141,8 @@ Authoritative source для v1 Pilot — предоставленный «Про
   для competition, peer, court, bracket, session, judge, device и event; `DomainCommand` принимает полный typed audit context
   и преобразуется в event только с назначенными event ID и UTC timestamp. `SessionLifecycleJournal` может rebuild immutable
    projection из sequenced in-memory lifecycle events с deterministic order и idempotent duplicate delivery. Отдельный
-   `JdbcSessionLifecycleJournal` покрывает durable lifecycle envelope и rebuild при recreation, но transport wiring,
+   `JdbcSessionLifecycleJournal` покрывает durable lifecycle envelope и rebuild при recreation; authenticated transport
+   boundary lifecycle commands уже использует общий journal contract, но desktop datasource, separate operator authorization,
    scoring и real-PostgreSQL acceptance ещё не реализованы;
 - secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
   идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
