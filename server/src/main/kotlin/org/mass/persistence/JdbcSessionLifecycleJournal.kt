@@ -42,7 +42,7 @@ class JdbcSessionLifecycleJournal(
         val event = command.toEvent(eventId, now())
         findById(eventId)?.let { existing ->
             return if (sameCommand(existing.event, event)) {
-                SessionLifecycleResult.Applied(existing, currentProjection)
+                SessionLifecycleResult.Applied(existing, projectionAt(existing))
             } else {
                 rejected("Event ID is already assigned to a different command", event)
             }
@@ -78,6 +78,12 @@ class JdbcSessionLifecycleJournal(
     }
 
     override fun projection(): SessionProjection = currentProjection
+
+    private fun projectionAt(event: SequencedDomainEvent): SessionProjection = SessionLifecycleJournal.rebuild(
+        ownership,
+        sessionId,
+        events().filter { it.sequence <= event.sequence },
+    )
 
     private fun append(event: DomainEvent): SequencedDomainEvent = dataSource.connection.use { connection ->
         connection.inTransaction {

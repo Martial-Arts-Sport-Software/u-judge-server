@@ -29,13 +29,14 @@ class SessionLifecycleJournal(
     private val now: () -> Instant = Instant::now,
 ) : SessionLifecycleEventJournal {
     private val eventsById = linkedMapOf<EventId, SequencedDomainEvent>()
+    private val projectionsByEventId = mutableMapOf<EventId, SessionProjection>()
     private var currentProjection = SessionProjection.initial(sessionId)
 
     override fun apply(command: DomainCommand, eventId: EventId): SessionLifecycleResult {
         val event = command.toEvent(eventId, now())
         eventsById[eventId]?.let { existing ->
             return if (sameCommand(existing.event, event)) {
-                SessionLifecycleResult.Applied(existing, currentProjection)
+                SessionLifecycleResult.Applied(existing, projectionsByEventId.getValue(eventId))
             } else {
                 rejected("Event ID is already assigned to a different command", event)
             }
@@ -56,6 +57,7 @@ class SessionLifecycleJournal(
         }
         val sequencedEvent = SequencedDomainEvent(event, sequence.next(event.peerId))
         eventsById[eventId] = sequencedEvent
+        projectionsByEventId[eventId] = nextProjection
         currentProjection = nextProjection
         return SessionLifecycleResult.Applied(sequencedEvent, currentProjection)
     }
