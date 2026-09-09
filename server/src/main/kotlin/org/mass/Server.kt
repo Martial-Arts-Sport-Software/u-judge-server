@@ -20,6 +20,7 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
@@ -50,6 +51,7 @@ import java.time.Duration
 import java.time.Instant
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.Collections
 import java.util.UUID
 
 /** Metadata a mobile client uses to validate a server before pairing. */
@@ -248,6 +250,33 @@ data class RealtimeSessionLifecycleAcknowledgement(val type: String, val eventId
 @Serializable
 data class RealtimeSessionLifecycleRejected(val type: String, val code: String)
 
+@Serializable
+data class RealtimeSessionStateUpdated(
+    val type: String,
+    val sessionId: String,
+    val state: String,
+)
+
+class RealtimeSessionStatePublisher {
+    private val subscribers = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
+
+    fun subscribe(session: WebSocketSession) {
+        subscribers += session
+    }
+
+    fun unsubscribe(session: WebSocketSession) {
+        subscribers -= session
+    }
+
+    suspend fun publish(update: RealtimeSessionStateUpdated) {
+        val recipients = synchronized(subscribers) { subscribers.toList() }
+        recipients.forEach { session ->
+            runCatching { session.send(Frame.Text(Json.encodeToString(update))) }
+                .onFailure { unsubscribe(session) }
+        }
+    }
+}
+
 class RealtimeSessionLifecycleCommands(private val journal: SessionLifecycleEventJournal) {
     fun accept(request: RealtimeSessionLifecycleCommandRequest): RealtimeSessionLifecycleOutcome {
         val command = try {
@@ -285,6 +314,8 @@ class RealtimeSessionLifecycleCommands(private val journal: SessionLifecycleEven
                     eventId = result.event.event.eventId.value,
                     state = result.projection.state.name.lowercase(),
                 ),
+                result.projection.sessionId.value,
+                result.isNew,
             )
             is SessionLifecycleResult.Rejected -> RealtimeSessionLifecycleOutcome.Rejected("lifecycle_command_rejected")
         }
@@ -292,7 +323,11 @@ class RealtimeSessionLifecycleCommands(private val journal: SessionLifecycleEven
 }
 
 sealed interface RealtimeSessionLifecycleOutcome {
-    data class Acknowledged(val acknowledgement: RealtimeSessionLifecycleAcknowledgement) : RealtimeSessionLifecycleOutcome
+    data class Acknowledged(
+        val acknowledgement: RealtimeSessionLifecycleAcknowledgement,
+        val sessionId: String,
+        val isNew: Boolean,
+    ) : RealtimeSessionLifecycleOutcome
 
     data class Rejected(val code: String) : RealtimeSessionLifecycleOutcome
 }
@@ -584,6 +619,7 @@ fun Application.module(
     pairingRequests: PairingRequests = PairingRequests(),
     realtimeCommands: RealtimeCommands = RealtimeCommands(),
     lifecycleCommands: RealtimeSessionLifecycleCommands? = null,
+    lifecycleStatePublisher: RealtimeSessionStatePublisher = RealtimeSessionStatePublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
 ) {
     install(ContentNegotiation) {
@@ -646,6 +682,7 @@ fun Application.module(
             }
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
             pairingRequests.connected(reconnectCredential)
+            lifecycleStatePublisher.subscribe(this)
             val heartbeatTracker = RealtimeHeartbeatTracker(heartbeatTimeout)
             heartbeatTracker.connected(reconnectCredential)
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
@@ -737,6 +774,15 @@ fun Application.module(
                         when (outcome) {
                             is RealtimeSessionLifecycleOutcome.Acknowledged -> {
                                 send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                                if (outcome.isNew) {
+                                    lifecycleStatePublisher.publish(
+                                        RealtimeSessionStateUpdated(
+                                            type = "session_state_updated",
+                                            sessionId = outcome.sessionId,
+                                            state = outcome.acknowledgement.state,
+                                        ),
+                                    )
+                                }
                             }
                             is RealtimeSessionLifecycleOutcome.Rejected -> {
                                 send(
@@ -766,6 +812,7 @@ fun Application.module(
                 timeoutJob.cancel()
                 heartbeatTracker.disconnected(reconnectCredential)
                 pairingRequests.disconnected(reconnectCredential)
+                lifecycleStatePublisher.unsubscribe(this)
             }
         }
     }
