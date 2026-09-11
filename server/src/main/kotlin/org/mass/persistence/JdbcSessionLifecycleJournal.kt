@@ -42,7 +42,7 @@ class JdbcSessionLifecycleJournal(
         val event = command.toEvent(eventId, now())
         findById(eventId)?.let { existing ->
             return if (sameCommand(existing.event, event)) {
-                SessionLifecycleResult.Applied(existing, projectionAt(existing))
+                SessionLifecycleResult.Applied(existing, projectionAt(existing), isNew = false)
             } else {
                 rejected("Event ID is already assigned to a different command", event)
             }

@@ -243,6 +243,12 @@ so the latter persists before ACK when supplied. Focused Ktor contract tests are
 `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003` and `NFR-012`; the default server still has no desktop
 datasource or separate operator authorization, and client outbox/reconnect, real PostgreSQL and Gate G2 remain open.
 
+After an accepted new lifecycle event, `/v1/realtime` publishes the typed `session_state_updated` projection containing the
+session ID and state to every currently authenticated socket, including the sender after its ACK. Idempotent retries and
+rejected lifecycle commands publish no update. A two-socket Ktor contract test is partial server-side evidence for `SES-004`,
+`NET-001` and `NFR-012`; watcher authorization/UI, persistent subscription cursors, client reconnect/outbox, desktop datasource,
+real PostgreSQL and Gate G2 remain open.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

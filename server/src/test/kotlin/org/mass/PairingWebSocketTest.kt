@@ -27,10 +27,64 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Duration
 import java.time.Instant
 
 class PairingWebSocketTest {
+    @Test
+    fun `accepted lifecycle command publishes one state update to authenticated subscribers`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val sender = approvedDevice(pairingRequests, "ios-lifecycle-sender", "Petrova", "ios")
+        val subscriber = approvedDevice(pairingRequests, "android-lifecycle-subscriber", "Ivanov", "android")
+        val journal = lifecycleJournal()
+        application {
+            module(pairingRequests = pairingRequests, lifecycleCommands = RealtimeSessionLifecycleCommands(journal))
+        }
+
+        val client = createClient { install(WebSockets) }
+        val senderSession = client.webSocketSession("/v1/realtime")
+        val subscriberSession = client.webSocketSession("/v1/realtime")
+        senderSession.sendHandshake(sender.request.reconnectCredential)
+        subscriberSession.sendHandshake(subscriber.request.reconnectCredential)
+        senderSession.receiveJson()
+        subscriberSession.receiveJson()
+
+        senderSession.send(Frame.Text(lifecycleCommand()))
+
+        assertEquals("session_lifecycle_ack", senderSession.receiveJson().getValue("type").jsonPrimitive.content)
+        assertSessionStateUpdate(senderSession.receiveJson())
+        assertSessionStateUpdate(subscriberSession.receiveJson())
+
+        senderSession.send(Frame.Text(lifecycleCommand()))
+
+        assertEquals("session_lifecycle_ack", senderSession.receiveJson().getValue("type").jsonPrimitive.content)
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+    }
+
+    @Test
+    fun `rejected lifecycle command does not publish a state update`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val sender = approvedDevice(pairingRequests, "ios-lifecycle-rejected", "Petrova", "ios")
+        val subscriber = approvedDevice(pairingRequests, "android-lifecycle-rejected", "Ivanov", "android")
+        application {
+            module(pairingRequests = pairingRequests, lifecycleCommands = RealtimeSessionLifecycleCommands(lifecycleJournal()))
+        }
+
+        val client = createClient { install(WebSockets) }
+        val senderSession = client.webSocketSession("/v1/realtime")
+        val subscriberSession = client.webSocketSession("/v1/realtime")
+        senderSession.sendHandshake(sender.request.reconnectCredential)
+        subscriberSession.sendHandshake(subscriber.request.reconnectCredential)
+        senderSession.receiveJson()
+        subscriberSession.receiveJson()
+
+        senderSession.send(Frame.Text(lifecycleCommand(eventId = "not-a-uuid")))
+
+        assertEquals("session_lifecycle_rejected", senderSession.receiveJson().getValue("type").jsonPrimitive.content)
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+    }
+
     @Test
     fun `authenticated owner lifecycle command updates the projection before its idempotent ACK`() = testApplication {
         val pairingRequests = PairingRequests()
@@ -62,6 +116,7 @@ class PairingWebSocketTest {
         assertEquals("session_lifecycle_ack", acknowledgement.getValue("type").jsonPrimitive.content)
         assertEquals("00000000-0000-4000-8000-000000000004", acknowledgement.getValue("eventId").jsonPrimitive.content)
         assertEquals("running", acknowledgement.getValue("state").jsonPrimitive.content)
+        assertSessionStateUpdate(session.receiveJson())
         assertEquals(SessionState.RUNNING, journal.projection().state)
         assertEquals(1, journal.events().size)
 
@@ -758,6 +813,24 @@ class PairingWebSocketTest {
             BracketOwnership.assign(BracketId("00000000-0000-4000-8000-000000000002"), ownerPeerId).start(ownerPeerId),
             SessionId("00000000-0000-4000-8000-000000000003"),
         )
+    }
+
+    private fun approvedDevice(
+        pairingRequests: PairingRequests,
+        deviceId: String,
+        surname: String,
+        platform: String,
+    ): PairingApproval.Accepted {
+        val pending = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand(deviceId, surname, platform)),
+        )
+        return assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
+    }
+
+    private fun assertSessionStateUpdate(message: kotlinx.serialization.json.JsonObject) {
+        assertEquals("session_state_updated", message["type"]?.jsonPrimitive?.content, message.toString())
+        assertEquals("00000000-0000-4000-8000-000000000003", message.getValue("sessionId").jsonPrimitive.content)
+        assertEquals("running", message.getValue("state").jsonPrimitive.content)
     }
 
     private fun lifecycleCommand(

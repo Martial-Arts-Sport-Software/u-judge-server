@@ -3,10 +3,16 @@ package org.mass.domain
 import java.time.Instant
 
 sealed interface SessionLifecycleResult {
-    data class Applied(
+    class Applied(
         val event: SequencedDomainEvent,
         val projection: SessionProjection,
-    ) : SessionLifecycleResult
+        val isNew: Boolean = true,
+    ) : SessionLifecycleResult {
+        override fun equals(other: Any?): Boolean = other is Applied &&
+            event == other.event && projection == other.projection
+
+        override fun hashCode(): Int = 31 * event.hashCode() + projection.hashCode()
+    }
 
     data class Rejected(
         val reason: String,
@@ -36,7 +42,7 @@ class SessionLifecycleJournal(
         val event = command.toEvent(eventId, now())
         eventsById[eventId]?.let { existing ->
             return if (sameCommand(existing.event, event)) {
-                SessionLifecycleResult.Applied(existing, projectionsByEventId.getValue(eventId))
+                SessionLifecycleResult.Applied(existing, projectionsByEventId.getValue(eventId), isNew = false)
             } else {
                 rejected("Event ID is already assigned to a different command", event)
             }
