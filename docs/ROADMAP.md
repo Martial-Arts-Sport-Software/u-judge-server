@@ -249,6 +249,16 @@ rejected lifecycle commands publish no update. A two-socket Ktor contract test i
 `NET-001` and `NFR-012`; watcher authorization/UI, persistent subscription cursors, client reconnect/outbox, desktop datasource,
 real PostgreSQL and Gate G2 remain open.
 
+`KerugiScoringEngine` вводит transport-agnostic, детерминированную основу первого Kerugi slice: конфигурация принимает
+ровно 2 или 3 боковых судьи, quorum и положительное coincidence window (по умолчанию 2 и `1000 мс`); кандидат содержит
+судью, участника, `HEAD`/`BODY` и уже скорректированный к server clock UTC timestamp. Движок группирует кандидаты одного
+участника в непересекающиеся окна, учитывает только distinct configured judges, назначает `BODY=1`/`HEAD=2`, а при
+конфликтующих кандидатах в успешном окне применяет минимальную оценку. Every window, including insufficient quorum,
+retains event IDs and typed decision for audit; identical duplicate event IDs are applied once and conflicting reuse is
+rejected. Focused unit tests cover configuration bounds, rule vectors, window boundary, insufficient/duplicate/foreign
+judge cases. This is partial evidence for `KER-001` through `KER-005`, `NET-003`, `NET-004` and `NFR-011`; realtime
+command wiring, durable event journal, corrections, operator actions, timer and client/device acceptance remain open.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
