@@ -269,6 +269,12 @@ conflicting event ID не меняют журнал. Authenticated `/v1/realtime
 throws/spins/Gamjeom/corrections, timer, desktop datasource wiring, client durable outbox/reconnect и physical-device
 acceptance остаются открыты.
 
+После каждого нового принятого `kerugi_score_command` `/v1/realtime` публикует typed `kerugi_score_updated` с session ID и
+authoritative blue/red totals всем текущим authenticated sockets, включая sender после ACK. Identical retries и rejected
+commands не публикуют update. Two-socket Ktor contract test является partial server-side evidence для `KER-001` through
+`KER-005`, `KER-009`, `SES-004`, `NET-001`, `NET-003`, `NFR-011` и `NFR-012`; watcher authorization/UI, persistent
+subscription cursors, desktop datasource, client reconnect/outbox и physical-device acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

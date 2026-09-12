@@ -6,6 +6,7 @@ import io.ktor.server.testing.testApplication
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -23,6 +24,43 @@ import kotlin.test.assertIs
 
 class KerugiWebSocketTest {
     @Test
+    fun `accepted Kerugi score command publishes one projection update to authenticated subscribers`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val sender = approvedDevice(pairingRequests, "ios-kerugi-sender", "Petrova", "ios")
+        val subscriber = approvedDevice(pairingRequests, "android-kerugi-subscriber", "Ivanov", "android")
+        application {
+            module(pairingRequests = pairingRequests, kerugiScoreCommands = RealtimeKerugiScoreCommands(journal()))
+        }
+
+        val client = createClient { install(WebSockets) }
+        val senderSession = client.webSocketSession("/v1/realtime")
+        val subscriberSession = client.webSocketSession("/v1/realtime")
+        senderSession.sendHandshake(sender.request.reconnectCredential)
+        subscriberSession.sendHandshake(subscriber.request.reconnectCredential)
+        senderSession.receiveJson()
+        subscriberSession.receiveJson()
+
+        senderSession.send(Frame.Text(command(10, 7, "HEAD", 0)))
+        assertEquals("kerugi_score_ack", senderSession.receiveJson().getValue("type").jsonPrimitive.content)
+        assertScoreUpdate(senderSession.receiveJson(), 0, 0)
+        assertScoreUpdate(subscriberSession.receiveJson(), 0, 0)
+
+        senderSession.send(Frame.Text(command(11, 8, "BODY", 500)))
+        val acknowledgement = senderSession.receiveJson()
+        assertEquals("kerugi_score_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+        assertScoreUpdate(senderSession.receiveJson(), 1, 0)
+        assertScoreUpdate(subscriberSession.receiveJson(), 1, 0)
+
+        senderSession.send(Frame.Text(command(11, 8, "BODY", 500)))
+        assertEquals(acknowledgement, senderSession.receiveJson())
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+
+        senderSession.send(Frame.Text(command(12, 9, "HEAD", 750)))
+        assertEquals("kerugi_score_rejected", senderSession.receiveJson().getValue("type").jsonPrimitive.content)
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+    }
+
+    @Test
     fun `authenticated judges receive an idempotent Kerugi ACK after the score projection is applied`() = testApplication {
         val pairingRequests = PairingRequests()
         val accepted = approvedDevice(pairingRequests)
@@ -36,10 +74,12 @@ class KerugiWebSocketTest {
 
         session.send(Frame.Text(command(10, 7, "HEAD", 0)))
         assertEquals("0", session.receiveJson().getValue("blueScore").jsonPrimitive.content)
+        assertScoreUpdate(session.receiveJson(), 0, 0)
         session.send(Frame.Text(command(11, 8, "BODY", 500)))
         val acknowledgement = session.receiveJson()
         assertEquals("kerugi_score_ack", acknowledgement.getValue("type").jsonPrimitive.content)
         assertEquals("1", acknowledgement.getValue("blueScore").jsonPrimitive.content)
+        assertScoreUpdate(session.receiveJson(), 1, 0)
         session.send(Frame.Text(command(11, 8, "BODY", 500)))
         assertEquals(acknowledgement, session.receiveJson())
 
@@ -76,9 +116,14 @@ class KerugiWebSocketTest {
         )
     }
 
-    private fun approvedDevice(pairingRequests: PairingRequests): PairingApproval.Accepted {
+    private fun approvedDevice(
+        pairingRequests: PairingRequests,
+        deviceId: String = "ios-kerugi",
+        surname: String = "Petrova",
+        platform: String = "ios",
+    ): PairingApproval.Accepted {
         val pending = assertIs<PairingSubmission.Pending>(
-            pairingRequests.submit(PairingRequestCommand("ios-kerugi", "Petrova", "ios")),
+            pairingRequests.submit(PairingRequestCommand(deviceId, surname, platform)),
         )
         return assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId))
     }
@@ -89,6 +134,17 @@ class KerugiWebSocketTest {
     private suspend fun io.ktor.websocket.WebSocketSession.receiveJson() = Json.parseToJsonElement(
         (incoming.receive() as Frame.Text).readText(),
     ).jsonObject
+
+    private suspend fun io.ktor.websocket.WebSocketSession.sendHandshake(reconnectCredential: String) {
+        send(Frame.Text("""{"type":"handshake","protocolVersion":"1.0","reconnectCredential":"$reconnectCredential"}"""))
+    }
+
+    private fun assertScoreUpdate(message: kotlinx.serialization.json.JsonObject, blueScore: Int, redScore: Int) {
+        assertEquals("kerugi_score_updated", message.getValue("type").jsonPrimitive.content)
+        assertEquals("00000000-0000-4000-8000-000000000003", message.getValue("sessionId").jsonPrimitive.content)
+        assertEquals(blueScore.toString(), message.getValue("blueScore").jsonPrimitive.content)
+        assertEquals(redScore.toString(), message.getValue("redScore").jsonPrimitive.content)
+    }
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")
 }
