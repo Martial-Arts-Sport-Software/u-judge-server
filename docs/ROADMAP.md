@@ -259,6 +259,16 @@ rejected. Focused unit tests cover configuration bounds, rule vectors, window bo
 judge cases. This is partial evidence for `KER-001` through `KER-005`, `NET-003`, `NET-004` and `NFR-011`; realtime
 command wiring, durable event journal, corrections, operator actions, timer and client/device acceptance remain open.
 
+`KerugiScoreJournal` теперь принимает только полный domain command типа `kerugi_score_candidate`, валидирует принадлежность
+in-progress local bracket и состав боковых судей, append-ит raw candidate до пересчёта immutable score projection и
+детерминированно rebuilds score/audit из sequenced events. `JdbcKerugiScoreJournal` сохраняет полный envelope в migration
+`V3` и восстанавливает projection после recreation; identical retry возвращает исходный ACK/projection, а foreign judge и
+conflicting event ID не меняют журнал. Authenticated `/v1/realtime` принимает строго typed `kerugi_score_command` и
+возвращает `kerugi_score_ack` только после применения journal. Domain, H2 и Ktor contract tests являются partial evidence
+для `KER-001` through `KER-005`, `KER-009`, `NET-001`, `NET-003`, `NFR-011` и `NFR-012`; score projection publication, operator
+throws/spins/Gamjeom/corrections, timer, desktop datasource wiring, client durable outbox/reconnect и physical-device
+acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
