@@ -43,6 +43,12 @@ import org.mass.domain.DomainCommand
 import org.mass.domain.EventId
 import org.mass.domain.EventSource
 import org.mass.domain.JudgeId
+import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
+import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiScoreCandidatePayload
+import org.mass.domain.KerugiScoreEventJournal
+import org.mass.domain.KerugiScoreResult
+import org.mass.domain.KerugiScoringArea
 import org.mass.domain.PeerId
 import org.mass.domain.SessionId
 import org.mass.domain.SessionLifecycleEventJournal
@@ -256,6 +262,67 @@ data class RealtimeSessionStateUpdated(
     val sessionId: String,
     val state: String,
 )
+
+@Serializable
+data class RealtimeKerugiScoreCommandRequest(
+    val type: String,
+    val eventId: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val source: String,
+    val author: String,
+    val competitor: KerugiCompetitor,
+    val area: KerugiScoringArea,
+    val occurredAt: String,
+)
+
+@Serializable
+data class RealtimeKerugiScoreAcknowledgement(val type: String, val eventId: String, val blueScore: Int, val redScore: Int)
+
+@Serializable
+data class RealtimeKerugiScoreRejected(val type: String, val code: String)
+
+class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) {
+    fun accept(request: RealtimeKerugiScoreCommandRequest): RealtimeKerugiScoreOutcome {
+        val eventId = try {
+            require(request.type == "kerugi_score_command")
+            val occurredAt = Instant.parse(request.occurredAt)
+            val payload = Json.encodeToString(KerugiScoreCandidatePayload(request.competitor, request.area, occurredAt.toString()))
+            val command = DomainCommand(
+                CompetitionId(request.competitionId), PeerId(request.peerId), CourtId(request.courtId), BracketId(request.bracketId),
+                SessionId(request.sessionId), JudgeId(request.judgeId), DeviceId(request.deviceId), EventSource(request.source),
+                request.author, KERUGI_SCORE_CANDIDATE_EVENT, payload,
+            )
+            EventId(request.eventId) to command
+        } catch (_: IllegalArgumentException) {
+            return RealtimeKerugiScoreOutcome.Rejected("invalid_kerugi_score_command")
+        }
+        return try {
+            when (val result = journal.apply(eventId.second, eventId.first)) {
+                is KerugiScoreResult.Applied -> RealtimeKerugiScoreOutcome.Acknowledged(
+                    RealtimeKerugiScoreAcknowledgement(
+                        "kerugi_score_ack", result.event.event.eventId.value,
+                        result.projection.blueScore, result.projection.redScore,
+                    ),
+                )
+                is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_score_command_rejected")
+            }
+        } catch (_: Exception) {
+            RealtimeKerugiScoreOutcome.Rejected("kerugi_score_unavailable")
+        }
+    }
+}
+
+sealed interface RealtimeKerugiScoreOutcome {
+    data class Acknowledged(val acknowledgement: RealtimeKerugiScoreAcknowledgement) : RealtimeKerugiScoreOutcome
+
+    data class Rejected(val code: String) : RealtimeKerugiScoreOutcome
+}
 
 class RealtimeSessionStatePublisher {
     private val subscribers = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
@@ -619,6 +686,7 @@ fun Application.module(
     pairingRequests: PairingRequests = PairingRequests(),
     realtimeCommands: RealtimeCommands = RealtimeCommands(),
     lifecycleCommands: RealtimeSessionLifecycleCommands? = null,
+    kerugiScoreCommands: RealtimeKerugiScoreCommands? = null,
     lifecycleStatePublisher: RealtimeSessionStatePublisher = RealtimeSessionStatePublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
 ) {
@@ -792,6 +860,28 @@ fun Application.module(
                                                 "session_lifecycle_rejected",
                                                 outcome.code,
                                             ),
+                                        ),
+                                    ),
+                                )
+                            }
+                        }
+                        continue
+                    }
+                    if (messageType == "kerugi_score_command") {
+                        val request = runCatching {
+                            Json.decodeFromString<RealtimeKerugiScoreCommandRequest>(commandText)
+                        }.getOrNull()
+                        val outcome = request?.let { kerugiScoreCommands?.accept(it) }
+                            ?: RealtimeKerugiScoreOutcome.Rejected("kerugi_score_unavailable")
+                        when (outcome) {
+                            is RealtimeKerugiScoreOutcome.Acknowledged -> {
+                                send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                            }
+                            is RealtimeKerugiScoreOutcome.Rejected -> {
+                                send(
+                                    Frame.Text(
+                                        Json.encodeToString(
+                                            RealtimeKerugiScoreRejected("kerugi_score_rejected", outcome.code),
                                         ),
                                     ),
                                 )
