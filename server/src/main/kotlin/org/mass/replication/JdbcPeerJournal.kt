@@ -202,6 +202,7 @@ internal object JournalSchema {
     private val migrations = listOf(
         Migration(1, "/db/migration/V1__peer_journal.sql"),
         Migration(2, "/db/migration/V2__session_lifecycle_events.sql"),
+        Migration(3, "/db/migration/V3__kerugi_score_events.sql"),
     )
 
     private fun Connection.inTransaction(block: () -> Unit) {

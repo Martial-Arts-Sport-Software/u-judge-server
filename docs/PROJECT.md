@@ -131,6 +131,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
 - authenticated realtime `session_lifecycle_command`, который валидирует полный domain audit context и получает ACK только
   после применения owner event через общий in-memory/JDBC lifecycle journal; retry не меняет projection второй раз, а
   malformed и foreign-owner commands получают typed rejection;
+- transport-agnostic `KerugiScoreJournal` и `JdbcKerugiScoreJournal`, которые append-ят raw `HEAD`/`BODY` candidate с
+  полным audit envelope до пересчёта deterministic score/audit projection и восстанавливают его из JDBC journal; realtime
+  `kerugi_score_command` получает idempotent ACK только после применения configured journal;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
@@ -153,7 +156,8 @@ Authoritative source для v1 Pilot — предоставленный «Про
   получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
   idle socket с `heartbeat_timeout`, но client scheduling, persistent device state и physical-device evidence не реализованы.
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
-- таймер, scoring и формулы дисциплин;
+- операторские Kerugi actions, таймер и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum scoring и durable
+  journal уже существуют, но publication score projection, desktop datasource wiring и physical-device acceptance открыты;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
