@@ -287,6 +287,14 @@ data class RealtimeKerugiScoreAcknowledgement(val type: String, val eventId: Str
 @Serializable
 data class RealtimeKerugiScoreRejected(val type: String, val code: String)
 
+@Serializable
+data class RealtimeKerugiScoreUpdated(
+    val type: String,
+    val sessionId: String,
+    val blueScore: Int,
+    val redScore: Int,
+)
+
 class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) {
     fun accept(request: RealtimeKerugiScoreCommandRequest): RealtimeKerugiScoreOutcome {
         val eventId = try {
@@ -309,6 +317,8 @@ class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) 
                         "kerugi_score_ack", result.event.event.eventId.value,
                         result.projection.blueScore, result.projection.redScore,
                     ),
+                    result.event.event.sessionId.value,
+                    result.isNew,
                 )
                 is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_score_command_rejected")
             }
@@ -319,7 +329,11 @@ class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) 
 }
 
 sealed interface RealtimeKerugiScoreOutcome {
-    data class Acknowledged(val acknowledgement: RealtimeKerugiScoreAcknowledgement) : RealtimeKerugiScoreOutcome
+    data class Acknowledged(
+        val acknowledgement: RealtimeKerugiScoreAcknowledgement,
+        val sessionId: String,
+        val isNew: Boolean,
+    ) : RealtimeKerugiScoreOutcome
 
     data class Rejected(val code: String) : RealtimeKerugiScoreOutcome
 }
@@ -336,6 +350,26 @@ class RealtimeSessionStatePublisher {
     }
 
     suspend fun publish(update: RealtimeSessionStateUpdated) {
+        val recipients = synchronized(subscribers) { subscribers.toList() }
+        recipients.forEach { session ->
+            runCatching { session.send(Frame.Text(Json.encodeToString(update))) }
+                .onFailure { unsubscribe(session) }
+        }
+    }
+}
+
+class RealtimeKerugiScorePublisher {
+    private val subscribers = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
+
+    fun subscribe(session: WebSocketSession) {
+        subscribers += session
+    }
+
+    fun unsubscribe(session: WebSocketSession) {
+        subscribers -= session
+    }
+
+    suspend fun publish(update: RealtimeKerugiScoreUpdated) {
         val recipients = synchronized(subscribers) { subscribers.toList() }
         recipients.forEach { session ->
             runCatching { session.send(Frame.Text(Json.encodeToString(update))) }
@@ -688,6 +722,7 @@ fun Application.module(
     lifecycleCommands: RealtimeSessionLifecycleCommands? = null,
     kerugiScoreCommands: RealtimeKerugiScoreCommands? = null,
     lifecycleStatePublisher: RealtimeSessionStatePublisher = RealtimeSessionStatePublisher(),
+    kerugiScorePublisher: RealtimeKerugiScorePublisher = RealtimeKerugiScorePublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
 ) {
     install(ContentNegotiation) {
@@ -751,6 +786,7 @@ fun Application.module(
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
             pairingRequests.connected(reconnectCredential)
             lifecycleStatePublisher.subscribe(this)
+            kerugiScorePublisher.subscribe(this)
             val heartbeatTracker = RealtimeHeartbeatTracker(heartbeatTimeout)
             heartbeatTracker.connected(reconnectCredential)
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
@@ -876,6 +912,16 @@ fun Application.module(
                         when (outcome) {
                             is RealtimeKerugiScoreOutcome.Acknowledged -> {
                                 send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                                if (outcome.isNew) {
+                                    kerugiScorePublisher.publish(
+                                        RealtimeKerugiScoreUpdated(
+                                            type = "kerugi_score_updated",
+                                            sessionId = outcome.sessionId,
+                                            blueScore = outcome.acknowledgement.blueScore,
+                                            redScore = outcome.acknowledgement.redScore,
+                                        ),
+                                    )
+                                }
                             }
                             is RealtimeKerugiScoreOutcome.Rejected -> {
                                 send(
@@ -903,6 +949,7 @@ fun Application.module(
                 heartbeatTracker.disconnected(reconnectCredential)
                 pairingRequests.disconnected(reconnectCredential)
                 lifecycleStatePublisher.unsubscribe(this)
+                kerugiScorePublisher.unsubscribe(this)
             }
         }
     }
