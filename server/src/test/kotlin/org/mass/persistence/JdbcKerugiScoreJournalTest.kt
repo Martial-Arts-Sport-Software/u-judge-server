@@ -12,7 +12,10 @@ import org.mass.domain.EventId
 import org.mass.domain.EventSource
 import org.mass.domain.JudgeId
 import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
+import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
 import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiOperatorActionPayload
+import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.KerugiScoreCandidatePayload
 import org.mass.domain.KerugiScoreResult
 import org.mass.domain.KerugiScoringArea
@@ -45,6 +48,20 @@ class JdbcKerugiScoreJournalTest {
         assertEquals(listOf(eventId(10), eventId(11)), restartedProcess.events().map { it.event.eventId })
     }
 
+    @Test
+    fun `recovers persisted operator actions after recreation`() {
+        val dataSource = JdbcDataSource().apply { setURL("jdbc:h2:mem:kerugi-operator-recovery;MODE=PostgreSQL;DB_CLOSE_DELAY=-1") }
+        val firstProcess = journal(dataSource)
+        assertIs<KerugiScoreResult.Applied>(firstProcess.apply(operatorAction(KerugiOperatorActionType.THROW, KerugiCompetitor.BLUE, 2), eventId(10)))
+        assertIs<KerugiScoreResult.Applied>(firstProcess.apply(operatorAction(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(11)))
+
+        val restartedProcess = journal(dataSource)
+
+        assertEquals(2, restartedProcess.projection().blueScore)
+        assertEquals(1, restartedProcess.projection().redScore)
+        assertEquals(2, restartedProcess.projection().operatorActions.size)
+    }
+
     private fun journal(dataSource: JdbcDataSource) = JdbcKerugiScoreJournal(
         dataSource, ownership, sessionId, KerugiScoringConfiguration(judges, 2, Duration.ofSeconds(1)),
         now = { Instant.parse("2026-09-12T12:00:00Z") },
@@ -56,6 +73,13 @@ class JdbcKerugiScoreJournalTest {
         DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("judge"), "judge-${judgeId.value}",
         KERUGI_SCORE_CANDIDATE_EVENT,
         Json.encodeToString(KerugiScoreCandidatePayload(KerugiCompetitor.BLUE, area, Instant.parse("2026-09-12T12:00:00Z").plusMillis(offset).toString())),
+    )
+
+    private fun operatorAction(type: KerugiOperatorActionType, competitor: KerugiCompetitor, points: Int) = DomainCommand(
+        CompetitionId("00000000-0000-4000-8000-000000000004"), peerId,
+        CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
+        KERUGI_OPERATOR_ACTION_EVENT, Json.encodeToString(KerugiOperatorActionPayload(type, competitor, points)),
     )
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")

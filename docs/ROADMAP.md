@@ -275,6 +275,15 @@ commands не публикуют update. Two-socket Ktor contract test явля�
 `KER-005`, `KER-009`, `SES-004`, `NET-001`, `NET-003`, `NFR-011` и `NFR-012`; watcher authorization/UI, persistent
 subscription cursors, desktop datasource, client reconnect/outbox и physical-device acceptance остаются открыты.
 
+Операторские Kerugi-действия `THROW`, `SPIN_BONUS` и `GAMJEOM` принимаются только как typed
+`kerugi_operator_action_command`: append-only событие хранит тип, участника, положительное значение и автора. Бросок и
+вращение увеличивают счёт выбранного участника, а Gamjeom увеличивает счёт соперника; все три действия сохраняются отдельно
+в audit projection. In-memory и JDBC journals идемпотентны по event ID, rebuild-ят одинаковую проекцию, а realtime ACK
+возвращается только после применения; новое действие публикует `kerugi_score_updated` всем authenticated sockets. Domain,
+H2 recovery и Ktor contract tests являются partial evidence для `KER-006`, `KER-007`, `KER-009`, `NET-001`, `NET-003`,
+`SES-004`, `NFR-011` и `NFR-012`; корректировки, таймер, desktop operator UI, client durable outbox/reconnect и
+physical-device acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

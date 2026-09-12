@@ -5,12 +5,20 @@ import kotlinx.serialization.json.Json
 import java.time.Instant
 
 const val KERUGI_SCORE_CANDIDATE_EVENT = "kerugi_score_candidate"
+const val KERUGI_OPERATOR_ACTION_EVENT = "kerugi_operator_action"
 
 @Serializable
 data class KerugiScoreCandidatePayload(
     val competitor: KerugiCompetitor,
     val area: KerugiScoringArea,
     val occurredAt: String,
+)
+
+@Serializable
+data class KerugiOperatorActionPayload(
+    val type: KerugiOperatorActionType,
+    val competitor: KerugiCompetitor,
+    val points: Int,
 )
 
 sealed interface KerugiScoreResult {
@@ -51,15 +59,13 @@ class KerugiScoreJournal(
                 rejected("Event ID is already assigned to a different command", event)
             }
         }
-        val candidate = try {
+        try {
             validate(event, configuration, ownership, sessionId)
         } catch (error: IllegalArgumentException) {
             return rejected(error.message ?: "Invalid Kerugi score candidate", event)
         }
         val sequencedEvent = SequencedDomainEvent(event, sequence.next(event.peerId))
-        val nextProjection = KerugiScoringEngine(configuration).score(
-            eventsById.values.map { candidateFor(it.event) } + candidate,
-        )
+        val nextProjection = score(eventsById.values.map(SequencedDomainEvent::event) + event, configuration)
         eventsById[eventId] = sequencedEvent
         projectionsByEventId[eventId] = nextProjection
         currentProjection = nextProjection
@@ -85,9 +91,8 @@ class KerugiScoreJournal(
                 require(existing == null || existing == candidate) { "Event ID is already assigned to a different event" }
             }
             val ordered = DomainEventOrder.order(eventsById.values)
-            return KerugiScoringEngine(configuration).score(ordered.map { event ->
-                validate(event.event, configuration, ownership, sessionId)
-            })
+            ordered.forEach { validate(it.event, configuration, ownership, sessionId) }
+            return score(ordered.map(SequencedDomainEvent::event), configuration)
         }
 
         fun candidateFor(event: DomainEvent): KerugiScoreCandidate {
@@ -101,22 +106,37 @@ class KerugiScoreJournal(
             )
         }
 
+        fun operatorActionFor(event: DomainEvent): KerugiOperatorAction {
+            val payload = Json.decodeFromString<KerugiOperatorActionPayload>(event.payload)
+            return KerugiOperatorAction(event.eventId, payload.type, payload.competitor, payload.points)
+        }
+
+        private fun score(events: Iterable<DomainEvent>, configuration: KerugiScoringConfiguration): KerugiScoringResult =
+            KerugiScoringEngine(configuration).score(
+                events.filter { it.type == KERUGI_SCORE_CANDIDATE_EVENT }.map(::candidateFor),
+                events.filter { it.type == KERUGI_OPERATOR_ACTION_EVENT }.map(::operatorActionFor),
+            )
+
         fun validate(
             event: DomainEvent,
             configuration: KerugiScoringConfiguration,
             ownership: BracketOwnership,
             sessionId: SessionId,
-        ): KerugiScoreCandidate {
-            require(event.type == KERUGI_SCORE_CANDIDATE_EVENT) { "Unsupported Kerugi score command" }
+        ) {
             require(event.bracketId == ownership.bracketId && event.sessionId == sessionId) {
                 "Command does not target this session"
             }
             require(event.peerId == ownership.ownerPeerId && ownership.state == BracketState.IN_PROGRESS) {
                 "Only the in-progress bracket owner can score its session"
             }
-            val candidate = candidateFor(event)
-            require(candidate.judgeId in configuration.judges) { "Score candidate judge is not configured for this session" }
-            return candidate
+            when (event.type) {
+                KERUGI_SCORE_CANDIDATE_EVENT -> {
+                    val candidate = candidateFor(event)
+                    require(candidate.judgeId in configuration.judges) { "Score candidate judge is not configured for this session" }
+                }
+                KERUGI_OPERATOR_ACTION_EVENT -> operatorActionFor(event)
+                else -> throw IllegalArgumentException("Unsupported Kerugi score command")
+            }
         }
 
         fun sameCommand(existing: DomainEvent, candidate: DomainEvent): Boolean =
