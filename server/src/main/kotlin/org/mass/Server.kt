@@ -44,7 +44,10 @@ import org.mass.domain.EventId
 import org.mass.domain.EventSource
 import org.mass.domain.JudgeId
 import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
+import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
 import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiOperatorActionPayload
+import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.KerugiScoreCandidatePayload
 import org.mass.domain.KerugiScoreEventJournal
 import org.mass.domain.KerugiScoreResult
@@ -282,6 +285,24 @@ data class RealtimeKerugiScoreCommandRequest(
 )
 
 @Serializable
+data class RealtimeKerugiOperatorActionCommandRequest(
+    val type: String,
+    val eventId: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val source: String,
+    val author: String,
+    val action: KerugiOperatorActionType,
+    val competitor: KerugiCompetitor,
+    val points: Int,
+)
+
+@Serializable
 data class RealtimeKerugiScoreAcknowledgement(val type: String, val eventId: String, val blueScore: Int, val redScore: Int)
 
 @Serializable
@@ -324,6 +345,38 @@ class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) 
             }
         } catch (_: Exception) {
             RealtimeKerugiScoreOutcome.Rejected("kerugi_score_unavailable")
+        }
+    }
+}
+
+class RealtimeKerugiOperatorActionCommands(private val journal: KerugiScoreEventJournal) {
+    fun accept(request: RealtimeKerugiOperatorActionCommandRequest): RealtimeKerugiScoreOutcome {
+        val eventId = try {
+            require(request.type == "kerugi_operator_action_command")
+            val payload = Json.encodeToString(KerugiOperatorActionPayload(request.action, request.competitor, request.points))
+            val command = DomainCommand(
+                CompetitionId(request.competitionId), PeerId(request.peerId), CourtId(request.courtId), BracketId(request.bracketId),
+                SessionId(request.sessionId), JudgeId(request.judgeId), DeviceId(request.deviceId), EventSource(request.source),
+                request.author, KERUGI_OPERATOR_ACTION_EVENT, payload,
+            )
+            EventId(request.eventId) to command
+        } catch (_: IllegalArgumentException) {
+            return RealtimeKerugiScoreOutcome.Rejected("invalid_kerugi_operator_action_command")
+        }
+        return try {
+            when (val result = journal.apply(eventId.second, eventId.first)) {
+                is KerugiScoreResult.Applied -> RealtimeKerugiScoreOutcome.Acknowledged(
+                    RealtimeKerugiScoreAcknowledgement(
+                        "kerugi_operator_action_ack", result.event.event.eventId.value,
+                        result.projection.blueScore, result.projection.redScore,
+                    ),
+                    result.event.event.sessionId.value,
+                    result.isNew,
+                )
+                is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_operator_action_command_rejected")
+            }
+        } catch (_: Exception) {
+            RealtimeKerugiScoreOutcome.Rejected("kerugi_operator_action_unavailable")
         }
     }
 }
@@ -721,6 +774,7 @@ fun Application.module(
     realtimeCommands: RealtimeCommands = RealtimeCommands(),
     lifecycleCommands: RealtimeSessionLifecycleCommands? = null,
     kerugiScoreCommands: RealtimeKerugiScoreCommands? = null,
+    kerugiOperatorActionCommands: RealtimeKerugiOperatorActionCommands? = null,
     lifecycleStatePublisher: RealtimeSessionStatePublisher = RealtimeSessionStatePublisher(),
     kerugiScorePublisher: RealtimeKerugiScorePublisher = RealtimeKerugiScorePublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
@@ -928,6 +982,38 @@ fun Application.module(
                                     Frame.Text(
                                         Json.encodeToString(
                                             RealtimeKerugiScoreRejected("kerugi_score_rejected", outcome.code),
+                                        ),
+                                    ),
+                                )
+                            }
+                        }
+                        continue
+                    }
+                    if (messageType == "kerugi_operator_action_command") {
+                        val request = runCatching {
+                            Json.decodeFromString<RealtimeKerugiOperatorActionCommandRequest>(commandText)
+                        }.getOrNull()
+                        val outcome = request?.let { kerugiOperatorActionCommands?.accept(it) }
+                            ?: RealtimeKerugiScoreOutcome.Rejected("kerugi_operator_action_unavailable")
+                        when (outcome) {
+                            is RealtimeKerugiScoreOutcome.Acknowledged -> {
+                                send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                                if (outcome.isNew) {
+                                    kerugiScorePublisher.publish(
+                                        RealtimeKerugiScoreUpdated(
+                                            type = "kerugi_score_updated",
+                                            sessionId = outcome.sessionId,
+                                            blueScore = outcome.acknowledgement.blueScore,
+                                            redScore = outcome.acknowledgement.redScore,
+                                        ),
+                                    )
+                                }
+                            }
+                            is RealtimeKerugiScoreOutcome.Rejected -> {
+                                send(
+                                    Frame.Text(
+                                        Json.encodeToString(
+                                            RealtimeKerugiScoreRejected("kerugi_operator_action_rejected", outcome.code),
                                         ),
                                     ),
                                 )
