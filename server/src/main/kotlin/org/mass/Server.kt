@@ -47,6 +47,7 @@ import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
 import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
 import org.mass.domain.KERUGI_SCORE_CORRECTION_EVENT
 import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiDisqualificationWarning
 import org.mass.domain.KerugiOperatorActionPayload
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.KerugiScoreCandidatePayload
@@ -332,6 +333,7 @@ data class RealtimeKerugiScoreUpdated(
     val sessionId: String,
     val blueScore: Int,
     val redScore: Int,
+    val disqualificationWarnings: List<KerugiDisqualificationWarning>,
 )
 
 class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) {
@@ -358,6 +360,7 @@ class RealtimeKerugiScoreCommands(private val journal: KerugiScoreEventJournal) 
                     ),
                     result.event.event.sessionId.value,
                     result.isNew,
+                    result.projection.disqualificationWarnings,
                 )
                 is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_score_command_rejected")
             }
@@ -390,6 +393,7 @@ class RealtimeKerugiOperatorActionCommands(private val journal: KerugiScoreEvent
                     ),
                     result.event.event.sessionId.value,
                     result.isNew,
+                    result.projection.disqualificationWarnings,
                 )
                 is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_operator_action_command_rejected")
             }
@@ -422,6 +426,7 @@ class RealtimeKerugiScoreCorrectionCommands(private val journal: KerugiScoreEven
                     ),
                     result.event.event.sessionId.value,
                     result.isNew,
+                    result.projection.disqualificationWarnings,
                 )
                 is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_score_correction_command_rejected")
             }
@@ -436,6 +441,7 @@ sealed interface RealtimeKerugiScoreOutcome {
         val acknowledgement: RealtimeKerugiScoreAcknowledgement,
         val sessionId: String,
         val isNew: Boolean,
+        val disqualificationWarnings: List<KerugiDisqualificationWarning>,
     ) : RealtimeKerugiScoreOutcome
 
     data class Rejected(val code: String) : RealtimeKerugiScoreOutcome
@@ -1024,6 +1030,7 @@ fun Application.module(
                                             sessionId = outcome.sessionId,
                                             blueScore = outcome.acknowledgement.blueScore,
                                             redScore = outcome.acknowledgement.redScore,
+                                            disqualificationWarnings = outcome.disqualificationWarnings,
                                         ),
                                     )
                                 }
@@ -1056,6 +1063,7 @@ fun Application.module(
                                             sessionId = outcome.sessionId,
                                             blueScore = outcome.acknowledgement.blueScore,
                                             redScore = outcome.acknowledgement.redScore,
+                                            disqualificationWarnings = outcome.disqualificationWarnings,
                                         ),
                                     )
                                 }
@@ -1088,6 +1096,7 @@ fun Application.module(
                                             sessionId = outcome.sessionId,
                                             blueScore = outcome.acknowledgement.blueScore,
                                             redScore = outcome.acknowledgement.redScore,
+                                            disqualificationWarnings = outcome.disqualificationWarnings,
                                         ),
                                     )
                                 }

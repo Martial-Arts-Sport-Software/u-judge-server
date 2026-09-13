@@ -1,7 +1,10 @@
 package org.mass.domain
 
+import kotlinx.serialization.Serializable
 import java.time.Duration
 import java.time.Instant
+
+private const val KERUGI_DISQUALIFICATION_GAMJEOM_THRESHOLD = 10
 
 enum class KerugiCompetitor {
     BLUE,
@@ -80,6 +83,10 @@ data class KerugiOperatorAction(
 /** An operator correction that removes the referenced raw score input from the projection. */
 data class KerugiScoreCorrection(val eventId: EventId, val targetEventId: EventId)
 
+/** Alerts the operator that confirmation is required before a disqualification decision. */
+@Serializable
+data class KerugiDisqualificationWarning(val competitor: KerugiCompetitor, val gamjeomCount: Int)
+
 private fun KerugiCompetitor.opponent() = if (this == KerugiCompetitor.BLUE) KerugiCompetitor.RED else KerugiCompetitor.BLUE
 
 /** Retains the input events and the decision for a scoring window for later audit. */
@@ -96,6 +103,7 @@ data class KerugiScoringResult(
     val audit: List<KerugiWindowAudit>,
     val operatorActions: List<KerugiOperatorAction> = emptyList(),
     val corrections: List<KerugiScoreCorrection> = emptyList(),
+    val disqualificationWarnings: List<KerugiDisqualificationWarning> = emptyList(),
 ) {
     val blueScore: Int get() = scoreFor(KerugiCompetitor.BLUE)
     val redScore: Int get() = scoreFor(KerugiCompetitor.RED)
@@ -141,11 +149,20 @@ class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration)
                 )
             }
         }
+        val activeOperatorActions = operatorActions.filter { it.eventId !in correctedEventIds }.distinctBy(KerugiOperatorAction::eventId)
+        val warnings = KerugiCompetitor.entries.mapNotNull { competitor ->
+            val gamjeomCount = activeOperatorActions
+                .filter { it.type == KerugiOperatorActionType.GAMJEOM && it.competitor == competitor }
+                .sumOf(KerugiOperatorAction::points)
+            KerugiDisqualificationWarning(competitor, gamjeomCount)
+                .takeIf { gamjeomCount >= KERUGI_DISQUALIFICATION_GAMJEOM_THRESHOLD }
+        }
         return KerugiScoringResult(
             awardsByWindow,
             windows,
-            operatorActions.filter { it.eventId !in correctedEventIds }.distinctBy(KerugiOperatorAction::eventId),
+            activeOperatorActions,
             correctionsById.values.toList(),
+            warnings,
         )
     }
 

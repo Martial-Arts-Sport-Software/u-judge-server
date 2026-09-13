@@ -76,6 +76,32 @@ class KerugiOperatorActionJournalTest {
         assertEquals(0, journal.projection().redScore)
     }
 
+    @Test
+    fun `warns at ten effective Gamjeom without automatically disqualifying the competitor`() {
+        val journal = journal()
+        (10..18).forEach { event ->
+            assertIs<KerugiScoreResult.Applied>(
+                journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(event)),
+            )
+        }
+        assertEquals(emptyList(), journal.projection().disqualificationWarnings)
+
+        val tenthGamjeom = assertIs<KerugiScoreResult.Applied>(
+            journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(19)),
+        )
+
+        assertEquals(listOf(KerugiDisqualificationWarning(KerugiCompetitor.BLUE, 10)), tenthGamjeom.projection.disqualificationWarnings)
+        assertEquals(10, tenthGamjeom.projection.redScore)
+        assertEquals(false, assertIs<KerugiScoreResult.Applied>(
+            journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(19)),
+        ).isNew)
+
+        val corrected = assertIs<KerugiScoreResult.Applied>(journal.apply(correction(eventId(19)), eventId(20)))
+        assertEquals(emptyList(), corrected.projection.disqualificationWarnings)
+        assertEquals(9, corrected.projection.redScore)
+        assertEquals(corrected.projection, KerugiScoreJournal.rebuild(ownership, sessionId, configuration(), journal.events()))
+    }
+
     private fun journal() = KerugiScoreJournal(ownership, sessionId, configuration(), now = { Instant.parse("2026-09-12T12:00:00Z") })
 
     private fun configuration() = KerugiScoringConfiguration(setOf(judgeId(7), judgeId(8)), 2, Duration.ofSeconds(1))

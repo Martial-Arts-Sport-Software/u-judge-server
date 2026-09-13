@@ -15,6 +15,7 @@ import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
 import org.mass.domain.KERUGI_SCORE_CORRECTION_EVENT
 import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
 import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiDisqualificationWarning
 import org.mass.domain.KerugiOperatorActionPayload
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.KerugiScoreCandidatePayload
@@ -76,6 +77,22 @@ class JdbcKerugiScoreJournalTest {
         assertEquals(0, restartedProcess.projection().blueScore)
         assertEquals(listOf(eventId(10)), restartedProcess.projection().corrections.map { it.targetEventId })
         assertEquals(2, restartedProcess.events().size)
+    }
+
+    @Test
+    fun `recovers a disqualification warning from persisted Gamjeom actions`() {
+        val dataSource = JdbcDataSource().apply { setURL("jdbc:h2:mem:kerugi-gamjeom-warning;MODE=PostgreSQL;DB_CLOSE_DELAY=-1") }
+        val firstProcess = journal(dataSource)
+        (10..19).forEach { event ->
+            assertIs<KerugiScoreResult.Applied>(
+                firstProcess.apply(operatorAction(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(event)),
+            )
+        }
+
+        val restartedProcess = journal(dataSource)
+
+        assertEquals(listOf(KerugiDisqualificationWarning(KerugiCompetitor.BLUE, 10)), restartedProcess.projection().disqualificationWarnings)
+        assertEquals(10, restartedProcess.projection().redScore)
     }
 
     private fun journal(dataSource: JdbcDataSource) = JdbcKerugiScoreJournal(
