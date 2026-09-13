@@ -292,6 +292,14 @@ recalculation, operator action correction и публикацию новых aut
 evidence для `KER-005`, `KER-008`, `KER-009`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; timer, desktop
 operator UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
 
+`KerugiScoringResult` теперь детерминированно проецирует `disqualificationWarnings`, когда effective sum операторских
+`GAMJEOM` против участника достигает `10`; warning не создаёт автоматического решения о дисквалификации. Correction
+Gamjeom снимает warning при rebuild, а повторная доставка действия не создаёт дополнительную публикацию. Domain, JDBC/H2
+recovery и authenticated WebSocket contract tests покрывают threshold, retry и recovery. Это partial evidence для
+`KER-007`, `KER-009`, `KER-015`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; подтверждаемое оператором
+решение о дисквалификации, timer, desktop operator UI, client durable outbox/reconnect и physical-device acceptance
+остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

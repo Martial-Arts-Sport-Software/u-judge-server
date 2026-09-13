@@ -160,9 +160,10 @@ Authoritative source для v1 Pilot — предоставленный «Про
   получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
   idle socket с `heartbeat_timeout`, но client scheduling, persistent device state и physical-device evidence не реализованы.
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
-- Kerugi timer и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum scoring, append-only corrections,
-  операторские throw/spin/Gamjeom actions, durable journal и authenticated score projection publication уже существуют,
-  но desktop datasource wiring и physical-device acceptance открыты;
+- Kerugi timer, подтверждаемое решение о дисквалификации и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY`
+  quorum scoring, append-only corrections, операторские throw/spin/Gamjeom actions, warning при 10 Gamjeom, durable
+  journal и authenticated score projection publication уже существуют, но desktop datasource wiring и physical-device
+  acceptance открыты;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
