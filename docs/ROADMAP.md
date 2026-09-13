@@ -300,6 +300,14 @@ recovery и authenticated WebSocket contract tests покрывают threshold,
 решение о дисквалификации, timer, desktop operator UI, client durable outbox/reconnect и physical-device acceptance
 остаются открыты.
 
+`KerugiTimerJournal` добавляет append-only typed transitions `START`, `PAUSE`, `RESUME` и `STOP` только от operator
+локального владельца in-progress сетки. Immutable timer projection отклоняет недопустимый порядок, duplicate/conflicting
+event IDs не меняют state, а versioned JDBC migration восстанавливает состояние после recreation до ACK. Authenticated
+realtime command публикует `kerugi_timer_updated` только для нового события. Domain, H2 recovery и two-socket Ktor
+contract tests являются partial evidence для `KER-011`, `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`,
+`SES-004`, `NFR-011` и `NFR-012`; age-category duration policy, breaks, golden round, desktop UI, client durable
+outbox/reconnect и physical-device acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
