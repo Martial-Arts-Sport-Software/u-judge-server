@@ -60,6 +60,23 @@ class KerugiScoreJournalTest {
         assertEquals(0, journal.projection().blueScore)
     }
 
+    @Test
+    fun `correction removes a raw candidate and recalculates its quorum window`() {
+        val journal = journal()
+        assertIs<KerugiScoreResult.Applied>(
+            journal.apply(command(judgeId(7), KerugiCompetitor.BLUE, KerugiScoringArea.HEAD, 0), eventId(10)),
+        )
+        assertIs<KerugiScoreResult.Applied>(
+            journal.apply(command(judgeId(8), KerugiCompetitor.BLUE, KerugiScoringArea.BODY, 500), eventId(11)),
+        )
+
+        val corrected = assertIs<KerugiScoreResult.Applied>(journal.apply(correction(eventId(10)), eventId(12)))
+
+        assertEquals(0, corrected.projection.blueScore)
+        assertEquals(KerugiWindowDecision.QUORUM_NOT_REACHED, corrected.projection.audit.single().decision)
+        assertEquals(listOf(eventId(10)), corrected.projection.corrections.map(KerugiScoreCorrection::targetEventId))
+    }
+
     private fun journal() = KerugiScoreJournal(ownership, sessionId, configuration(), now = { Instant.parse("2026-09-12T12:00:00Z") })
 
     private fun configuration() = KerugiScoringConfiguration(judges, quorum = 2, coincidenceWindow = Duration.ofSeconds(1))
@@ -70,6 +87,13 @@ class KerugiScoreJournalTest {
         DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("judge"), "judge-${judgeId.value}",
         KERUGI_SCORE_CANDIDATE_EVENT,
         Json.encodeToString(KerugiScoreCandidatePayload(competitor, area, Instant.parse("2026-09-12T12:00:00Z").plusMillis(offset).toString())),
+    )
+
+    private fun correction(targetEventId: EventId) = DomainCommand(
+        CompetitionId("00000000-0000-4000-8000-000000000004"), ownerPeerId,
+        CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
+        KERUGI_SCORE_CORRECTION_EVENT, Json.encodeToString(KerugiScoreCorrectionPayload(targetEventId.value)),
     )
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")

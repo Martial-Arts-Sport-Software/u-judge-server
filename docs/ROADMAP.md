@@ -284,6 +284,14 @@ H2 recovery и Ktor contract tests являются partial evidence для `KER
 `SES-004`, `NFR-011` и `NFR-012`; корректировки, таймер, desktop operator UI, client durable outbox/reconnect и
 physical-device acceptance остаются открыты.
 
+Операторская `kerugi_score_correction_command` создаёт append-only компенсирующее событие со ссылкой на уже принятое
+raw score candidate или operator action. Исходное событие сохраняется в журнале и audit, а deterministic projection
+исключает его эффект при rebuild; повторная доставка возвращает исходный ACK, а unknown, duplicate-target и conflicting
+corrections не меняют журнал. In-memory, JDBC/H2 recovery и two-socket Ktor contract tests покрывают candidate quorum
+recalculation, operator action correction и публикацию новых authoritative totals только для нового события. Это partial
+evidence для `KER-005`, `KER-008`, `KER-009`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; timer, desktop
+operator UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.

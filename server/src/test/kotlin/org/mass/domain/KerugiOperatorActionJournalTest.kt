@@ -48,6 +48,34 @@ class KerugiOperatorActionJournalTest {
         assertEquals(2, journal.projection().redScore)
     }
 
+    @Test
+    fun `applies an append-only correction by removing its target from the score projection`() {
+        val journal = journal()
+        assertIs<KerugiScoreResult.Applied>(journal.apply(action(KerugiOperatorActionType.THROW, KerugiCompetitor.BLUE, 2), eventId(10)))
+
+        val corrected = assertIs<KerugiScoreResult.Applied>(journal.apply(correction(eventId(10)), eventId(11)))
+
+        assertEquals(0, corrected.projection.blueScore)
+        assertEquals(listOf(eventId(10)), corrected.projection.corrections.map(KerugiScoreCorrection::targetEventId))
+        assertEquals(2, journal.events().size)
+        assertEquals(KERUGI_OPERATOR_ACTION_EVENT, journal.events().first().event.type)
+        assertEquals(KERUGI_SCORE_CORRECTION_EVENT, journal.events().last().event.type)
+        assertEquals(corrected.projection, KerugiScoreJournal.rebuild(ownership, sessionId, configuration(), journal.events()))
+    }
+
+    @Test
+    fun `rejects corrections for unknown or already corrected targets without changing the journal`() {
+        val journal = journal()
+        assertIs<KerugiScoreResult.Applied>(journal.apply(action(KerugiOperatorActionType.THROW, KerugiCompetitor.RED, 2), eventId(10)))
+        assertIs<KerugiScoreResult.Applied>(journal.apply(correction(eventId(10)), eventId(11)))
+
+        assertIs<KerugiScoreResult.Rejected>(journal.apply(correction(eventId(12)), eventId(12)))
+        assertIs<KerugiScoreResult.Rejected>(journal.apply(correction(eventId(10)), eventId(13)))
+
+        assertEquals(2, journal.events().size)
+        assertEquals(0, journal.projection().redScore)
+    }
+
     private fun journal() = KerugiScoreJournal(ownership, sessionId, configuration(), now = { Instant.parse("2026-09-12T12:00:00Z") })
 
     private fun configuration() = KerugiScoringConfiguration(setOf(judgeId(7), judgeId(8)), 2, Duration.ofSeconds(1))
@@ -62,6 +90,13 @@ class KerugiOperatorActionJournalTest {
         CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
         DeviceId("00000000-0000-4000-8000-000000000006"), EventSource(source), "operator",
         KERUGI_OPERATOR_ACTION_EVENT, Json.encodeToString(KerugiOperatorActionPayload(type, competitor, points)),
+    )
+
+    private fun correction(targetEventId: EventId) = DomainCommand(
+        CompetitionId("00000000-0000-4000-8000-000000000004"), peerId,
+        CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
+        KERUGI_SCORE_CORRECTION_EVENT, Json.encodeToString(KerugiScoreCorrectionPayload(targetEventId.value)),
     )
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")

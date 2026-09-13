@@ -6,6 +6,7 @@ import java.time.Instant
 
 const val KERUGI_SCORE_CANDIDATE_EVENT = "kerugi_score_candidate"
 const val KERUGI_OPERATOR_ACTION_EVENT = "kerugi_operator_action"
+const val KERUGI_SCORE_CORRECTION_EVENT = "kerugi_score_correction"
 
 @Serializable
 data class KerugiScoreCandidatePayload(
@@ -20,6 +21,9 @@ data class KerugiOperatorActionPayload(
     val competitor: KerugiCompetitor,
     val points: Int,
 )
+
+@Serializable
+data class KerugiScoreCorrectionPayload(val targetEventId: String)
 
 sealed interface KerugiScoreResult {
     class Applied(
@@ -60,7 +64,7 @@ class KerugiScoreJournal(
             }
         }
         try {
-            validate(event, configuration, ownership, sessionId)
+            validate(event, configuration, ownership, sessionId, eventsById.values.map(SequencedDomainEvent::event))
         } catch (error: IllegalArgumentException) {
             return rejected(error.message ?: "Invalid Kerugi score candidate", event)
         }
@@ -91,7 +95,11 @@ class KerugiScoreJournal(
                 require(existing == null || existing == candidate) { "Event ID is already assigned to a different event" }
             }
             val ordered = DomainEventOrder.order(eventsById.values)
-            ordered.forEach { validate(it.event, configuration, ownership, sessionId) }
+            val accepted = mutableListOf<DomainEvent>()
+            ordered.forEach {
+                validate(it.event, configuration, ownership, sessionId, accepted)
+                accepted += it.event
+            }
             return score(ordered.map(SequencedDomainEvent::event), configuration)
         }
 
@@ -111,17 +119,26 @@ class KerugiScoreJournal(
             return KerugiOperatorAction(event.eventId, payload.type, payload.competitor, payload.points)
         }
 
-        private fun score(events: Iterable<DomainEvent>, configuration: KerugiScoringConfiguration): KerugiScoringResult =
-            KerugiScoringEngine(configuration).score(
-                events.filter { it.type == KERUGI_SCORE_CANDIDATE_EVENT }.map(::candidateFor),
-                events.filter { it.type == KERUGI_OPERATOR_ACTION_EVENT }.map(::operatorActionFor),
+        fun correctionFor(event: DomainEvent): KerugiScoreCorrection = KerugiScoreCorrection(
+            event.eventId,
+            EventId(Json.decodeFromString<KerugiScoreCorrectionPayload>(event.payload).targetEventId),
+        )
+
+        private fun score(events: Iterable<DomainEvent>, configuration: KerugiScoringConfiguration): KerugiScoringResult {
+            val eventList = events.toList()
+            return KerugiScoringEngine(configuration).score(
+                eventList.filter { it.type == KERUGI_SCORE_CANDIDATE_EVENT }.map(::candidateFor),
+                eventList.filter { it.type == KERUGI_OPERATOR_ACTION_EVENT }.map(::operatorActionFor),
+                eventList.filter { it.type == KERUGI_SCORE_CORRECTION_EVENT }.map(::correctionFor),
             )
+        }
 
         fun validate(
             event: DomainEvent,
             configuration: KerugiScoringConfiguration,
             ownership: BracketOwnership,
             sessionId: SessionId,
+            acceptedEvents: Iterable<DomainEvent> = emptyList(),
         ) {
             require(event.bracketId == ownership.bracketId && event.sessionId == sessionId) {
                 "Command does not target this session"
@@ -137,6 +154,17 @@ class KerugiScoreJournal(
                 KERUGI_OPERATOR_ACTION_EVENT -> {
                     require(event.source.value == "operator") { "Kerugi operator action must have an operator source" }
                     operatorActionFor(event)
+                }
+                KERUGI_SCORE_CORRECTION_EVENT -> {
+                    require(event.source.value == "operator") { "Kerugi score correction must have an operator source" }
+                    val correction = correctionFor(event)
+                    val target = acceptedEvents.firstOrNull { it.eventId == correction.targetEventId }
+                    require(target?.type in setOf(KERUGI_SCORE_CANDIDATE_EVENT, KERUGI_OPERATOR_ACTION_EVENT)) {
+                        "Kerugi score correction must target an accepted score event"
+                    }
+                    require(acceptedEvents.none {
+                        it.type == KERUGI_SCORE_CORRECTION_EVENT && correctionFor(it).targetEventId == correction.targetEventId
+                    }) { "Kerugi score event is already corrected" }
                 }
                 else -> throw IllegalArgumentException("Unsupported Kerugi score command")
             }
