@@ -132,9 +132,12 @@ Authoritative source для v1 Pilot — предоставленный «Про
   после применения owner event через общий in-memory/JDBC lifecycle journal; retry не меняет projection второй раз, а
   malformed и foreign-owner commands получают typed rejection;
 - transport-agnostic `KerugiScoreJournal` и `JdbcKerugiScoreJournal`, которые append-ят raw `HEAD`/`BODY` candidate с
-  полным audit envelope до пересчёта deterministic score/audit projection и восстанавливают его из JDBC journal; realtime
-  `kerugi_score_command` получает idempotent ACK только после применения configured journal и публикует authoritative
-  blue/red projection всем authenticated realtime subscribers только для нового event;
+   полным audit envelope до пересчёта deterministic score/audit projection и восстанавливают его из JDBC journal; realtime
+   `kerugi_score_command` получает idempotent ACK только после применения configured journal и публикует authoritative
+   blue/red projection всем authenticated realtime subscribers только для нового event;
+- typed `kerugi_operator_action_command` для append-only операторских `THROW`, `SPIN_BONUS` и `GAMJEOM`: бросок и вращение
+  увеличивают выбранный счёт, Gamjeom - счёт соперника, а raw action с типом, участником, значением и автором сохраняется
+  отдельно в Kerugi audit projection; JDBC rebuild и realtime score publication используют тот же журнал;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
@@ -157,9 +160,9 @@ Authoritative source для v1 Pilot — предоставленный «Про
   получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
   idle socket с `heartbeat_timeout`, но client scheduling, persistent device state и physical-device evidence не реализованы.
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
-- операторские Kerugi actions, таймер и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum scoring, durable
-  journal и authenticated score projection publication уже существуют, но desktop datasource wiring и physical-device
-  acceptance открыты;
+- Kerugi corrections, таймер и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum scoring, операторские
+  throw/spin/Gamjeom actions, durable journal и authenticated score projection publication уже существуют, но desktop
+  datasource wiring и physical-device acceptance открыты;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;

@@ -16,11 +16,12 @@ class ManagedPostgresTest {
     @Test
     fun `runtime configuration keeps cluster outside installation and exposes JDBC URL only while running`() {
         val root = createTempDirectory()
+        val port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port
         try {
             val configuration = PostgresRuntimeConfiguration(
                 installationDirectory = root.resolve("installation"),
                 applicationDataDirectory = root.resolve("application-data"),
-                port = 54326,
+                port = port,
                 platform = PostgresPlatform.Windows,
             )
             val managedPostgres = ManagedPostgres(waitingCommand(port = configuration.port))
@@ -42,14 +43,14 @@ class ManagedPostgresTest {
                     "-h",
                     "127.0.0.1",
                     "-p",
-                    "54326",
+                    port.toString(),
                 ),
                 configuration.postgresCommand.arguments,
             )
             assertEquals(null, runtime.jdbcUrl)
 
             assertIs<PostgresState.Running>(runtime.start())
-            assertEquals("jdbc:postgresql://127.0.0.1:54326/u_judge", runtime.jdbcUrl)
+            assertEquals("jdbc:postgresql://127.0.0.1:$port/u_judge", runtime.jdbcUrl)
 
             assertEquals(PostgresState.Stopped, runtime.stop())
             assertEquals(null, runtime.jdbcUrl)

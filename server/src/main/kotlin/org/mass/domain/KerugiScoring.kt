@@ -56,6 +56,29 @@ data class KerugiScoreAward(
     val windowStartedAt: Instant,
 )
 
+enum class KerugiOperatorActionType {
+    THROW,
+    SPIN_BONUS,
+    GAMJEOM,
+}
+
+/** An operator decision retained independently from side-judge candidate windows. */
+data class KerugiOperatorAction(
+    val eventId: EventId,
+    val type: KerugiOperatorActionType,
+    val competitor: KerugiCompetitor,
+    val points: Int,
+) {
+    init {
+        require(points > 0) { "Kerugi operator action points must be positive" }
+    }
+
+    val awardedCompetitor: KerugiCompetitor
+        get() = if (type == KerugiOperatorActionType.GAMJEOM) competitor.opponent() else competitor
+}
+
+private fun KerugiCompetitor.opponent() = if (this == KerugiCompetitor.BLUE) KerugiCompetitor.RED else KerugiCompetitor.BLUE
+
 /** Retains the input events and the decision for a scoring window for later audit. */
 data class KerugiWindowAudit(
     val competitor: KerugiCompetitor,
@@ -68,9 +91,14 @@ data class KerugiWindowAudit(
 data class KerugiScoringResult(
     val awards: List<KerugiScoreAward>,
     val audit: List<KerugiWindowAudit>,
+    val operatorActions: List<KerugiOperatorAction> = emptyList(),
 ) {
-    val blueScore: Int get() = awards.filter { it.competitor == KerugiCompetitor.BLUE }.sumOf(KerugiScoreAward::points)
-    val redScore: Int get() = awards.filter { it.competitor == KerugiCompetitor.RED }.sumOf(KerugiScoreAward::points)
+    val blueScore: Int get() = scoreFor(KerugiCompetitor.BLUE)
+    val redScore: Int get() = scoreFor(KerugiCompetitor.RED)
+
+    private fun scoreFor(competitor: KerugiCompetitor) =
+        awards.filter { it.competitor == competitor }.sumOf(KerugiScoreAward::points) +
+            operatorActions.filter { it.awardedCompetitor == competitor }.sumOf(KerugiOperatorAction::points)
 }
 
 /**
@@ -78,7 +106,10 @@ data class KerugiScoringResult(
  * A window starts at its earliest candidate and includes candidates at most coincidenceWindow later.
  */
 class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration) {
-    fun score(deliveredCandidates: Iterable<KerugiScoreCandidate>): KerugiScoringResult {
+    fun score(
+        deliveredCandidates: Iterable<KerugiScoreCandidate>,
+        operatorActions: Iterable<KerugiOperatorAction> = emptyList(),
+    ): KerugiScoringResult {
         val candidatesById = linkedMapOf<EventId, KerugiScoreCandidate>()
         deliveredCandidates.forEach { candidate ->
             require(candidate.judgeId in configuration.judges) { "Score candidate judge is not configured for this session" }
@@ -102,7 +133,7 @@ class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration)
                 )
             }
         }
-        return KerugiScoringResult(awardsByWindow, windows)
+        return KerugiScoringResult(awardsByWindow, windows, operatorActions.distinctBy(KerugiOperatorAction::eventId))
     }
 
     private fun windowsFor(candidates: List<KerugiScoreCandidate>): List<KerugiWindowAudit> {
