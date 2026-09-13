@@ -145,6 +145,44 @@ class KerugiWebSocketTest {
         assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
     }
 
+    @Test
+    fun `operator correction publishes compensated totals once and preserves retry ACK`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val sender = approvedDevice(pairingRequests, "ios-correction-operator", "Petrova", "ios")
+        val subscriber = approvedDevice(pairingRequests, "android-correction-watcher", "Ivanov", "android")
+        val journal = journal()
+        application {
+            module(
+                pairingRequests = pairingRequests,
+                kerugiOperatorActionCommands = RealtimeKerugiOperatorActionCommands(journal),
+                kerugiScoreCorrectionCommands = RealtimeKerugiScoreCorrectionCommands(journal),
+            )
+        }
+
+        val client = createClient { install(WebSockets) }
+        val senderSession = client.webSocketSession("/v1/realtime")
+        val subscriberSession = client.webSocketSession("/v1/realtime")
+        senderSession.sendHandshake(sender.request.reconnectCredential)
+        subscriberSession.sendHandshake(subscriber.request.reconnectCredential)
+        senderSession.receiveJson()
+        subscriberSession.receiveJson()
+
+        senderSession.send(Frame.Text(operatorAction(20, "THROW", "BLUE", 2)))
+        senderSession.receiveJson()
+        senderSession.receiveJson()
+        subscriberSession.receiveJson()
+        senderSession.send(Frame.Text(correction(21, 20)))
+        val acknowledgement = senderSession.receiveJson()
+        assertEquals("kerugi_score_correction_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+        assertEquals("0", acknowledgement.getValue("blueScore").jsonPrimitive.content)
+        assertScoreUpdate(senderSession.receiveJson(), 0, 0)
+        assertScoreUpdate(subscriberSession.receiveJson(), 0, 0)
+
+        senderSession.send(Frame.Text(correction(21, 20)))
+        assertEquals(acknowledgement, senderSession.receiveJson())
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+    }
+
     private fun journal(): KerugiScoreJournal {
         val peerId = PeerId("00000000-0000-4000-8000-000000000001")
         return KerugiScoreJournal(
@@ -171,6 +209,9 @@ class KerugiWebSocketTest {
 
     private fun operatorAction(event: Int, action: String, competitor: String, points: Int) =
         """{"type":"kerugi_operator_action_command","eventId":"00000000-0000-4000-8000-${event.toString().padStart(12, '0')}","competitionId":"00000000-0000-4000-8000-000000000004","peerId":"00000000-0000-4000-8000-000000000001","courtId":"00000000-0000-4000-8000-000000000005","bracketId":"00000000-0000-4000-8000-000000000002","sessionId":"00000000-0000-4000-8000-000000000003","judgeId":"00000000-0000-4000-8000-000000000007","deviceId":"00000000-0000-4000-8000-000000000006","source":"operator","author":"operator","action":"$action","competitor":"$competitor","points":$points}"""
+
+    private fun correction(event: Int, target: Int) =
+        """{"type":"kerugi_score_correction_command","eventId":"00000000-0000-4000-8000-${event.toString().padStart(12, '0')}","competitionId":"00000000-0000-4000-8000-000000000004","peerId":"00000000-0000-4000-8000-000000000001","courtId":"00000000-0000-4000-8000-000000000005","bracketId":"00000000-0000-4000-8000-000000000002","sessionId":"00000000-0000-4000-8000-000000000003","judgeId":"00000000-0000-4000-8000-000000000007","deviceId":"00000000-0000-4000-8000-000000000006","source":"operator","author":"operator","targetEventId":"00000000-0000-4000-8000-${target.toString().padStart(12, '0')}"}"""
 
     private suspend fun io.ktor.websocket.WebSocketSession.receiveJson() = Json.parseToJsonElement(
         (incoming.receive() as Frame.Text).readText(),

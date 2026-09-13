@@ -12,11 +12,13 @@ import org.mass.domain.EventId
 import org.mass.domain.EventSource
 import org.mass.domain.JudgeId
 import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
+import org.mass.domain.KERUGI_SCORE_CORRECTION_EVENT
 import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
 import org.mass.domain.KerugiCompetitor
 import org.mass.domain.KerugiOperatorActionPayload
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.KerugiScoreCandidatePayload
+import org.mass.domain.KerugiScoreCorrectionPayload
 import org.mass.domain.KerugiScoreResult
 import org.mass.domain.KerugiScoringArea
 import org.mass.domain.KerugiScoringConfiguration
@@ -62,6 +64,20 @@ class JdbcKerugiScoreJournalTest {
         assertEquals(2, restartedProcess.projection().operatorActions.size)
     }
 
+    @Test
+    fun `recovers a persisted score correction after recreation`() {
+        val dataSource = JdbcDataSource().apply { setURL("jdbc:h2:mem:kerugi-correction-recovery;MODE=PostgreSQL;DB_CLOSE_DELAY=-1") }
+        val firstProcess = journal(dataSource)
+        assertIs<KerugiScoreResult.Applied>(firstProcess.apply(operatorAction(KerugiOperatorActionType.THROW, KerugiCompetitor.BLUE, 2), eventId(10)))
+        assertIs<KerugiScoreResult.Applied>(firstProcess.apply(correction(eventId(10)), eventId(11)))
+
+        val restartedProcess = journal(dataSource)
+
+        assertEquals(0, restartedProcess.projection().blueScore)
+        assertEquals(listOf(eventId(10)), restartedProcess.projection().corrections.map { it.targetEventId })
+        assertEquals(2, restartedProcess.events().size)
+    }
+
     private fun journal(dataSource: JdbcDataSource) = JdbcKerugiScoreJournal(
         dataSource, ownership, sessionId, KerugiScoringConfiguration(judges, 2, Duration.ofSeconds(1)),
         now = { Instant.parse("2026-09-12T12:00:00Z") },
@@ -80,6 +96,13 @@ class JdbcKerugiScoreJournalTest {
         CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
         DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
         KERUGI_OPERATOR_ACTION_EVENT, Json.encodeToString(KerugiOperatorActionPayload(type, competitor, points)),
+    )
+
+    private fun correction(targetEventId: EventId) = DomainCommand(
+        CompetitionId("00000000-0000-4000-8000-000000000004"), peerId,
+        CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
+        KERUGI_SCORE_CORRECTION_EVENT, Json.encodeToString(KerugiScoreCorrectionPayload(targetEventId.value)),
     )
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")

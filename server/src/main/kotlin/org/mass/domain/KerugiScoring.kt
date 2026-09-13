@@ -77,6 +77,9 @@ data class KerugiOperatorAction(
         get() = if (type == KerugiOperatorActionType.GAMJEOM) competitor.opponent() else competitor
 }
 
+/** An operator correction that removes the referenced raw score input from the projection. */
+data class KerugiScoreCorrection(val eventId: EventId, val targetEventId: EventId)
+
 private fun KerugiCompetitor.opponent() = if (this == KerugiCompetitor.BLUE) KerugiCompetitor.RED else KerugiCompetitor.BLUE
 
 /** Retains the input events and the decision for a scoring window for later audit. */
@@ -92,6 +95,7 @@ data class KerugiScoringResult(
     val awards: List<KerugiScoreAward>,
     val audit: List<KerugiWindowAudit>,
     val operatorActions: List<KerugiOperatorAction> = emptyList(),
+    val corrections: List<KerugiScoreCorrection> = emptyList(),
 ) {
     val blueScore: Int get() = scoreFor(KerugiCompetitor.BLUE)
     val redScore: Int get() = scoreFor(KerugiCompetitor.RED)
@@ -109,15 +113,19 @@ class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration)
     fun score(
         deliveredCandidates: Iterable<KerugiScoreCandidate>,
         operatorActions: Iterable<KerugiOperatorAction> = emptyList(),
+        corrections: Iterable<KerugiScoreCorrection> = emptyList(),
     ): KerugiScoringResult {
+        val correctionsById = corrections.associateBy(KerugiScoreCorrection::eventId)
+        val correctedEventIds = correctionsById.values.map(KerugiScoreCorrection::targetEventId).toSet()
         val candidatesById = linkedMapOf<EventId, KerugiScoreCandidate>()
         deliveredCandidates.forEach { candidate ->
             require(candidate.judgeId in configuration.judges) { "Score candidate judge is not configured for this session" }
             val existing = candidatesById.putIfAbsent(candidate.eventId, candidate)
             require(existing == null || existing == candidate) { "Event ID is already assigned to a different score candidate" }
         }
+        val activeCandidates = candidatesById.values.filter { it.eventId !in correctedEventIds }
         val windows = KerugiCompetitor.entries.flatMap { competitor ->
-            windowsFor(candidatesById.values.filter { it.competitor == competitor })
+            windowsFor(activeCandidates.filter { it.competitor == competitor })
         }.sortedWith(compareBy<KerugiWindowAudit>({ it.windowStartedAt }, { it.competitor }))
 
         val awardsByWindow = windows.mapNotNull { audit ->
@@ -133,7 +141,12 @@ class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration)
                 )
             }
         }
-        return KerugiScoringResult(awardsByWindow, windows, operatorActions.distinctBy(KerugiOperatorAction::eventId))
+        return KerugiScoringResult(
+            awardsByWindow,
+            windows,
+            operatorActions.filter { it.eventId !in correctedEventIds }.distinctBy(KerugiOperatorAction::eventId),
+            correctionsById.values.toList(),
+        )
     }
 
     private fun windowsFor(candidates: List<KerugiScoreCandidate>): List<KerugiWindowAudit> {

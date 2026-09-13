@@ -48,7 +48,9 @@ class JdbcKerugiScoreJournal(
             }
         }
         try {
-            KerugiScoreJournal.validate(event, configuration, ownership, sessionId)
+            KerugiScoreJournal.validate(
+                event, configuration, ownership, sessionId, events().map(SequencedDomainEvent::event),
+            )
         } catch (error: IllegalArgumentException) {
             return rejected(error.message ?: "Invalid Kerugi score candidate", event)
         }
