@@ -8,6 +8,7 @@ import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.mass.domain.BracketId
@@ -181,6 +182,37 @@ class KerugiWebSocketTest {
         senderSession.send(Frame.Text(correction(21, 20)))
         assertEquals(acknowledgement, senderSession.receiveJson())
         assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+    }
+
+    @Test
+    fun `tenth Gamjeom publishes an operator warning without a duplicate on retry`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val accepted = approvedDevice(pairingRequests, "ios-gamjeom-operator", "Petrova", "ios")
+        val journal = journal()
+        application {
+            module(pairingRequests = pairingRequests, kerugiOperatorActionCommands = RealtimeKerugiOperatorActionCommands(journal))
+        }
+        val session = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        session.sendHandshake(accepted.request.reconnectCredential)
+        session.receiveJson()
+
+        (20..28).forEach { event ->
+            session.send(Frame.Text(operatorAction(event, "GAMJEOM", "BLUE", 1)))
+            assertEquals("kerugi_operator_action_ack", session.receiveJson().getValue("type").jsonPrimitive.content)
+            assertScoreUpdate(session.receiveJson(), 0, event - 19)
+        }
+        session.send(Frame.Text(operatorAction(29, "GAMJEOM", "BLUE", 1)))
+        assertEquals("kerugi_operator_action_ack", session.receiveJson().getValue("type").jsonPrimitive.content)
+        val update = session.receiveJson()
+        assertScoreUpdate(update, 0, 10)
+        val warning = update.getValue("disqualificationWarnings").jsonArray.single().jsonObject
+        assertEquals("BLUE", warning.getValue("competitor").jsonPrimitive.content)
+        assertEquals("10", warning.getValue("gamjeomCount").jsonPrimitive.content)
+
+        session.send(Frame.Text(operatorAction(29, "GAMJEOM", "BLUE", 1)))
+        assertEquals("kerugi_operator_action_ack", session.receiveJson().getValue("type").jsonPrimitive.content)
+        assertEquals(null, withTimeoutOrNull(100) { session.incoming.receive() })
+        assertEquals(10, journal.events().size)
     }
 
     private fun journal(): KerugiScoreJournal {
