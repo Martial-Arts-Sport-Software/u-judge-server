@@ -52,7 +52,7 @@ class KerugiTimerJournal(
         val nextState = try { validate(event, ownership, sessionId) } catch (error: IllegalArgumentException) {
             return rejected(error.message ?: "Invalid Kerugi timer command", event)
         }
-        val nextProjection = try { currentProjection.transitionTo(nextState) } catch (error: IllegalArgumentException) {
+        val nextProjection = try { transition(currentProjection, event.type, nextState) } catch (error: IllegalArgumentException) {
             return rejected(error.message ?: "Invalid Kerugi timer transition", event)
         }
         val sequenced = SequencedDomainEvent(event, sequence.next(event.peerId))
@@ -72,7 +72,7 @@ class KerugiTimerJournal(
             val byId = linkedMapOf<EventId, SequencedDomainEvent>()
             events.forEach { event -> require(byId.putIfAbsent(event.event.eventId, event) in setOf(null, event)) { "Event ID is already assigned to a different event" } }
             return DomainEventOrder.order(byId.values).fold(KerugiTimerProjection.initial(sessionId)) { projection, event ->
-                projection.transitionTo(validate(event.event, ownership, sessionId))
+                transition(projection, event.event.type, validate(event.event, ownership, sessionId))
             }
         }
 
@@ -90,6 +90,21 @@ class KerugiTimerJournal(
             }
             require(event.source.value == "operator") { "Kerugi timer command must have an operator source" }
             return requireNotNull(stateFor(event.type)) { "Unsupported Kerugi timer command" }
+        }
+
+        fun transition(
+            projection: KerugiTimerProjection,
+            type: String,
+            nextState: KerugiTimerState,
+        ): KerugiTimerProjection {
+            when (type) {
+                "kerugi_timer_started" -> require(projection.state == KerugiTimerState.PREPARED)
+                "kerugi_timer_paused" -> require(projection.state == KerugiTimerState.RUNNING)
+                "kerugi_timer_resumed" -> require(projection.state == KerugiTimerState.PAUSED)
+                "kerugi_timer_stopped" -> require(projection.state in setOf(KerugiTimerState.RUNNING, KerugiTimerState.PAUSED))
+                else -> throw IllegalArgumentException("Unsupported Kerugi timer command")
+            }
+            return projection.transitionTo(nextState)
         }
 
         fun sameCommand(existing: DomainEvent, candidate: DomainEvent): Boolean = existing.copy(occurredAt = candidate.occurredAt) == candidate

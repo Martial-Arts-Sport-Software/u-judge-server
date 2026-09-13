@@ -26,6 +26,7 @@ class KerugiTimerJournalTest {
     fun `rejects invalid foreign and conflicting timer commands without changing state`() {
         val journal = journal()
         assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_timer_paused"), eventId(10)))
+        assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_timer_resumed"), eventId(11)))
         assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_timer_started", peerId = PeerId("00000000-0000-4000-8000-000000000009")), eventId(11)))
         val started = assertIs<KerugiTimerResult.Applied>(journal.apply(command("kerugi_timer_started"), eventId(12)))
         assertEquals(false, assertIs<KerugiTimerResult.Applied>(journal.apply(command("kerugi_timer_started"), eventId(12))).isNew)

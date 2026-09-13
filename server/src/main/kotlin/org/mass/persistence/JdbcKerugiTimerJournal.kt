@@ -24,7 +24,9 @@ class JdbcKerugiTimerJournal(
                 KerugiTimerResult.Applied(existing, projectionAt(existing), false)
             } else rejected("Event ID is already assigned to a different command", event)
         }
-        val next = try { currentProjection.transitionTo(KerugiTimerJournal.validate(event, ownership, sessionId)) } catch (error: IllegalArgumentException) {
+        val next = try {
+            KerugiTimerJournal.transition(currentProjection, event.type, KerugiTimerJournal.validate(event, ownership, sessionId))
+        } catch (error: IllegalArgumentException) {
             return rejected(error.message ?: "Invalid Kerugi timer command", event)
         }
         val sequenced = append(event)
