@@ -39,6 +39,9 @@ class KerugiOperatorActionJournalTest {
         assertIs<KerugiScoreResult.Applied>(journal.apply(accepted, eventId(10)))
 
         assertIs<KerugiScoreResult.Rejected>(journal.apply(action(KerugiOperatorActionType.SPIN_BONUS, KerugiCompetitor.RED, 0), eventId(11)))
+        assertIs<KerugiScoreResult.Rejected>(
+            journal.apply(action(KerugiOperatorActionType.SPIN_BONUS, KerugiCompetitor.RED, 1, source = "judge"), eventId(12)),
+        )
         assertIs<KerugiScoreResult.Rejected>(journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.RED, 1), eventId(10)))
 
         assertEquals(1, journal.events().size)
@@ -49,10 +52,15 @@ class KerugiOperatorActionJournalTest {
 
     private fun configuration() = KerugiScoringConfiguration(setOf(judgeId(7), judgeId(8)), 2, Duration.ofSeconds(1))
 
-    private fun action(type: KerugiOperatorActionType, competitor: KerugiCompetitor, points: Int) = DomainCommand(
+    private fun action(
+        type: KerugiOperatorActionType,
+        competitor: KerugiCompetitor,
+        points: Int,
+        source: String = "operator",
+    ) = DomainCommand(
         CompetitionId("00000000-0000-4000-8000-000000000004"), peerId,
         CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
-        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource(source), "operator",
         KERUGI_OPERATOR_ACTION_EVENT, Json.encodeToString(KerugiOperatorActionPayload(type, competitor, points)),
     )
 

@@ -134,7 +134,10 @@ class KerugiScoreJournal(
                     val candidate = candidateFor(event)
                     require(candidate.judgeId in configuration.judges) { "Score candidate judge is not configured for this session" }
                 }
-                KERUGI_OPERATOR_ACTION_EVENT -> operatorActionFor(event)
+                KERUGI_OPERATOR_ACTION_EVENT -> {
+                    require(event.source.value == "operator") { "Kerugi operator action must have an operator source" }
+                    operatorActionFor(event)
+                }
                 else -> throw IllegalArgumentException("Unsupported Kerugi score command")
             }
         }
