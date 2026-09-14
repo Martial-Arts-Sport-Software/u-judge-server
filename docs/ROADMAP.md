@@ -308,6 +308,14 @@ contract tests являются partial evidence для `KER-011`, `SYS-007`, `S
 `SES-004`, `NFR-011` и `NFR-012`; age-category duration policy, breaks, golden round, desktop UI, client durable
 outbox/reconnect и physical-device acceptance остаются открыты.
 
+`KerugiTimerJournal` также хранит отдельный `ROUND_BREAK` period: только operator local owner может начать перерыв из
+`RUNNING`, завершить его обратно в `RUNNING` или остановить таймер. Break events append-only, idempotent и rebuild-ятся
+из JDBC journal после recreation; authenticated `START_BREAK`/`END_BREAK` commands ACK-ятся после применения и публикуют
+`kerugi_timer_updated` только для нового события. Domain, H2 recovery и two-socket Ktor contract tests являются partial
+evidence для `KER-012`, `KER-011`, `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`, `SES-004`,
+`NFR-011` и `NFR-012`; нормативная длительность перерыва, отсчёт remaining time, age-category duration policy, golden
+round, desktop UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
