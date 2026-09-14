@@ -55,8 +55,13 @@ import org.mass.domain.KerugiScoreCorrectionPayload
 import org.mass.domain.KerugiScoreEventJournal
 import org.mass.domain.KerugiScoreResult
 import org.mass.domain.KerugiScoringArea
+import org.mass.domain.KerugiResultEventJournal
+import org.mass.domain.KerugiResultJournal
+import org.mass.domain.KerugiResultJournalResult
+import org.mass.domain.KerugiResultPayload
 import org.mass.domain.KerugiTimerEventJournal
 import org.mass.domain.KerugiTimerResult
+import org.mass.domain.KerugiVictoryReason
 import org.mass.domain.PeerId
 import org.mass.domain.SessionId
 import org.mass.domain.SessionLifecycleEventJournal
@@ -365,6 +370,34 @@ data class RealtimeKerugiTimerRejected(val type: String, val code: String)
 @Serializable
 data class RealtimeKerugiTimerUpdated(val type: String, val sessionId: String, val state: String)
 
+@Serializable
+data class RealtimeKerugiResultCommandRequest(
+    val type: String,
+    val eventId: String,
+    val sequence: Long,
+    val clientTimestamp: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val source: String,
+    val author: String,
+    val winner: String,
+    val reason: String,
+)
+
+@Serializable
+data class RealtimeKerugiResultAcknowledgement(val type: String, val eventId: String, val winner: String, val reason: String)
+
+@Serializable
+data class RealtimeKerugiResultRejected(val type: String, val code: String)
+
+@Serializable
+data class RealtimeKerugiResultUpdated(val type: String, val sessionId: String, val winner: String, val reason: String)
+
 class RealtimeKerugiTimerCommands(private val journal: KerugiTimerEventJournal) {
     fun accept(request: RealtimeKerugiTimerCommandRequest): RealtimeKerugiTimerOutcome {
         val command = try {
@@ -402,6 +435,46 @@ private fun timerEventType(action: String) = when (action) {
     "END_BREAK" -> "kerugi_round_break_ended"
     "STOP" -> "kerugi_timer_stopped"
     else -> throw IllegalArgumentException("Unsupported Kerugi timer action")
+}
+
+class RealtimeKerugiResultCommands(private val journal: KerugiResultEventJournal) {
+    fun accept(request: RealtimeKerugiResultCommandRequest): RealtimeKerugiResultOutcome {
+        val command = try {
+            require(request.type == "kerugi_result_command")
+            require(request.sequence > 0)
+            Instant.parse(request.clientTimestamp)
+            val winner = KerugiCompetitor.valueOf(request.winner)
+            val reason = KerugiVictoryReason.valueOf(request.reason)
+            DomainCommand(
+                CompetitionId(request.competitionId), PeerId(request.peerId), CourtId(request.courtId), BracketId(request.bracketId),
+                SessionId(request.sessionId), JudgeId(request.judgeId), DeviceId(request.deviceId), EventSource(request.source),
+                request.author, KerugiResultJournal.KERUGI_RESULT_EVENT,
+                Json.encodeToString(KerugiResultPayload(winner.name, reason.name)),
+            )
+        } catch (_: IllegalArgumentException) {
+            return RealtimeKerugiResultOutcome.Rejected("invalid_kerugi_result_command")
+        }
+        val eventId = try { EventId(request.eventId) } catch (_: IllegalArgumentException) {
+            return RealtimeKerugiResultOutcome.Rejected("invalid_kerugi_result_command")
+        }
+        return try {
+            when (val result = journal.apply(command, eventId)) {
+                is KerugiResultJournalResult.Applied -> RealtimeKerugiResultOutcome.Acknowledged(
+                    RealtimeKerugiResultAcknowledgement(
+                        "kerugi_result_ack", result.event.event.eventId.value,
+                        requireNotNull(result.projection.winner).name.lowercase(), requireNotNull(result.projection.reason).name.lowercase(),
+                    ),
+                    result.projection.sessionId.value, result.isNew,
+                )
+                is KerugiResultJournalResult.Rejected -> RealtimeKerugiResultOutcome.Rejected("kerugi_result_command_rejected")
+            }
+        } catch (_: Exception) { RealtimeKerugiResultOutcome.Rejected("kerugi_result_unavailable") }
+    }
+}
+
+sealed interface RealtimeKerugiResultOutcome {
+    data class Acknowledged(val acknowledgement: RealtimeKerugiResultAcknowledgement, val sessionId: String, val isNew: Boolean) : RealtimeKerugiResultOutcome
+    data class Rejected(val code: String) : RealtimeKerugiResultOutcome
 }
 
 sealed interface RealtimeKerugiTimerOutcome {
@@ -565,6 +638,17 @@ class RealtimeKerugiTimerPublisher {
     fun subscribe(session: WebSocketSession) { subscribers += session }
     fun unsubscribe(session: WebSocketSession) { subscribers -= session }
     suspend fun publish(update: RealtimeKerugiTimerUpdated) {
+        synchronized(subscribers) { subscribers.toList() }.forEach { session ->
+            runCatching { session.send(Frame.Text(Json.encodeToString(update))) }.onFailure { unsubscribe(session) }
+        }
+    }
+}
+
+class RealtimeKerugiResultPublisher {
+    private val subscribers = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
+    fun subscribe(session: WebSocketSession) { subscribers += session }
+    fun unsubscribe(session: WebSocketSession) { subscribers -= session }
+    suspend fun publish(update: RealtimeKerugiResultUpdated) {
         synchronized(subscribers) { subscribers.toList() }.forEach { session ->
             runCatching { session.send(Frame.Text(Json.encodeToString(update))) }.onFailure { unsubscribe(session) }
         }
@@ -917,9 +1001,11 @@ fun Application.module(
     kerugiOperatorActionCommands: RealtimeKerugiOperatorActionCommands? = null,
     kerugiScoreCorrectionCommands: RealtimeKerugiScoreCorrectionCommands? = null,
     kerugiTimerCommands: RealtimeKerugiTimerCommands? = null,
+    kerugiResultCommands: RealtimeKerugiResultCommands? = null,
     lifecycleStatePublisher: RealtimeSessionStatePublisher = RealtimeSessionStatePublisher(),
     kerugiScorePublisher: RealtimeKerugiScorePublisher = RealtimeKerugiScorePublisher(),
     kerugiTimerPublisher: RealtimeKerugiTimerPublisher = RealtimeKerugiTimerPublisher(),
+    kerugiResultPublisher: RealtimeKerugiResultPublisher = RealtimeKerugiResultPublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
 ) {
     install(ContentNegotiation) {
@@ -985,6 +1071,7 @@ fun Application.module(
             lifecycleStatePublisher.subscribe(this)
             kerugiScorePublisher.subscribe(this)
             kerugiTimerPublisher.subscribe(this)
+            kerugiResultPublisher.subscribe(this)
             val heartbeatTracker = RealtimeHeartbeatTracker(heartbeatTimeout)
             heartbeatTracker.connected(reconnectCredential)
             send(Frame.Text(Json.encodeToString(RealtimeHandshakeAccepted("handshake_accepted"))))
@@ -1151,6 +1238,26 @@ fun Application.module(
                         }
                         continue
                     }
+                    if (messageType == "kerugi_result_command") {
+                        val request = runCatching { Json.decodeFromString<RealtimeKerugiResultCommandRequest>(commandText) }.getOrNull()
+                        val outcome = request?.let { kerugiResultCommands?.accept(it) }
+                            ?: RealtimeKerugiResultOutcome.Rejected("kerugi_result_unavailable")
+                        when (outcome) {
+                            is RealtimeKerugiResultOutcome.Acknowledged -> {
+                                send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                                if (outcome.isNew) kerugiResultPublisher.publish(
+                                    RealtimeKerugiResultUpdated(
+                                        "kerugi_result_updated", outcome.sessionId,
+                                        outcome.acknowledgement.winner, outcome.acknowledgement.reason,
+                                    ),
+                                )
+                            }
+                            is RealtimeKerugiResultOutcome.Rejected -> send(
+                                Frame.Text(Json.encodeToString(RealtimeKerugiResultRejected("kerugi_result_rejected", outcome.code))),
+                            )
+                        }
+                        continue
+                    }
                     if (messageType == "kerugi_operator_action_command") {
                         val request = runCatching {
                             Json.decodeFromString<RealtimeKerugiOperatorActionCommandRequest>(commandText)
@@ -1233,6 +1340,7 @@ fun Application.module(
                 lifecycleStatePublisher.unsubscribe(this)
                 kerugiScorePublisher.unsubscribe(this)
                 kerugiTimerPublisher.unsubscribe(this)
+                kerugiResultPublisher.unsubscribe(this)
             }
         }
     }

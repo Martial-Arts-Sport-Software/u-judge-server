@@ -316,6 +316,15 @@ evidence для `KER-012`, `KER-011`, `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`
 `NFR-011` и `NFR-012`; нормативная длительность перерыва, отсчёт remaining time, age-category duration policy, golden
 round, desktop UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
 
+`KerugiResultJournal` фиксирует ровно одно append-only операторское решение о победителе local in-progress bracket с
+причиной `final_score` или `golden_round`. Решение хранит победителя и причину в raw payload, не может быть заменено
+вторым решением, idempotent по event ID и rebuild-ится из JDBC migration после recreation; authenticated realtime command
+ACK-ится только после применения и публикует `kerugi_result_updated` всем current authenticated sockets только для нового
+решения. Domain, H2 recovery и two-socket Ktor contract tests являются partial evidence для `KER-013`, `SYS-007`,
+`SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; age-category duration policy,
+связь решения с завершением session/bracket, desktop UI, client durable outbox/reconnect и physical-device acceptance
+остаются открыты, поэтому `KER-013` и Gate G3 не закрыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
