@@ -29,10 +29,13 @@ class KerugiTimerWebSocketTest {
         senderSocket.send(Frame.Text(command(4, "START")))
         assertEquals("kerugi_timer_ack", senderSocket.receiveJson().getValue("type").jsonPrimitive.content)
         assertUpdate(senderSocket.receiveJson(), "running"); assertUpdate(watcherSocket.receiveJson(), "running")
-        senderSocket.send(Frame.Text(command(4, "START")))
+        senderSocket.send(Frame.Text(command(5, "START_BREAK")))
+        assertEquals("kerugi_timer_ack", senderSocket.receiveJson().getValue("type").jsonPrimitive.content)
+        assertUpdate(senderSocket.receiveJson(), "round_break"); assertUpdate(watcherSocket.receiveJson(), "round_break")
+        senderSocket.send(Frame.Text(command(5, "START_BREAK")))
         assertEquals("kerugi_timer_ack", senderSocket.receiveJson().getValue("type").jsonPrimitive.content)
         assertEquals(null, withTimeoutOrNull(100) { watcherSocket.incoming.receive() })
-        senderSocket.send(Frame.Text(command(5, "PAUSE", peer = "00000000-0000-4000-8000-000000000009")))
+        senderSocket.send(Frame.Text(command(6, "END_BREAK", peer = "00000000-0000-4000-8000-000000000009")))
         assertEquals("kerugi_timer_rejected", senderSocket.receiveJson().getValue("type").jsonPrimitive.content)
     }
     private fun journal(): KerugiTimerJournal {

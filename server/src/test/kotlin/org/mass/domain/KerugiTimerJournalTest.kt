@@ -23,9 +23,21 @@ class KerugiTimerJournalTest {
     }
 
     @Test
+    fun `applies an explicit round break and rebuilds it from events`() {
+        val journal = journal()
+        assertIs<KerugiTimerResult.Applied>(journal.apply(command("kerugi_timer_started"), eventId(20)))
+        assertIs<KerugiTimerResult.Applied>(journal.apply(command("kerugi_round_break_started"), eventId(21)))
+        assertEquals(KerugiTimerState.ROUND_BREAK, journal.projection().state)
+        assertEquals(journal.projection(), KerugiTimerJournal.rebuild(ownership, sessionId, journal.events()))
+        assertIs<KerugiTimerResult.Applied>(journal.apply(command("kerugi_round_break_ended"), eventId(22)))
+        assertEquals(KerugiTimerState.RUNNING, journal.projection().state)
+    }
+
+    @Test
     fun `rejects invalid foreign and conflicting timer commands without changing state`() {
         val journal = journal()
         assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_timer_paused"), eventId(10)))
+        assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_round_break_started"), eventId(11)))
         assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_timer_resumed"), eventId(11)))
         assertIs<KerugiTimerResult.Rejected>(journal.apply(command("kerugi_timer_started", peerId = PeerId("00000000-0000-4000-8000-000000000009")), eventId(11)))
         val started = assertIs<KerugiTimerResult.Applied>(journal.apply(command("kerugi_timer_started"), eventId(12)))

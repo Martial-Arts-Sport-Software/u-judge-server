@@ -398,6 +398,8 @@ private fun timerEventType(action: String) = when (action) {
     "START" -> "kerugi_timer_started"
     "PAUSE" -> "kerugi_timer_paused"
     "RESUME" -> "kerugi_timer_resumed"
+    "START_BREAK" -> "kerugi_round_break_started"
+    "END_BREAK" -> "kerugi_round_break_ended"
     "STOP" -> "kerugi_timer_stopped"
     else -> throw IllegalArgumentException("Unsupported Kerugi timer action")
 }
