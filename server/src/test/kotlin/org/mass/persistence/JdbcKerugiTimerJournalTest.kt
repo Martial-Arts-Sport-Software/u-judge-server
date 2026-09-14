@@ -27,6 +27,18 @@ class JdbcKerugiTimerJournalTest {
         assertEquals(started.event, retry.event)
     }
 
+    @Test
+    fun `rebuilds persisted round break after recreation`() {
+        val source = JdbcDataSource().apply { setURL("jdbc:h2:mem:kerugi-timer-break;MODE=PostgreSQL;DB_CLOSE_DELAY=-1") }
+        val first = journal(source)
+        assertIs<KerugiTimerResult.Applied>(first.apply(command("kerugi_timer_started"), eventId(20)))
+        assertIs<KerugiTimerResult.Applied>(first.apply(command("kerugi_round_break_started"), eventId(21)))
+
+        val restarted = journal(source)
+        assertEquals(KerugiTimerState.ROUND_BREAK, restarted.projection().state)
+        assertEquals(false, assertIs<KerugiTimerResult.Applied>(restarted.apply(command("kerugi_round_break_started"), eventId(21))).isNew)
+    }
+
     private fun journal(source: JdbcDataSource) = JdbcKerugiTimerJournal(source, ownership, sessionId, now = { Instant.parse("2026-09-13T12:00:00Z") })
     private fun command(type: String) = DomainCommand(
         CompetitionId("00000000-0000-4000-8000-000000000004"), peerId, CourtId("00000000-0000-4000-8000-000000000005"), bracketId,

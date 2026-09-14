@@ -2,7 +2,7 @@ package org.mass.domain
 
 import java.time.Instant
 
-enum class KerugiTimerState { PREPARED, RUNNING, PAUSED, STOPPED }
+enum class KerugiTimerState { PREPARED, RUNNING, PAUSED, ROUND_BREAK, STOPPED }
 
 data class KerugiTimerProjection(val sessionId: SessionId, val state: KerugiTimerState) {
     fun transitionTo(next: KerugiTimerState): KerugiTimerProjection {
@@ -15,8 +15,9 @@ data class KerugiTimerProjection(val sessionId: SessionId, val state: KerugiTime
 
         private val allowedTransitions = mapOf(
             KerugiTimerState.PREPARED to setOf(KerugiTimerState.RUNNING),
-            KerugiTimerState.RUNNING to setOf(KerugiTimerState.PAUSED, KerugiTimerState.STOPPED),
+            KerugiTimerState.RUNNING to setOf(KerugiTimerState.PAUSED, KerugiTimerState.ROUND_BREAK, KerugiTimerState.STOPPED),
             KerugiTimerState.PAUSED to setOf(KerugiTimerState.RUNNING, KerugiTimerState.STOPPED),
+            KerugiTimerState.ROUND_BREAK to setOf(KerugiTimerState.RUNNING, KerugiTimerState.STOPPED),
             KerugiTimerState.STOPPED to emptySet(),
         )
     }
@@ -77,8 +78,9 @@ class KerugiTimerJournal(
         }
 
         fun stateFor(type: String): KerugiTimerState? = when (type) {
-            "kerugi_timer_started", "kerugi_timer_resumed" -> KerugiTimerState.RUNNING
+            "kerugi_timer_started", "kerugi_timer_resumed", "kerugi_round_break_ended" -> KerugiTimerState.RUNNING
             "kerugi_timer_paused" -> KerugiTimerState.PAUSED
+            "kerugi_round_break_started" -> KerugiTimerState.ROUND_BREAK
             "kerugi_timer_stopped" -> KerugiTimerState.STOPPED
             else -> null
         }
@@ -101,7 +103,9 @@ class KerugiTimerJournal(
                 "kerugi_timer_started" -> require(projection.state == KerugiTimerState.PREPARED)
                 "kerugi_timer_paused" -> require(projection.state == KerugiTimerState.RUNNING)
                 "kerugi_timer_resumed" -> require(projection.state == KerugiTimerState.PAUSED)
-                "kerugi_timer_stopped" -> require(projection.state in setOf(KerugiTimerState.RUNNING, KerugiTimerState.PAUSED))
+                "kerugi_round_break_started" -> require(projection.state == KerugiTimerState.RUNNING)
+                "kerugi_round_break_ended" -> require(projection.state == KerugiTimerState.ROUND_BREAK)
+                "kerugi_timer_stopped" -> require(projection.state in setOf(KerugiTimerState.RUNNING, KerugiTimerState.PAUSED, KerugiTimerState.ROUND_BREAK))
                 else -> throw IllegalArgumentException("Unsupported Kerugi timer command")
             }
             return projection.transitionTo(nextState)
