@@ -5,6 +5,13 @@ description: Use when testing, packaging, releasing, or modifying Gradle, depend
 
 # U'Judge Server Verification
 
+## Delivery scope
+
+- Before implementation, name the acceptance outcome or gate evidence the PR will advance and map it to requirement IDs.
+- Include every server-owned layer required to prove that outcome: domain behavior, persistence/rebuild, transport contract, publication, and desktop UI when applicable.
+- For a cross-repository outcome, link the client work and record the integration or physical-device evidence needed to close it.
+- A narrow prerequisite is allowed only for an urgent fix, blocking preparation, CI/docs change, or independently useful dependency. Explain the exception and the parent outcome in the issue and PR; never mark partial evidence as a completed requirement or gate.
+
 ## Required checks
 
 - Use JDK 21.
