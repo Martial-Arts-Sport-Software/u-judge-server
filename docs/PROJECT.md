@@ -160,12 +160,12 @@ Authoritative source для v1 Pilot — предоставленный «Про
   получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
   idle socket с `heartbeat_timeout`, но client scheduling, persistent device state и physical-device evidence не реализованы.
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
-- Нормативные длительности Kerugi, перерывы, golden round, подтверждаемое решение о дисквалификации и формулы остальных
-дисциплин; базовые Kerugi `HEAD`/`BODY` quorum scoring, append-only corrections, операторские throw/spin/Gamjeom
-actions, warning при 10 Gamjeom, persisted start/pause/resume/stop timer state, durable journal и authenticated
-projection publication уже существуют. Отдельный persisted `ROUND_BREAK` period принимает только `START_BREAK` из
-`RUNNING` и `END_BREAK` обратно в `RUNNING`, с durable rebuild и realtime publication; нормативная длительность,
-remaining-time countdown, desktop datasource wiring и physical-device acceptance открыты;
+- Нормативные длительности Kerugi, golden round policy и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum
+  scoring, append-only corrections, операторские throw/spin/Gamjeom actions, warning при 10 Gamjeom и append-only
+  подтверждаемое оператором решение о дисквалификации, persisted start/pause/resume/stop timer state, durable journal и
+  authenticated projection publication уже существуют. Отдельный persisted `ROUND_BREAK` period принимает только `START_BREAK` из
+  `RUNNING` и `END_BREAK` обратно в `RUNNING`, с durable rebuild и realtime publication; нормативная длительность,
+  remaining-time countdown, desktop datasource wiring и physical-device acceptance открыты;
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
