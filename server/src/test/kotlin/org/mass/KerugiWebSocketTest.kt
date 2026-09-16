@@ -215,6 +215,50 @@ class KerugiWebSocketTest {
         assertEquals(10, journal.events().size)
     }
 
+    @Test
+    fun `operator-confirmed disqualification publishes once after the Gamjeom warning`() = testApplication {
+        val pairingRequests = PairingRequests()
+        val sender = approvedDevice(pairingRequests, "ios-disqualification-operator", "Petrova", "ios")
+        val subscriber = approvedDevice(pairingRequests, "android-disqualification-watcher", "Ivanov", "android")
+        val journal = journal()
+        application {
+            module(
+                pairingRequests = pairingRequests,
+                kerugiOperatorActionCommands = RealtimeKerugiOperatorActionCommands(journal),
+                kerugiDisqualificationCommands = RealtimeKerugiDisqualificationCommands(journal),
+            )
+        }
+        val client = createClient { install(WebSockets) }
+        val senderSession = client.webSocketSession("/v1/realtime")
+        val subscriberSession = client.webSocketSession("/v1/realtime")
+        senderSession.sendHandshake(sender.request.reconnectCredential)
+        subscriberSession.sendHandshake(subscriber.request.reconnectCredential)
+        senderSession.receiveJson()
+        subscriberSession.receiveJson()
+
+        senderSession.send(Frame.Text(disqualification(30, "BLUE")))
+        assertEquals("kerugi_disqualification_rejected", senderSession.receiveJson().getValue("type").jsonPrimitive.content)
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+        (20..29).forEach { event ->
+            senderSession.send(Frame.Text(operatorAction(event, "GAMJEOM", "BLUE", 1)))
+            senderSession.receiveJson()
+            senderSession.receiveJson()
+            subscriberSession.receiveJson()
+        }
+
+        senderSession.send(Frame.Text(disqualification(30, "BLUE")))
+        val acknowledgement = senderSession.receiveJson()
+        assertEquals("kerugi_disqualification_ack", acknowledgement.getValue("type").jsonPrimitive.content)
+        val update = senderSession.receiveJson()
+        assertScoreUpdate(update, 0, 10)
+        assertEquals("BLUE", update.getValue("disqualification").jsonObject.getValue("competitor").jsonPrimitive.content)
+        assertScoreUpdate(subscriberSession.receiveJson(), 0, 10)
+
+        senderSession.send(Frame.Text(disqualification(30, "BLUE")))
+        assertEquals(acknowledgement, senderSession.receiveJson())
+        assertEquals(null, withTimeoutOrNull(100) { subscriberSession.incoming.receive() })
+    }
+
     private fun journal(): KerugiScoreJournal {
         val peerId = PeerId("00000000-0000-4000-8000-000000000001")
         return KerugiScoreJournal(
@@ -244,6 +288,9 @@ class KerugiWebSocketTest {
 
     private fun correction(event: Int, target: Int) =
         """{"type":"kerugi_score_correction_command","eventId":"00000000-0000-4000-8000-${event.toString().padStart(12, '0')}","competitionId":"00000000-0000-4000-8000-000000000004","peerId":"00000000-0000-4000-8000-000000000001","courtId":"00000000-0000-4000-8000-000000000005","bracketId":"00000000-0000-4000-8000-000000000002","sessionId":"00000000-0000-4000-8000-000000000003","judgeId":"00000000-0000-4000-8000-000000000007","deviceId":"00000000-0000-4000-8000-000000000006","source":"operator","author":"operator","targetEventId":"00000000-0000-4000-8000-${target.toString().padStart(12, '0')}"}"""
+
+    private fun disqualification(event: Int, competitor: String) =
+        """{"type":"kerugi_disqualification_command","eventId":"00000000-0000-4000-8000-${event.toString().padStart(12, '0')}","competitionId":"00000000-0000-4000-8000-000000000004","peerId":"00000000-0000-4000-8000-000000000001","courtId":"00000000-0000-4000-8000-000000000005","bracketId":"00000000-0000-4000-8000-000000000002","sessionId":"00000000-0000-4000-8000-000000000003","judgeId":"00000000-0000-4000-8000-000000000007","deviceId":"00000000-0000-4000-8000-000000000006","source":"operator","author":"operator","competitor":"$competitor"}"""
 
     private suspend fun io.ktor.websocket.WebSocketSession.receiveJson() = Json.parseToJsonElement(
         (incoming.receive() as Frame.Text).readText(),

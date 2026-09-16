@@ -14,7 +14,10 @@ import org.mass.domain.JudgeId
 import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
 import org.mass.domain.KERUGI_SCORE_CORRECTION_EVENT
 import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
+import org.mass.domain.KERUGI_DISQUALIFICATION_EVENT
 import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiDisqualification
+import org.mass.domain.KerugiDisqualificationPayload
 import org.mass.domain.KerugiDisqualificationWarning
 import org.mass.domain.KerugiOperatorActionPayload
 import org.mass.domain.KerugiOperatorActionType
@@ -95,6 +98,23 @@ class JdbcKerugiScoreJournalTest {
         assertEquals(10, restartedProcess.projection().redScore)
     }
 
+    @Test
+    fun `recovers an operator-confirmed disqualification after recreation`() {
+        val dataSource = JdbcDataSource().apply { setURL("jdbc:h2:mem:kerugi-disqualification-recovery;MODE=PostgreSQL;DB_CLOSE_DELAY=-1") }
+        val firstProcess = journal(dataSource)
+        (10..19).forEach { event ->
+            assertIs<KerugiScoreResult.Applied>(
+                firstProcess.apply(operatorAction(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(event)),
+            )
+        }
+        assertIs<KerugiScoreResult.Applied>(firstProcess.apply(disqualification(KerugiCompetitor.BLUE), eventId(20)))
+
+        val restartedProcess = journal(dataSource)
+
+        assertEquals(KerugiDisqualification(eventId(20).value, KerugiCompetitor.BLUE), restartedProcess.projection().disqualification)
+        assertEquals(11, restartedProcess.events().size)
+    }
+
     private fun journal(dataSource: JdbcDataSource) = JdbcKerugiScoreJournal(
         dataSource, ownership, sessionId, KerugiScoringConfiguration(judges, 2, Duration.ofSeconds(1)),
         now = { Instant.parse("2026-09-12T12:00:00Z") },
@@ -120,6 +140,13 @@ class JdbcKerugiScoreJournalTest {
         CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
         DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
         KERUGI_SCORE_CORRECTION_EVENT, Json.encodeToString(KerugiScoreCorrectionPayload(targetEventId.value)),
+    )
+
+    private fun disqualification(competitor: KerugiCompetitor) = DomainCommand(
+        CompetitionId("00000000-0000-4000-8000-000000000004"), peerId,
+        CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
+        KERUGI_DISQUALIFICATION_EVENT, Json.encodeToString(KerugiDisqualificationPayload(competitor)),
     )
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")

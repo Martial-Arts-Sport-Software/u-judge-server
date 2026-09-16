@@ -292,13 +292,15 @@ recalculation, operator action correction и публикацию новых aut
 evidence для `KER-005`, `KER-008`, `KER-009`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; timer, desktop
 operator UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
 
-`KerugiScoringResult` теперь детерминированно проецирует `disqualificationWarnings`, когда effective sum операторских
-`GAMJEOM` против участника достигает `10`; warning не создаёт автоматического решения о дисквалификации. Correction
-Gamjeom снимает warning при rebuild, а повторная доставка действия не создаёт дополнительную публикацию. Domain, JDBC/H2
-recovery и authenticated WebSocket contract tests покрывают threshold, retry и recovery. Это partial evidence для
-`KER-007`, `KER-009`, `KER-015`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; подтверждаемое оператором
-решение о дисквалификации, timer, desktop operator UI, client durable outbox/reconnect и physical-device acceptance
-остаются открыты.
+`KerugiScoringResult` детерминированно проецирует `disqualificationWarnings`, когда effective sum операторских
+`GAMJEOM` против участника достигает `10`; warning сам по себе не создаёт решения. Только operator local owner может
+append-ить одно `kerugi_disqualification_confirmed` после такого warning: raw event сохраняет дисквалифицированного
+участника и полный audit envelope, а premature, foreign, duplicate и conflicting commands не меняют journal. Решение
+rebuild-ится из JDBC/H2 journal после recreation, authenticated `/v1/realtime` ACK-ит его только после применения и
+публикует authoritative score projection с confirmed disqualification только для нового event. Domain, JDBC/H2 recovery
+и two-socket WebSocket contract tests являются partial evidence для `KER-007`, `KER-009`, `KER-015`, `SYS-007`,
+`SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; timer, desktop operator UI,
+client durable outbox/reconnect и physical-device acceptance остаются открыты, поэтому `KER-015` и Gate G3 не закрыты.
 
 `KerugiTimerJournal` добавляет append-only typed transitions `START`, `PAUSE`, `RESUME` и `STOP` только от operator
 локального владельца in-progress сетки. Immutable timer projection отклоняет недопустимый порядок, duplicate/conflicting
