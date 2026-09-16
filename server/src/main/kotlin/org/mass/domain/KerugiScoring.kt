@@ -87,6 +87,10 @@ data class KerugiScoreCorrection(val eventId: EventId, val targetEventId: EventI
 @Serializable
 data class KerugiDisqualificationWarning(val competitor: KerugiCompetitor, val gamjeomCount: Int)
 
+/** An operator-confirmed disqualification based on the effective Gamjeom audit trail. */
+@Serializable
+data class KerugiDisqualification(val eventId: String, val competitor: KerugiCompetitor)
+
 private fun KerugiCompetitor.opponent() = if (this == KerugiCompetitor.BLUE) KerugiCompetitor.RED else KerugiCompetitor.BLUE
 
 /** Retains the input events and the decision for a scoring window for later audit. */
@@ -104,6 +108,7 @@ data class KerugiScoringResult(
     val operatorActions: List<KerugiOperatorAction> = emptyList(),
     val corrections: List<KerugiScoreCorrection> = emptyList(),
     val disqualificationWarnings: List<KerugiDisqualificationWarning> = emptyList(),
+    val disqualification: KerugiDisqualification? = null,
 ) {
     val blueScore: Int get() = scoreFor(KerugiCompetitor.BLUE)
     val redScore: Int get() = scoreFor(KerugiCompetitor.RED)
@@ -122,6 +127,7 @@ class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration)
         deliveredCandidates: Iterable<KerugiScoreCandidate>,
         operatorActions: Iterable<KerugiOperatorAction> = emptyList(),
         corrections: Iterable<KerugiScoreCorrection> = emptyList(),
+        disqualifications: Iterable<KerugiDisqualification> = emptyList(),
     ): KerugiScoringResult {
         val correctionsById = corrections.associateBy(KerugiScoreCorrection::eventId)
         val correctedEventIds = correctionsById.values.map(KerugiScoreCorrection::targetEventId).toSet()
@@ -157,12 +163,14 @@ class KerugiScoringEngine(private val configuration: KerugiScoringConfiguration)
             KerugiDisqualificationWarning(competitor, gamjeomCount)
                 .takeIf { gamjeomCount >= KERUGI_DISQUALIFICATION_GAMJEOM_THRESHOLD }
         }
+        val disqualification = disqualifications.singleOrNull()
         return KerugiScoringResult(
             awardsByWindow,
             windows,
             activeOperatorActions,
             correctionsById.values.toList(),
             warnings,
+            disqualification,
         )
     }
 

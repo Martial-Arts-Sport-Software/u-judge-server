@@ -102,6 +102,56 @@ class KerugiOperatorActionJournalTest {
         assertEquals(corrected.projection, KerugiScoreJournal.rebuild(ownership, sessionId, configuration(), journal.events()))
     }
 
+    @Test
+    fun `requires an operator to confirm one disqualification after ten effective Gamjeom`() {
+        val journal = journal()
+        (10..19).forEach { event ->
+            assertIs<KerugiScoreResult.Applied>(
+                journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(event)),
+            )
+        }
+
+        val confirmed = assertIs<KerugiScoreResult.Applied>(journal.apply(disqualification(KerugiCompetitor.BLUE), eventId(20)))
+
+        assertEquals(KerugiDisqualification(eventId(20).value, KerugiCompetitor.BLUE), confirmed.projection.disqualification)
+        assertEquals(false, assertIs<KerugiScoreResult.Applied>(
+            journal.apply(disqualification(KerugiCompetitor.BLUE), eventId(20)),
+        ).isNew)
+        assertIs<KerugiScoreResult.Rejected>(journal.apply(disqualification(KerugiCompetitor.BLUE), eventId(21)))
+        assertEquals(11, journal.events().size)
+        assertEquals(confirmed.projection, KerugiScoreJournal.rebuild(ownership, sessionId, configuration(), journal.events()))
+    }
+
+    @Test
+    fun `rejects a premature disqualification without changing the audit journal`() {
+        val journal = journal()
+        assertIs<KerugiScoreResult.Applied>(
+            journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(10)),
+        )
+
+        assertIs<KerugiScoreResult.Rejected>(journal.apply(disqualification(KerugiCompetitor.BLUE), eventId(11)))
+
+        assertEquals(1, journal.events().size)
+        assertEquals(null, journal.projection().disqualification)
+    }
+
+    @Test
+    fun `rejects a disqualification from a non-operator source without changing the audit journal`() {
+        val journal = journal()
+        (10..19).forEach { event ->
+            assertIs<KerugiScoreResult.Applied>(
+                journal.apply(action(KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1), eventId(event)),
+            )
+        }
+
+        assertIs<KerugiScoreResult.Rejected>(
+            journal.apply(disqualification(KerugiCompetitor.BLUE, source = "judge"), eventId(20)),
+        )
+
+        assertEquals(10, journal.events().size)
+        assertEquals(null, journal.projection().disqualification)
+    }
+
     private fun journal() = KerugiScoreJournal(ownership, sessionId, configuration(), now = { Instant.parse("2026-09-12T12:00:00Z") })
 
     private fun configuration() = KerugiScoringConfiguration(setOf(judgeId(7), judgeId(8)), 2, Duration.ofSeconds(1))
@@ -123,6 +173,13 @@ class KerugiOperatorActionJournalTest {
         CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
         DeviceId("00000000-0000-4000-8000-000000000006"), EventSource("operator"), "operator",
         KERUGI_SCORE_CORRECTION_EVENT, Json.encodeToString(KerugiScoreCorrectionPayload(targetEventId.value)),
+    )
+
+    private fun disqualification(competitor: KerugiCompetitor, source: String = "operator") = DomainCommand(
+        CompetitionId("00000000-0000-4000-8000-000000000004"), peerId,
+        CourtId("00000000-0000-4000-8000-000000000005"), bracketId, sessionId, judgeId(7),
+        DeviceId("00000000-0000-4000-8000-000000000006"), EventSource(source), "operator",
+        KERUGI_DISQUALIFICATION_EVENT, Json.encodeToString(KerugiDisqualificationPayload(competitor)),
     )
 
     private fun judgeId(number: Int) = JudgeId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")

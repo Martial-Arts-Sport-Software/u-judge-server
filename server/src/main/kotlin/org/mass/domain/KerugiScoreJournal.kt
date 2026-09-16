@@ -7,6 +7,7 @@ import java.time.Instant
 const val KERUGI_SCORE_CANDIDATE_EVENT = "kerugi_score_candidate"
 const val KERUGI_OPERATOR_ACTION_EVENT = "kerugi_operator_action"
 const val KERUGI_SCORE_CORRECTION_EVENT = "kerugi_score_correction"
+const val KERUGI_DISQUALIFICATION_EVENT = "kerugi_disqualification_confirmed"
 
 @Serializable
 data class KerugiScoreCandidatePayload(
@@ -24,6 +25,9 @@ data class KerugiOperatorActionPayload(
 
 @Serializable
 data class KerugiScoreCorrectionPayload(val targetEventId: String)
+
+@Serializable
+data class KerugiDisqualificationPayload(val competitor: KerugiCompetitor)
 
 sealed interface KerugiScoreResult {
     class Applied(
@@ -124,12 +128,18 @@ class KerugiScoreJournal(
             EventId(Json.decodeFromString<KerugiScoreCorrectionPayload>(event.payload).targetEventId),
         )
 
+        fun disqualificationFor(event: DomainEvent): KerugiDisqualification = KerugiDisqualification(
+            event.eventId.value,
+            Json.decodeFromString<KerugiDisqualificationPayload>(event.payload).competitor,
+        )
+
         private fun score(events: Iterable<DomainEvent>, configuration: KerugiScoringConfiguration): KerugiScoringResult {
             val eventList = events.toList()
             return KerugiScoringEngine(configuration).score(
                 eventList.filter { it.type == KERUGI_SCORE_CANDIDATE_EVENT }.map(::candidateFor),
                 eventList.filter { it.type == KERUGI_OPERATOR_ACTION_EVENT }.map(::operatorActionFor),
                 eventList.filter { it.type == KERUGI_SCORE_CORRECTION_EVENT }.map(::correctionFor),
+                eventList.filter { it.type == KERUGI_DISQUALIFICATION_EVENT }.map(::disqualificationFor),
             )
         }
 
@@ -165,6 +175,18 @@ class KerugiScoreJournal(
                     require(acceptedEvents.none {
                         it.type == KERUGI_SCORE_CORRECTION_EVENT && correctionFor(it).targetEventId == correction.targetEventId
                     }) { "Kerugi score event is already corrected" }
+                }
+                KERUGI_DISQUALIFICATION_EVENT -> {
+                    require(event.source.value == "operator") { "Kerugi disqualification must have an operator source" }
+                    val disqualification = disqualificationFor(event)
+                    require(acceptedEvents.none { it.type == KERUGI_DISQUALIFICATION_EVENT }) {
+                        "Kerugi disqualification is already confirmed"
+                    }
+                    require(
+                        score(acceptedEvents, configuration).disqualificationWarnings.any {
+                            it.competitor == disqualification.competitor
+                        },
+                    ) { "Kerugi disqualification requires ten effective Gamjeom" }
                 }
                 else -> throw IllegalArgumentException("Unsupported Kerugi score command")
             }

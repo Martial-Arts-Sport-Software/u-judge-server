@@ -46,7 +46,10 @@ import org.mass.domain.JudgeId
 import org.mass.domain.KERUGI_SCORE_CANDIDATE_EVENT
 import org.mass.domain.KERUGI_OPERATOR_ACTION_EVENT
 import org.mass.domain.KERUGI_SCORE_CORRECTION_EVENT
+import org.mass.domain.KERUGI_DISQUALIFICATION_EVENT
 import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiDisqualification
+import org.mass.domain.KerugiDisqualificationPayload
 import org.mass.domain.KerugiDisqualificationWarning
 import org.mass.domain.KerugiOperatorActionPayload
 import org.mass.domain.KerugiOperatorActionType
@@ -329,6 +332,22 @@ data class RealtimeKerugiScoreCorrectionCommandRequest(
 )
 
 @Serializable
+data class RealtimeKerugiDisqualificationCommandRequest(
+    val type: String,
+    val eventId: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val source: String,
+    val author: String,
+    val competitor: KerugiCompetitor,
+)
+
+@Serializable
 data class RealtimeKerugiScoreAcknowledgement(val type: String, val eventId: String, val blueScore: Int, val redScore: Int)
 
 @Serializable
@@ -341,6 +360,7 @@ data class RealtimeKerugiScoreUpdated(
     val blueScore: Int,
     val redScore: Int,
     val disqualificationWarnings: List<KerugiDisqualificationWarning>,
+    val disqualification: KerugiDisqualification? = null,
 )
 
 @Serializable
@@ -582,12 +602,44 @@ class RealtimeKerugiScoreCorrectionCommands(private val journal: KerugiScoreEven
     }
 }
 
+class RealtimeKerugiDisqualificationCommands(private val journal: KerugiScoreEventJournal) {
+    fun accept(request: RealtimeKerugiDisqualificationCommandRequest): RealtimeKerugiScoreOutcome {
+        val eventId = try {
+            require(request.type == "kerugi_disqualification_command")
+            val command = DomainCommand(
+                CompetitionId(request.competitionId), PeerId(request.peerId), CourtId(request.courtId), BracketId(request.bracketId),
+                SessionId(request.sessionId), JudgeId(request.judgeId), DeviceId(request.deviceId), EventSource(request.source),
+                request.author, KERUGI_DISQUALIFICATION_EVENT, Json.encodeToString(KerugiDisqualificationPayload(request.competitor)),
+            )
+            EventId(request.eventId) to command
+        } catch (_: IllegalArgumentException) {
+            return RealtimeKerugiScoreOutcome.Rejected("invalid_kerugi_disqualification_command")
+        }
+        return try {
+            when (val result = journal.apply(eventId.second, eventId.first)) {
+                is KerugiScoreResult.Applied -> RealtimeKerugiScoreOutcome.Acknowledged(
+                    RealtimeKerugiScoreAcknowledgement(
+                        "kerugi_disqualification_ack", result.event.event.eventId.value,
+                        result.projection.blueScore, result.projection.redScore,
+                    ),
+                    result.event.event.sessionId.value, result.isNew, result.projection.disqualificationWarnings,
+                    result.projection.disqualification,
+                )
+                is KerugiScoreResult.Rejected -> RealtimeKerugiScoreOutcome.Rejected("kerugi_disqualification_command_rejected")
+            }
+        } catch (_: Exception) {
+            RealtimeKerugiScoreOutcome.Rejected("kerugi_disqualification_unavailable")
+        }
+    }
+}
+
 sealed interface RealtimeKerugiScoreOutcome {
     data class Acknowledged(
         val acknowledgement: RealtimeKerugiScoreAcknowledgement,
         val sessionId: String,
         val isNew: Boolean,
         val disqualificationWarnings: List<KerugiDisqualificationWarning>,
+        val disqualification: KerugiDisqualification? = null,
     ) : RealtimeKerugiScoreOutcome
 
     data class Rejected(val code: String) : RealtimeKerugiScoreOutcome
@@ -1000,6 +1052,7 @@ fun Application.module(
     kerugiScoreCommands: RealtimeKerugiScoreCommands? = null,
     kerugiOperatorActionCommands: RealtimeKerugiOperatorActionCommands? = null,
     kerugiScoreCorrectionCommands: RealtimeKerugiScoreCorrectionCommands? = null,
+    kerugiDisqualificationCommands: RealtimeKerugiDisqualificationCommands? = null,
     kerugiTimerCommands: RealtimeKerugiTimerCommands? = null,
     kerugiResultCommands: RealtimeKerugiResultCommands? = null,
     lifecycleStatePublisher: RealtimeSessionStatePublisher = RealtimeSessionStatePublisher(),
@@ -1205,6 +1258,7 @@ fun Application.module(
                                             blueScore = outcome.acknowledgement.blueScore,
                                             redScore = outcome.acknowledgement.redScore,
                                             disqualificationWarnings = outcome.disqualificationWarnings,
+                                            disqualification = outcome.disqualification,
                                         ),
                                     )
                                 }
@@ -1275,6 +1329,7 @@ fun Application.module(
                                             blueScore = outcome.acknowledgement.blueScore,
                                             redScore = outcome.acknowledgement.redScore,
                                             disqualificationWarnings = outcome.disqualificationWarnings,
+                                            disqualification = outcome.disqualification,
                                         ),
                                     )
                                 }
@@ -1321,6 +1376,38 @@ fun Application.module(
                                     ),
                                 )
                             }
+                        }
+                        continue
+                    }
+                    if (messageType == "kerugi_disqualification_command") {
+                        val request = runCatching {
+                            Json.decodeFromString<RealtimeKerugiDisqualificationCommandRequest>(commandText)
+                        }.getOrNull()
+                        val outcome = request?.let { kerugiDisqualificationCommands?.accept(it) }
+                            ?: RealtimeKerugiScoreOutcome.Rejected("kerugi_disqualification_unavailable")
+                        when (outcome) {
+                            is RealtimeKerugiScoreOutcome.Acknowledged -> {
+                                send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                                if (outcome.isNew) {
+                                    kerugiScorePublisher.publish(
+                                        RealtimeKerugiScoreUpdated(
+                                            type = "kerugi_score_updated",
+                                            sessionId = outcome.sessionId,
+                                            blueScore = outcome.acknowledgement.blueScore,
+                                            redScore = outcome.acknowledgement.redScore,
+                                            disqualificationWarnings = outcome.disqualificationWarnings,
+                                            disqualification = outcome.disqualification,
+                                        ),
+                                    )
+                                }
+                            }
+                            is RealtimeKerugiScoreOutcome.Rejected -> send(
+                                Frame.Text(
+                                    Json.encodeToString(
+                                        RealtimeKerugiScoreRejected("kerugi_disqualification_rejected", outcome.code),
+                                    ),
+                                ),
+                            )
                         }
                         continue
                     }
