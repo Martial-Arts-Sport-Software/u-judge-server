@@ -316,6 +316,16 @@ evidence для `KER-012`, `KER-011`, `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`
 `NFR-011` и `NFR-012`; нормативная длительность перерыва, отсчёт remaining time, age-category duration policy, golden
 round, desktop UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
 
+Оператор может append-only зафиксировать единственный результат Kerugi с typed победителем и причиной
+`FINAL_SCORE` или `GOLDEN_ROUND`. Решение принимает только operator локального owner активной сетки; duplicate event ID
+возвращает исходный ACK, а второй, foreign или conflicting command не меняет result projection. `JdbcKerugiResultJournal`
+сохраняет полный audit envelope в migration `V5` до ACK и детерминированно rebuild-ит решение после recreation;
+authenticated realtime command публикует `kerugi_result_updated` только для нового решения. Domain, H2 recovery и
+two-socket Ktor contract tests являются partial server-side evidence для `KER-013`, `SYS-007`, `SYS-008`, `SYS-009`,
+`AUD-001`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; проверка победителя по authoritative score,
+нормативные duration/golden-round policy, desktop confirmation UI, client durable outbox/reconnect и physical-device
+acceptance остаются открыты.
+
 ### Client
 
 - Заменить глобальные флаги соединения явной state machine.
