@@ -555,4 +555,5 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 - [Описание проекта](PROJECT.md)
 - [Функциональные требования](REQUIREMENTS.md)
+- [Нормативные правила ФХР 2024](FHR-RULES-2024.md)
 - [Клиентский roadmap](https://github.com/Martial-Arts-Sport-Software/u-judge-client/blob/main/docs/ROADMAP.md)
