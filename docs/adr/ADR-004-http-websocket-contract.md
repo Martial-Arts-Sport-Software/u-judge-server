@@ -51,8 +51,11 @@ revokes that credential idempotently, without exposing anonymous LAN decision en
 `GET /v1/pairing-status/{requestId}` addresses a typed `pairing_status` projection by opaque request ID. The response has
 state, device ID and a rejection code only when rejected; it never exposes a surname or reconnect credential. `/v1/realtime`
 accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
-incompatible-version requests. Credential delivery to Android/iOS secure storage, persistent device state and client
-heartbeat scheduling remain unimplemented.
+incompatible-version requests. A client may include an opaque delivery proof with its pairing request; the server retains only
+a SHA-256 hash and includes the reconnect credential in an accepted status response only when the request carries the matching
+proof over a secure transport. The current HTTP-only runtime intentionally does not pass this boundary, so it remains
+credential-free until the locally managed TLS flow is wired. Credential storage, persistent device state and client heartbeat
+scheduling remain unimplemented.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
