@@ -5,6 +5,7 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.request.receive
 import io.ktor.server.engine.EmbeddedServer
@@ -72,6 +73,7 @@ import org.mass.domain.SessionLifecycleResult
 import java.time.Duration
 import java.time.Instant
 import java.security.SecureRandom
+import java.security.MessageDigest
 import java.util.Base64
 import java.util.Collections
 import java.util.UUID
@@ -109,6 +111,7 @@ data class PairingRequestCommand(
     val deviceId: String,
     val surname: String,
     val platform: String,
+    val deliveryProof: String? = null,
 )
 
 @Serializable
@@ -167,12 +170,16 @@ data class PairingStatus(
     val state: PairingStatusState,
     val deviceId: String,
     val code: PairingStatusCode? = null,
+    val reconnectCredential: String? = null,
 ) {
     init {
         require(type == "pairing_status")
         require((state == PairingStatusState.REJECTED) == (code != null))
+        require(reconnectCredential == null || state == PairingStatusState.ACCEPTED)
     }
 }
+
+const val PAIRING_DELIVERY_PROOF_HEADER = "X-UJudge-Pairing-Delivery-Proof"
 
 @Serializable
 enum class DeviceConnectionState {
@@ -884,17 +891,24 @@ class PairingRequests {
     private val rejectedByRequestId = mutableMapOf<String, PairingStatus>()
     private val revokedByRequestId = mutableMapOf<String, RevokedPairingRequest>()
     private val connectionsByCredential = mutableMapOf<String, Int>()
+    private val deliveryProofHashesByRequestId = mutableMapOf<String, ByteArray>()
 
     fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
         val deviceId = command.deviceId.trim()
         val surname = command.surname.trim()
         val platform = command.platform.lowercase()
-        if (deviceId.isEmpty() || surname.isEmpty() || platform !in setOf("android", "ios")) {
+        val deliveryProof = command.deliveryProof
+        if (deviceId.isEmpty() || surname.isEmpty() || platform !in setOf("android", "ios") ||
+            (deliveryProof != null && (deliveryProof.isBlank() || deliveryProof.length > 512))) {
             return PairingSubmission.Rejected
         }
 
         val existing = pendingByDeviceId[deviceId]
         if (existing != null) {
+            val existingHash = deliveryProofHashesByRequestId[existing.requestId]
+            if (deliveryProof != null && (existingHash == null || !MessageDigest.isEqual(existingHash, hash(deliveryProof)))) {
+                return PairingSubmission.Rejected
+            }
             return PairingSubmission.Pending(existing, created = false)
         }
 
@@ -905,6 +919,7 @@ class PairingRequests {
             platform = platform,
         )
         pendingByDeviceId[deviceId] = request
+        deliveryProof?.let { deliveryProofHashesByRequestId[request.requestId] = hash(it) }
         PairingSubmission.Pending(request, created = true)
     }
 
@@ -1004,12 +1019,16 @@ class PairingRequests {
             .toList()
     }
 
-    fun status(requestId: String): PairingStatus? = synchronized(this) {
+    fun status(requestId: String, deliveryProof: String? = null, secureDelivery: Boolean = false): PairingStatus? = synchronized(this) {
         pendingByDeviceId.values.firstOrNull { it.requestId == requestId }?.let {
             return PairingStatus(state = PairingStatusState.PENDING, deviceId = it.deviceId)
         }
         acceptedByRequestId[requestId]?.let {
-            return PairingStatus(state = PairingStatusState.ACCEPTED, deviceId = it.deviceId)
+            val credential = if (secureDelivery && requestId !in revokedByRequestId && deliveryProof != null &&
+                deliveryProofHashesByRequestId[requestId]?.let { expected -> MessageDigest.isEqual(expected, hash(deliveryProof)) } == true) {
+                it.reconnectCredential
+            } else null
+            return PairingStatus(state = PairingStatusState.ACCEPTED, deviceId = it.deviceId, reconnectCredential = credential)
         }
         rejectedByRequestId[requestId]
     }
@@ -1017,6 +1036,8 @@ class PairingRequests {
     private fun newReconnectCredential(): String = ByteArray(32).also(SecureRandom()::nextBytes).let {
         Base64.getUrlEncoder().withoutPadding().encodeToString(it)
     }
+
+    private fun hash(value: String): ByteArray = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
 }
 
 sealed interface PairingSubmission {
@@ -1060,6 +1081,7 @@ fun Application.module(
     kerugiTimerPublisher: RealtimeKerugiTimerPublisher = RealtimeKerugiTimerPublisher(),
     kerugiResultPublisher: RealtimeKerugiResultPublisher = RealtimeKerugiResultPublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
+    credentialDeliveryIsSecure: (ApplicationCall) -> Boolean = { call -> call.request.local.scheme == "https" },
 ) {
     install(ContentNegotiation) {
         json(Json {
@@ -1097,7 +1119,11 @@ fun Application.module(
         }
         get("/v1/pairing-status/{requestId}") {
             val requestId = requireNotNull(call.parameters["requestId"])
-            val status = pairingRequests.status(requestId)
+            val status = pairingRequests.status(
+                requestId,
+                call.request.headers[PAIRING_DELIVERY_PROOF_HEADER],
+                credentialDeliveryIsSecure(call),
+            )
             if (status == null) {
                 call.respond(HttpStatusCode.NotFound)
             } else {
