@@ -135,7 +135,9 @@ time до pairing; `POST /v1/pairing-requests` валидирует фамили
 по device ID. Локальный operator application service идемпотентно переводит pending request в accepted или rejected и выдаёт
 opaque reconnect credential только при принятии, без anonymous LAN decision endpoint. Public
 `GET /v1/pairing-status/{requestId}` возвращает typed pending/accepted/rejected status по opaque request ID; response не
-содержит surname или reconnect credential, а rejection code присутствует только для rejected. Локальный operator service
+содержит surname или reconnect credential без matching client delivery proof на secure transport, а rejection code присутствует
+только для rejected. Server сохраняет только SHA-256 hash delivery proof; текущий HTTP runtime не считается secure transport и
+не раскрывает credential до подключения локального TLS flow. Локальный operator service
 также идемпотентно отзывает принятое устройство: сохранённый reconnect credential становится inactive, а request identity
 решения сохраняется. `/v1/realtime` принимает
 versioned WebSocket handshake только для active reconnect credential и возвращает typed accepted/rejected response; unknown,

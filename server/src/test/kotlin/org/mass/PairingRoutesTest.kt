@@ -146,6 +146,59 @@ class PairingRoutesTest {
     }
 
     @Test
+    fun `secure matching delivery proof exposes only its accepted credential`() = testApplication {
+        val pairingRequests = PairingRequests()
+        application { module(pairingRequests = pairingRequests, credentialDeliveryIsSecure = { true }) }
+        val submitted = client.post("/v1/pairing-requests") {
+            header(HttpHeaders.ContentType, "application/json")
+            setBody("""{"deviceId":"ios-proof","surname":"Petrova","platform":"ios","deliveryProof":"client-proof-1"}""")
+        }
+        val requestId = Json.parseToJsonElement(submitted.bodyAsText()).jsonObject.getValue("requestId").jsonPrimitive.content
+        val accepted = assertIs<PairingApproval.Accepted>(pairingRequests.approve(requestId))
+
+        val publicStatus = Json.parseToJsonElement(client.get("/v1/pairing-status/$requestId").bodyAsText()).jsonObject
+        val delivered = Json.parseToJsonElement(client.get("/v1/pairing-status/$requestId") {
+            header(PAIRING_DELIVERY_PROOF_HEADER, "client-proof-1")
+        }.bodyAsText()).jsonObject
+
+        assertEquals(null, publicStatus["reconnectCredential"])
+        assertEquals(accepted.request.reconnectCredential, delivered.getValue("reconnectCredential").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `missing invalid and insecure delivery proofs never disclose a credential`() = testApplication {
+        val pairingRequests = PairingRequests()
+        application { module(pairingRequests = pairingRequests, credentialDeliveryIsSecure = { false }) }
+        val submitted = client.post("/v1/pairing-requests") {
+            header(HttpHeaders.ContentType, "application/json")
+            setBody("""{"deviceId":"android-proof","surname":"Ivanov","platform":"android","deliveryProof":"client-proof-2"}""")
+        }
+        val requestId = Json.parseToJsonElement(submitted.bodyAsText()).jsonObject.getValue("requestId").jsonPrimitive.content
+        pairingRequests.approve(requestId)
+
+        listOf(null, "wrong-proof", "client-proof-2").forEach { proof ->
+            val response = client.get("/v1/pairing-status/$requestId") { proof?.let { header(PAIRING_DELIVERY_PROOF_HEADER, it) } }
+            assertEquals(null, Json.parseToJsonElement(response.bodyAsText()).jsonObject["reconnectCredential"])
+        }
+    }
+
+    @Test
+    fun `delivery proof retries must match the pending request`() = testApplication {
+        application { module(pairingRequests = PairingRequests()) }
+        val first = client.post("/v1/pairing-requests") {
+            header(HttpHeaders.ContentType, "application/json")
+            setBody("""{"deviceId":"ios-proof-retry","surname":"Petrova","platform":"ios","deliveryProof":"client-proof-3"}""")
+        }
+        val retry = client.post("/v1/pairing-requests") {
+            header(HttpHeaders.ContentType, "application/json")
+            setBody("""{"deviceId":"ios-proof-retry","surname":"Petrova","platform":"ios","deliveryProof":"other-proof"}""")
+        }
+
+        assertEquals(HttpStatusCode.Accepted, first.status)
+        assertEquals(HttpStatusCode.BadRequest, retry.status)
+    }
+
+    @Test
     fun `unknown pairing status returns not found`() = testApplication {
         application {
             module(pairingRequests = PairingRequests())
