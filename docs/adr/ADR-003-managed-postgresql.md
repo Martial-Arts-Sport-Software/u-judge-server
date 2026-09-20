@@ -29,13 +29,23 @@ does not reserve that port across child-process launch, so `ManagedPostgres.star
 immediately before launching PostgreSQL.
 
 `PostgresRuntimeConfiguration` derives the platform-specific bundled `initdb` and `postgres` commands, cluster directory,
-loopback port and JDBC URL from one configuration. It rejects an application-data path below the installation directory.
-`ManagedPostgresRuntime` composes that configuration with the provisioning and supervision boundaries and exposes the JDBC URL
-only while the child is running. Its test uses the same JVM process fixture as the lifecycle tests, not a PostgreSQL binary.
+loopback port, database role and JDBC URLs from one configuration. It rejects an application-data path below the installation
+directory and an unsafe database name. The provisioner appends the one authoritative `-D` argument to `initdb`; configuration
+does not duplicate it. `ManagedPostgresRuntime` waits for a JDBC connection to the supervised child, creates the configured
+database when absent, and exposes its datasource only after both steps succeed. A readiness or database-creation failure stops
+the child and returns a diagnostic rather than publishing a nonfunctional JDBC URL.
 
-This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. It does
-not demonstrate a real PostgreSQL server lifecycle or a clean Windows/macOS installation, so `NFR-004`, `NFR-009`,
-`NFR-010` and `P2P-010` remain Partial and Gate G1 remains open.
+`RealPostgresLifecycleTest` is an opt-in acceptance test for an actual bundled PostgreSQL binary. It initializes a disposable
+cluster outside the repository, starts the process, applies ordered journal migrations, persists an event, restarts, and proves
+journal recovery and sequence continuity. Run it with
+`./gradlew :server:test --tests org.mass.persistence.RealPostgresLifecycleTest -DuJudge.postgres.installationDirectory=/path/to/bundle`,
+where the bundle root contains `postgresql/bin/initdb` and `postgresql/bin/postgres` (use `.exe` on Windows). It is skipped when
+the property is absent, so normal CI does not claim real-binary evidence.
+
+This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. The
+real-binary test has not run on the current development machine because no PostgreSQL bundle is installed. It does not
+demonstrate clean Windows/macOS installation, backup/restore, or the cross-repository mobile reconnect flow, so `NFR-004`,
+`NFR-009`, `NFR-010` and `P2P-010` remain Partial and Gate G1 remains open.
 
 ## Options
 

@@ -110,8 +110,11 @@ architecture. They are not v1 Pilot acceptance gates.
 
 Текущее доказательство: durable-journal slice с versioned JDBC migration и restart/idempotency tests дополнен
 `ManagedPostgres`, который супервизирует сконфигурированный дочерний процесс и диагностирует конфликт loopback-порта,
-ошибку запуска и аварийный exit. Тест использует JVM fixture, а не PostgreSQL; managed lifecycle реального сервера,
-clean-machine verification и Gate G1 не закрыты. Перед запуском supervised child `PostgresProvisioner` вызывает configured
+ошибку запуска и аварийный exit. `ManagedPostgresRuntime` ожидает JDBC readiness, создаёт configured database и публикует
+datasource только после этого; readiness failure останавливает child и возвращает diagnostic. `RealPostgresLifecycleTest`
+может выполнить init/start/migration/restart/journal recovery против явно указанного PostgreSQL bundle, но без property
+bundle на CI пропускается. На текущей машине реальный binary не установлен; clean-machine verification и Gate G1 не закрыты.
+Перед запуском supervised child `PostgresProvisioner` вызывает configured
 `initdb`, требует `PG_VERSION`, безопасно переиспользует готовый cluster и отказывается перезаписывать nonempty directory
 без PostgreSQL marker; `ManagedPostgres.restart()` заменяет child после аварийного exit. Эти тесты также используют JVM
 fixture. `PostgresCommand.withAvailableLoopbackPort()` выбирает свободный IPv4 loopback port (`127.0.0.1`) для нового command;

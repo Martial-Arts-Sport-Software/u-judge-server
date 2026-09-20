@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
 
 class ManagedPostgresTest {
     @Test
-    fun `runtime configuration keeps cluster outside installation and exposes JDBC URL only while running`() {
+    fun `runtime configuration keeps cluster outside installation and derives its JDBC URL`() {
         val root = createTempDirectory()
         val port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port
         try {
@@ -24,14 +24,11 @@ class ManagedPostgresTest {
                 port = port,
                 platform = PostgresPlatform.Windows,
             )
-            val managedPostgres = ManagedPostgres(waitingCommand(port = configuration.port))
-            val runtime = ManagedPostgresRuntime(configuration, managedPostgres)
-
             assertEquals(
                 listOf(
                     root.resolve("installation/postgresql/bin/initdb.exe").toString(),
-                    "-D",
-                    root.resolve("application-data/postgres").toString(),
+                    "--username",
+                    "postgres",
                 ),
                 configuration.initdbCommand,
             )
@@ -47,13 +44,8 @@ class ManagedPostgresTest {
                 ),
                 configuration.postgresCommand.arguments,
             )
-            assertEquals(null, runtime.jdbcUrl)
-
-            assertIs<PostgresState.Running>(runtime.start())
-            assertEquals("jdbc:postgresql://127.0.0.1:$port/u_judge", runtime.jdbcUrl)
-
-            assertEquals(PostgresState.Stopped, runtime.stop())
-            assertEquals(null, runtime.jdbcUrl)
+            assertEquals("jdbc:postgresql://127.0.0.1:$port/u_judge", configuration.jdbcUrl)
+            assertEquals("jdbc:postgresql://127.0.0.1:$port/postgres", configuration.administrationJdbcUrl)
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -69,6 +61,24 @@ class ManagedPostgresTest {
                     applicationDataDirectory = root.resolve("installation/application-data"),
                     port = 54326,
                     platform = PostgresPlatform.MacOs,
+                )
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `runtime configuration rejects unsafe database identifiers`() {
+        val root = createTempDirectory()
+        try {
+            assertFailsWith<IllegalArgumentException> {
+                PostgresRuntimeConfiguration(
+                    installationDirectory = root.resolve("installation"),
+                    applicationDataDirectory = root.resolve("application-data"),
+                    port = 54326,
+                    platform = PostgresPlatform.MacOs,
+                    databaseName = "u-judge",
                 )
             }
         } finally {

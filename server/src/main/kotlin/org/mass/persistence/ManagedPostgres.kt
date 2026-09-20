@@ -78,6 +78,11 @@ class ManagedPostgres(
         return start()
     }
 
+    fun fail(diagnostic: String): PostgresState {
+        stop()
+        return PostgresState.Failed(diagnostic).also { currentState = it }
+    }
+
     private fun refreshState(): PostgresState {
         val running = currentState as? PostgresState.Running ?: return currentState
         if (running.process.isAlive) return running
