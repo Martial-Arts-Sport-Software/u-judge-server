@@ -33,6 +33,8 @@ Pilot не считается production-ready до отдельного hardeni
 ## 3. Принципы выполнения
 
 - Сначала один вертикальный Kerugi slice, затем Tanbon и остальные семь дисциплин из PDF 1.
+- Работа планируется инкрементами поставки: каждый PR доводит сценарий до production entry point и закрывает
+  требования или пункт gate.
 - События и контракты проектируются до UI-интеграции.
 - Источник результата - append-only журнал, а не изменяемые счётчики.
 - Каждая функция получает тестируемый acceptance criterion из `REQUIREMENTS.md`.
@@ -55,6 +57,67 @@ Pilot не считается production-ready до отдельного hardeni
 - [ ] Gate G6: не готов.
 - [ ] Gate G7: не готов.
 - [ ] Gate G8: не готов.
+
+## Инкременты поставки
+
+Единица планирования и PR - инкремент из таблицы ниже, а не отдельная transition, команда, таблица или publisher.
+Правила инкрементов закреплены в `AGENTS.md` (пункты 9-10, 12) и skill `u-judge-increment-planning`.
+
+### Ретроспектива 30.08-20.09.2026
+
+| Наблюдение | Факт на `main` |
+|------------|----------------|
+| Частота PR | Около 50 merged PR за 3 недели; типичный feature PR добавляет 40-450 строк кода и одну команду или transition |
+| Результат | Ни одно требование не переведено в `Implemented`; после G0 не закрыт ни один gate, хотя этап 3 планировался на недели 4-5 |
+| Достижимость | `Server.start()` вызывает `module()` без lifecycle/Kerugi handlers, а desktop только запускает `Server.start()` без operator pairing service и проекций: работа около 20 PR недоступна в запущенном приложении |
+| Фрагментация | Один Kerugi-бой разнесён по четырём journal-таблицам `V2`-`V5` и семи `Realtime*Commands`; `UNIQUE (owner_peer_id, sequence)` проверяется только внутри каждой таблицы |
+| Документация | Около 45 KB повторяющегося текста «partial evidence ... remain open» в roadmap, дублированного в README и PROJECT |
+
+Причина: slice определялся стеком server-слоёв (domain → JDBC → WebSocket) для одной команды, а не сценарием, который
+видит оператор или судья. Интеграция в production entry point, desktop UI и client evidence каждый раз оставались
+«следующей работой», поэтому ни один PR не мог закрыть requirement. Правило evidence-driven slices от 14.09.2026 не
+изменило темп: после него вышли такие же однокомандные PR результата, дисквалификации и delivery proof.
+
+### Правила
+
+- Инкремент заканчивается сценарием, воспроизводимым из `./gradlew :desktop:run` или installer, а не только из test fixture.
+- Инкремент переводит хотя бы одно Must-требование в `Implemented` или закрывает пункт gate. Partial evidence не
+  является целью инкремента.
+- Ориентир размера - 3-7 рабочих дней и одна issue. Обычно это один PR из 10-30 небольших Conventional Commits;
+  допускается 2-3 последовательных PR под одной issue, если каждый оставляет `main` рабочим, а статусы отмечает последний.
+- Новая команда, transition, таблица, publisher или экран без сценария - это коммит внутри инкремента, не отдельный PR.
+- Acceptance test инкремента проверяет сценарий целиком: Ktor `testApplication` или desktop application service,
+  реальный JDBC journal, restart/retry и публикация. Unit tests остаются для формул и инвариантов.
+- Доказательство записывается один раз: статус строки в таблице ниже и строка в таблице доказательств этапа.
+  README и `PROJECT.md` содержат только краткое текущее состояние.
+- Если инкремент не укладывается в 7 рабочих дней, его делят по сценариям (например, «Tanbon» и «технические
+  дисциплины»), а не по слоям.
+
+### План
+
+Недели считаются от baseline 30.08.2026; 25.09.2026 - неделя 4. Поле «Срок» в разделах этапов остаётся исходным
+baseline; при расхождении действует этот план.
+
+| Статус | ID | Недели | Gate | Сценарий, который можно показать | Requirement IDs | Cross-repo |
+|--------|----|--------|------|----------------------------------|-----------------|------------|
+| [ ] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Нет; client использует существующий контракт |
+| [ ] | I2 | 5-6 | G2, server-часть G3 | Оператор проводит Kerugi-бой на desktop: состав, кворум, окно, таймер по FHR 2024, баллы симулированных судей, действия, коррекции, сброс с причиной, golden round, результат; watcher read-only; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-013`, `KER-015`, `SES-001`-`SES-007`, `UI-001`-`UI-005`, `UI-008`, `NET-001`, `NET-003`, `AUD-002` | Contract fixtures для client |
+| [ ] | I3 | 7 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing по local TLS, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
+| [ ] | I4 | 7-8 | G4 | Оператор импортирует `df-template-v1` (500 участников), видит validation report и preview, правит сетку до старта, проводит поединки, победитель продвигается | `IMP-001`-`IMP-008`, `BRK-001`-`BRK-005`, `SES-003`, `SES-007`, `CMP-005`, `CMP-006`, `CMP-008`, `SYS-003`, `BAK-001`; ADR-005 | Нет |
+| [ ] | I5 | 8-9 | G5 | Tanbon переиспользует Kerugi pipeline; Hosinsool и технические режимы считают итог по нормативным векторам; client и server дают одинаковые суммы | `TAN-001`-`TAN-005`, `TEC-001`-`TEC-014`, `NFR-011` | Да: экраны дисциплин и vectors |
+| [ ] | I6 | 10 | G6 | Результат произвольной сессии объясняется историей и совпадает с XLSX/CSV после backup/restore; русский UI | `AUD-002`-`AUD-004`, `REP-001`-`REP-004`, `BAK-002`-`BAK-004`, `SYS-004` | Нет |
+| [ ] | I7 | 10-11 | G7 | Clean Windows/macOS installers, APK/TestFlight, нагрузка 5-7 clients, packet loss и restart, security check | `SYS-005`, `REL-003`-`REL-007`, `NFR-005`-`NFR-007`, `NFR-014` | Да: mobile builds |
+| [ ] | I8 | 12 | G8 | Полевой пилот по разделу 12 | `REL-001`, `REL-002` | Да |
+
+Технические задачи, обязательные внутри инкрементов:
+
+- I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence и один realtime command dispatcher
+  вместо отдельных `Realtime*Commands`; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
+  `RealPostgresLifecycleTest` в CI на PostgreSQL из образа runner; ручной прогон macOS/Windows фиксируется в PR, а
+  недоступная платформа остаётся открытым пунктом G1.
+- I2: Kerugi bout aggregate поверх единого журнала; длительности и раунды по [FHR 2024](FHR-RULES-2024.md) §4.1.2,
+  §4.1.13, §4.1.14; resync snapshot после reconnect; симулятор судей для acceptance test.
+- I3: local TLS для credential delivery согласуется с client до начала реализации.
 
 ## 4. Этап 0: фиксация baseline
 
@@ -108,20 +171,16 @@ architecture. They are not v1 Pilot acceptance gates.
 - [ ] Проверить чистую Windows и macOS machine.
 - [ ] Определить upgrade/backup strategy и размер installer.
 
-Текущее доказательство: durable-journal slice с versioned JDBC migration и restart/idempotency tests дополнен
-`ManagedPostgres`, который супервизирует сконфигурированный дочерний процесс и диагностирует конфликт loopback-порта,
-ошибку запуска и аварийный exit. `ManagedPostgresRuntime` ожидает JDBC readiness, создаёт configured database и публикует
-datasource только после этого; readiness failure останавливает child и возвращает diagnostic. `RealPostgresLifecycleTest`
-может выполнить init/start/migration/restart/journal recovery против явно указанного PostgreSQL bundle, но без property
-bundle на CI пропускается. На текущей машине реальный binary не установлен; clean-machine verification и Gate G1 не закрыты.
-Перед запуском supervised child `PostgresProvisioner` вызывает configured
-`initdb`, требует `PG_VERSION`, безопасно переиспользует готовый cluster и отказывается перезаписывать nonempty directory
-без PostgreSQL marker; `ManagedPostgres.restart()` заменяет child после аварийного exit. Эти тесты также используют JVM
-fixture. `PostgresCommand.withAvailableLoopbackPort()` выбирает свободный IPv4 loopback port (`127.0.0.1`) для нового command;
-порт освобождается до запуска child process, поэтому проверка занятости в `ManagedPostgres.start()` остаётся обязательной.
-`PostgresRuntimeConfiguration` из одного runtime config формирует platform-specific `initdb`/`postgres` commands,
-application-data cluster вне installation directory, port и JDBC URL; `ManagedPostgresRuntime` публикует URL только пока
-supervised child запущен. Это JVM-fixture evidence, не real PostgreSQL. Детали в [ADR-003](adr/ADR-003-managed-postgresql.md).
+Накопленное доказательство - JVM fixture и H2, не real PostgreSQL на clean machine. Детали в
+[ADR-003](adr/ADR-003-managed-postgresql.md).
+
+| Компонент | Подтверждено тестами | Открыто |
+|-----------|----------------------|---------|
+| Versioned JDBC migrations `V1`-`V5` | Durable journal, restart и idempotency на H2 | Единая схема журнала (I1) |
+| `PostgresProvisioner` | Configured `initdb`, требование `PG_VERSION`, reuse готового cluster, отказ перезаписывать nonempty directory без PostgreSQL marker | - |
+| `ManagedPostgres` | Supervision child process; диагностика конфликта loopback-порта, ошибки запуска и аварийного exit; `restart()` после exit | - |
+| `ManagedPostgresRuntime`, `PostgresRuntimeConfiguration` | JDBC readiness, создание database, JDBC URL публикуется только пока child запущен; platform-specific commands, cluster вне installation directory; `withAvailableLoopbackPort()` выбирает `127.0.0.1` port, поэтому проверка занятости в `start()` обязательна | Не подключены к `Server.start()` и desktop (I1) |
+| `RealPostgresLifecycleTest` | init/start/migration/restart/journal recovery против явно указанного bundle | На CI пропускается без bundle; clean Windows/macOS (I1, I7) |
 
 ### Realtime spike
 
@@ -130,45 +189,20 @@ supervised child запущен. Это JVM-fixture evidence, не real PostgreS
 - [ ] Событие получает ACK и безопасно повторяется после disconnect.
 - [ ] Clock offset и configurable `1000 мс` window проверяются на искусственной задержке.
 
-Текущее доказательство: `GET /v1/metadata` публикует version, capabilities, identity площадки, pairing policy и server
-time до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, создаёт pending request и дедуплицирует retry
-по device ID. Локальный operator application service идемпотентно переводит pending request в accepted или rejected и выдаёт
-opaque reconnect credential только при принятии, без anonymous LAN decision endpoint. Public
-`GET /v1/pairing-status/{requestId}` возвращает typed pending/accepted/rejected status по opaque request ID; response не
-содержит surname или reconnect credential без matching client delivery proof на secure transport, а rejection code присутствует
-только для rejected. Server сохраняет только SHA-256 hash delivery proof; текущий HTTP runtime не считается secure transport и
-не раскрывает credential до подключения локального TLS flow. Локальный operator service
-также идемпотентно отзывает принятое устройство: сохранённый reconnect credential становится inactive, а request identity
-решения сохраняется. `/v1/realtime` принимает
-versioned WebSocket handshake только для active reconnect credential и возвращает typed accepted/rejected response; unknown,
-revoked и incompatible-version handshakes отклоняются. Integration tests подтверждают JSON contract, отсутствие anonymous
-`POST /score` и revoke endpoint, а также rejection без создания pending state. Эти in-memory slices не заменяют secure
-credential delivery/storage, persistent device state, client durable outbox/replay, heartbeat или physical-device mDNS evidence.
-Authenticated `/v1/realtime` clients can now submit a bounded typed command envelope and receive an idempotent ACK keyed by
-event ID; malformed, oversized and post-revocation commands receive typed rejections. The default server remains in-memory,
-but a supplied `JdbcPeerJournal` appends each validated command before its ACK, uses the client event ID as the journal ID,
-and preserves identical retry ACKs after a `RealtimeCommands` recreation; a different envelope with that ID and a journal
-failure receive typed rejections. Pairing status/rejection contract tests are narrow evidence for `DEV-004`, `DEV-005`,
-`NET-005`, `NFR-006` and `NFR-012`, not Gate G1 closure: no desktop datasource, client durable outbox, reconnect/resync,
-heartbeat scheduling, scoring or physical-device acceptance is wired. Authenticated clients can also send `clock_sync` with an ISO-8601
-UTC client send timestamp and
-receive the echoed value plus UTC server receive/send timestamps; contract integration coverage verifies typed rejection of
-an invalid timestamp without preventing a later valid command. This is evidence for `NET-004`, `KER-003` and `NFR-012` only:
-the client still owns offset calculation, and artificial-delay, heartbeat scheduling/timeouts, scoring and physical-device evidence remain open.
-Authenticated clients can send a strictly typed `heartbeat` and receive `heartbeat_ack`; malformed heartbeats receive
-`heartbeat_rejected` without closing the session. This server-only contract evidence covers `NFR-012`; client scheduling,
-client-side disconnected transition, reconnect and device evidence remain open.
+Накопленное server-only доказательство - in-memory runtime и Ktor contract tests. Это partial evidence для `DEV-004`,
+`DEV-005`, `NET-001`, `NET-003`-`NET-006`, `NFR-006` и `NFR-012`, не закрытие Gate G1.
 
-An authenticated realtime socket now closes with `heartbeat_timeout` after a configurable interval without a valid heartbeat.
-Each valid heartbeat renews the deadline; malformed input does not. Focused tracker and Ktor contract tests cover expiry and
-renewal. This is partial server-only evidence for `NET-006` and `NFR-012`; client heartbeat scheduling, persistent device
-connection state, reconnect UX and physical-device evidence remain open.
-
-The local operator pairing service now projects approved device ID, platform and `connected`/`disconnected` state without
-surname or reconnect credential. Authenticated WebSocket handshake marks the device connected; socket close, including
-`heartbeat_timeout`, marks it disconnected. Unit and Ktor contract tests cover these transitions and exclude pending/rejected
-requests. This is partial in-memory evidence for `DEV-005`, `NET-006` and `NFR-012`; persistent registry, desktop UI,
-client scheduling, reconnect UX and physical-device evidence remain open.
+| Контракт | Подтверждено тестами | Открыто |
+|----------|----------------------|---------|
+| `GET /v1/metadata` | Version, capabilities, identity площадки, pairing policy и server time до pairing | - |
+| `POST /v1/pairing-requests` | Валидация фамилии и platform, pending request, dedup retry по device ID; хранится только SHA-256 hash client delivery proof | Persistent registry (I1) |
+| Operator pairing service | Идемпотентные approve/reject/revoke; reconnect credential только при принятии и inactive после отзыва; проекция device ID, platform и `connected`/`disconnected` без surname и credential; anonymous LAN decision/revoke endpoints отсутствуют | Desktop UI и durable state (I1) |
+| `GET /v1/pairing-status/{requestId}` | Typed pending/accepted/rejected; rejection code только для rejected; credential только по matching proof на secure transport | Local TLS отсутствует, поэтому HTTP runtime credential не раскрывает (I3) |
+| `/v1/realtime` handshake | Versioned handshake только для active credential; unknown, revoked и incompatible-version отклоняются без pending state | - |
+| Typed commands и ACK | Bounded envelope, idempotent ACK по event ID; с `JdbcPeerJournal` append до ACK, identical retry после recreation, cursor-based resync; typed rejections для malformed, oversized, post-revocation, conflicting и journal failure | Default server in-memory (I1); client outbox/replay (I3) |
+| `clock_sync` | Echo client timestamp и UTC server receive/send timestamps; invalid timestamp получает typed rejection без закрытия сессии | Client offset и artificial delay (I3) |
+| `heartbeat` | `heartbeat_ack`/`heartbeat_rejected`; `heartbeat_timeout` закрывает socket, valid heartbeat продлевает deadline; close помечает устройство disconnected | Client scheduling и reconnect UX (I3) |
+| Удалённый API | Anonymous `POST /score` и revoke endpoint отсутствуют | - |
 
 ### Gate G1
 
@@ -188,149 +222,18 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 - Разделить UI state, application services, transport и persistence.
 - Добавить structured logging и health/diagnostic state.
 
-Текущее доказательство: transport-agnostic domain boundary содержит отдельные validated UUID value types для competition,
-peer, court, bracket, session, judge, device и event. Focused unit tests подтверждают canonical UUID generation и rejection
-malformed/noncanonical values. Это partial evidence для `SYS-008` и `SYS-007`; domain commands, event envelope wiring,
-persistence, projections и audit payload остаются открыты.
+Накопленное доказательство - unit, H2 и Ktor contract tests. Это partial evidence для `SYS-007`-`SYS-009`, `AUD-001`,
+`AUD-004`, `SES-001`, `SES-002`, `SES-004`, `CMP-005`, `CMP-006` и `NFR-008`; production wiring отсутствует.
 
-`DomainEvent` сохраняет typed IDs всех этих сущностей, validated source и author, UTC timestamp, event type и raw payload.
-Focused unit tests покрывают complete audit context и rejection blank fields. Это partial evidence для `SYS-007`, `AUD-001`,
-`AUD-004` и `SYS-008`; JDBC schema, journal adapter, commands, projections и scoring остаются открыты.
-
-`DomainCommand` задаёт transport-agnostic границу изменяющего действия: он хранит typed контекст соревнования, ownership,
-сессии, судьи и устройства, source, author, type и payload, валидирует mutable audit fields и преобразуется в `DomainEvent`
-только с назначенными event ID и UTC timestamp. Focused unit tests покрывают перенос полного контекста и rejection blank
-fields. Это partial evidence для `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; назначение sequence, durable journal,
-projections, transport wiring и scoring остаются открыты.
-
-Read-only `GET /v1/health` публикует typed liveness status `healthy` для локальной диагностики без pairing identity,
-персональных данных или credentials. Ktor contract test фиксирует JSON response. Это partial evidence для `NFR-008`;
-structured logging, persistence readiness и desktop diagnostics остаются открыты.
-
-`SessionProjection` задаёт transport-agnostic lifecycle `prepared`, `running`, `paused`, `completed` и `cancelled`.
-Projection immutable, отвергает недопустимый переход без изменения текущего state и детерминированно rebuilds ordered
-transition history. Unit tests покрывают valid, invalid и terminal transitions. Это partial evidence для `SES-001`;
-event journal wiring, persistence, timer, bracket ownership и scoring остаются открыты.
-
-`BracketOwnership` назначает сетке один immutable local `PeerId` и допускает переход `prepared → in_progress` только от
-этого owner. Focused unit tests подтверждают принятие команды owner и rejection чужой команды без изменения projection.
-Это partial evidence для `CMP-005`, `CMP-006` и `SES-002`; P2P claims, ownership transfer, persistence и transport wiring
-остаются post-v1 или открытыми задачами.
-
-`DiagnosticContext` производен из `DomainEvent` и содержит только stable entity IDs, без author, surname, payload или
-reconnect credential. Focused unit test подтверждает сохранение IDs. Это partial evidence для `NFR-008` и `SYS-007`;
-logging backend, persistence readiness и desktop diagnostics остаются открыты.
-
-`SequencedDomainEvent` вводит positive logical sequence внутри typed owner peer, а `DomainEventOrder` детерминированно
-сортирует записи и отклоняет owner/sequence conflicts. Unit tests покрывают order, conflict и non-positive sequence. Это
-partial evidence для `SYS-009`, `SYS-008` и `AUD-001`; persistent sequencing, replication и transport wiring открыты.
-
-`SessionLifecycleJournal` применяет transport-agnostic lifecycle command только для `IN_PROGRESS` local bracket owner,
-сначала append-ит sequenced event, затем заменяет immutable `SessionProjection`. Re-delivery того же event ID возвращает
-исходный результат, повторное использование ID для другого command и invalid/foreign lifecycle commands не меняют журнал
-или projection; `PeerEventSequence` допускает одну возрастающую sequence для нескольких session journals владельца. Focused
-unit tests покрывают accepted, foreign, invalid, duplicate и conflicting-ID cases. `SessionLifecycleJournal.rebuild()`
-детерминированно применяет logical order sequenced lifecycle events, пропускает идентичную повторную доставку event ID и
-отклоняет конфликтующий ID, lifecycle вне `IN_PROGRESS` ownership и недопустимый порядок переходов. Это partial evidence
-для `SES-001`, `SES-002`, `SYS-007`, `SYS-008`, `SYS-009` и `AUD-001`; durable journal, rebuild из persisted events,
-transport wiring, timer и scoring остаются открыты.
-
-`JdbcSessionLifecycleJournal` сохраняет полный sequenced lifecycle event envelope в versioned JDBC migration до обновления
-проекции и при создании заново rebuilds projection из сохранённых событий. JDBC/H2 integration test подтверждает recovery
-после recreation; duplicate/conflict, transport wiring, реальный PostgreSQL lifecycle и Gate G2 остаются открыты.
-
-Authenticated `/v1/realtime` now accepts typed `session_lifecycle_command` only through a configured
-`SessionLifecycleEventJournal`. The command carries the complete validated domain audit context, event ID, event type and raw
-payload; an owner command returns `session_lifecycle_ack` only after the journal applies the event and the projection changes.
-An identical retry returns the original ACK without another transition, while malformed IDs and foreign-owner commands receive
-typed rejection without changing the journal or projection. Both in-memory and JDBC lifecycle journals implement this boundary,
-so the latter persists before ACK when supplied. Focused Ktor contract tests are partial evidence for `SES-001`, `SES-002`,
-`SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003` and `NFR-012`; the default server still has no desktop
-datasource or separate operator authorization, and client outbox/reconnect, real PostgreSQL and Gate G2 remain open.
-
-After an accepted new lifecycle event, `/v1/realtime` publishes the typed `session_state_updated` projection containing the
-session ID and state to every currently authenticated socket, including the sender after its ACK. Idempotent retries and
-rejected lifecycle commands publish no update. A two-socket Ktor contract test is partial server-side evidence for `SES-004`,
-`NET-001` and `NFR-012`; watcher authorization/UI, persistent subscription cursors, client reconnect/outbox, desktop datasource,
-real PostgreSQL and Gate G2 remain open.
-
-`KerugiScoringEngine` вводит transport-agnostic, детерминированную основу первого Kerugi slice: конфигурация принимает
-ровно 2 или 3 боковых судьи, quorum и положительное coincidence window (по умолчанию 2 и `1000 мс`); кандидат содержит
-судью, участника, `HEAD`/`BODY` и уже скорректированный к server clock UTC timestamp. Движок группирует кандидаты одного
-участника в непересекающиеся окна, учитывает только distinct configured judges, назначает `BODY=1`/`HEAD=2`, а при
-конфликтующих кандидатах в успешном окне применяет минимальную оценку. Every window, including insufficient quorum,
-retains event IDs and typed decision for audit; identical duplicate event IDs are applied once and conflicting reuse is
-rejected. Focused unit tests cover configuration bounds, rule vectors, window boundary, insufficient/duplicate/foreign
-judge cases. This is partial evidence for `KER-001` through `KER-005`, `NET-003`, `NET-004` and `NFR-011`; realtime
-command wiring, durable event journal, corrections, operator actions, timer and client/device acceptance remain open.
-
-`KerugiScoreJournal` теперь принимает только полный domain command типа `kerugi_score_candidate`, валидирует принадлежность
-in-progress local bracket и состав боковых судей, append-ит raw candidate до пересчёта immutable score projection и
-детерминированно rebuilds score/audit из sequenced events. `JdbcKerugiScoreJournal` сохраняет полный envelope в migration
-`V3` и восстанавливает projection после recreation; identical retry возвращает исходный ACK/projection, а foreign judge и
-conflicting event ID не меняют журнал. Authenticated `/v1/realtime` принимает строго typed `kerugi_score_command` и
-возвращает `kerugi_score_ack` только после применения journal. Domain, H2 и Ktor contract tests являются partial evidence
-для `KER-001` through `KER-005`, `KER-009`, `NET-001`, `NET-003`, `NFR-011` и `NFR-012`; score projection publication, operator
-throws/spins/Gamjeom/corrections, timer, desktop datasource wiring, client durable outbox/reconnect и physical-device
-acceptance остаются открыты.
-
-После каждого нового принятого `kerugi_score_command` `/v1/realtime` публикует typed `kerugi_score_updated` с session ID и
-authoritative blue/red totals всем текущим authenticated sockets, включая sender после ACK. Identical retries и rejected
-commands не публикуют update. Two-socket Ktor contract test является partial server-side evidence для `KER-001` through
-`KER-005`, `KER-009`, `SES-004`, `NET-001`, `NET-003`, `NFR-011` и `NFR-012`; watcher authorization/UI, persistent
-subscription cursors, desktop datasource, client reconnect/outbox и physical-device acceptance остаются открыты.
-
-Операторские Kerugi-действия `THROW`, `SPIN_BONUS` и `GAMJEOM` принимаются только как typed
-`kerugi_operator_action_command`: append-only событие хранит тип, участника, положительное значение и автора. Бросок и
-вращение увеличивают счёт выбранного участника, а Gamjeom увеличивает счёт соперника; все три действия сохраняются отдельно
-в audit projection. In-memory и JDBC journals идемпотентны по event ID, rebuild-ят одинаковую проекцию, а realtime ACK
-возвращается только после применения; новое действие публикует `kerugi_score_updated` всем authenticated sockets. Domain,
-H2 recovery и Ktor contract tests являются partial evidence для `KER-006`, `KER-007`, `KER-009`, `NET-001`, `NET-003`,
-`SES-004`, `NFR-011` и `NFR-012`; корректировки, таймер, desktop operator UI, client durable outbox/reconnect и
-physical-device acceptance остаются открыты.
-
-Операторская `kerugi_score_correction_command` создаёт append-only компенсирующее событие со ссылкой на уже принятое
-raw score candidate или operator action. Исходное событие сохраняется в журнале и audit, а deterministic projection
-исключает его эффект при rebuild; повторная доставка возвращает исходный ACK, а unknown, duplicate-target и conflicting
-corrections не меняют журнал. In-memory, JDBC/H2 recovery и two-socket Ktor contract tests покрывают candidate quorum
-recalculation, operator action correction и публикацию новых authoritative totals только для нового события. Это partial
-evidence для `KER-005`, `KER-008`, `KER-009`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; timer, desktop
-operator UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
-
-`KerugiScoringResult` детерминированно проецирует `disqualificationWarnings`, когда effective sum операторских
-`GAMJEOM` против участника достигает `10`; warning сам по себе не создаёт решения. Только operator local owner может
-append-ить одно `kerugi_disqualification_confirmed` после такого warning: raw event сохраняет дисквалифицированного
-участника и полный audit envelope, а premature, foreign, duplicate и conflicting commands не меняют journal. Решение
-rebuild-ится из JDBC/H2 journal после recreation, authenticated `/v1/realtime` ACK-ит его только после применения и
-публикует authoritative score projection с confirmed disqualification только для нового event. Domain, JDBC/H2 recovery
-и two-socket WebSocket contract tests являются partial evidence для `KER-007`, `KER-009`, `KER-015`, `SYS-007`,
-`SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; timer, desktop operator UI,
-client durable outbox/reconnect и physical-device acceptance остаются открыты, поэтому `KER-015` и Gate G3 не закрыты.
-
-`KerugiTimerJournal` добавляет append-only typed transitions `START`, `PAUSE`, `RESUME` и `STOP` только от operator
-локального владельца in-progress сетки. Immutable timer projection отклоняет недопустимый порядок, duplicate/conflicting
-event IDs не меняют state, а versioned JDBC migration восстанавливает состояние после recreation до ACK. Authenticated
-realtime command публикует `kerugi_timer_updated` только для нового события. Domain, H2 recovery и two-socket Ktor
-contract tests являются partial evidence для `KER-011`, `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`,
-`SES-004`, `NFR-011` и `NFR-012`; age-category duration policy, breaks, golden round, desktop UI, client durable
-outbox/reconnect и physical-device acceptance остаются открыты.
-
-`KerugiTimerJournal` также хранит отдельный `ROUND_BREAK` period: только operator local owner может начать перерыв из
-`RUNNING`, завершить его обратно в `RUNNING` или остановить таймер. Break events append-only, idempotent и rebuild-ятся
-из JDBC journal после recreation; authenticated `START_BREAK`/`END_BREAK` commands ACK-ятся после применения и публикуют
-`kerugi_timer_updated` только для нового события. Domain, H2 recovery и two-socket Ktor contract tests являются partial
-evidence для `KER-012`, `KER-011`, `SYS-007`, `SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`, `SES-004`,
-`NFR-011` и `NFR-012`; нормативная длительность перерыва, отсчёт remaining time, age-category duration policy, golden
-round, desktop UI, client durable outbox/reconnect и physical-device acceptance остаются открыты.
-
-`KerugiResultJournal` фиксирует ровно одно append-only операторское решение о победителе local in-progress bracket с
-причиной `final_score` или `golden_round`. Решение хранит победителя и причину в raw payload, не может быть заменено
-вторым решением, idempotent по event ID и rebuild-ится из JDBC migration после recreation; authenticated realtime command
-ACK-ится только после применения и публикует `kerugi_result_updated` всем current authenticated sockets только для нового
-решения. Domain, H2 recovery и two-socket Ktor contract tests являются partial evidence для `KER-013`, `SYS-007`,
-`SYS-008`, `SYS-009`, `AUD-001`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`; age-category duration policy,
-связь решения с завершением session/bracket, desktop UI, client durable outbox/reconnect и physical-device acceptance
-остаются открыты, поэтому `KER-013` и Gate G3 не закрыты.
+| Компонент | Подтверждено тестами | Открыто |
+|-----------|----------------------|---------|
+| Typed UUID IDs | Competition, peer, court, bracket, session, judge, device и event; canonical generation и rejection malformed/noncanonical | - |
+| `DomainCommand` → `DomainEvent` | Полный typed audit context, source, author, UTC timestamp, type и raw payload; event только с назначенными ID и timestamp; rejection blank fields | - |
+| `SequencedDomainEvent`, `DomainEventOrder`, `PeerEventSequence` | Positive per-owner sequence, deterministic order, rejection owner/sequence conflicts | Sequence уникальна только внутри каждой таблицы `V2`-`V5` (I1) |
+| `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I1, I2) |
+| `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection | Persistence сетки (I4); P2P claims post-v1 |
+| `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2) |
+| `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | Logging backend и persistence readiness (I1) |
 
 ### Client
 
@@ -373,6 +276,22 @@ ACK-ится только после применения и публикует 
 - Duplicate/out-of-order/reconnect tests.
 - Timer restart tests.
 - UI smoke tests критических действий.
+
+### Накопленное server-only доказательство
+
+Domain, JDBC/H2 recovery и two-socket Ktor contract tests. Это partial evidence для `KER-001`-`KER-009`, `KER-011`-`KER-013`,
+`KER-015`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`. Общий пробел: production wiring, desktop arbiter/watcher,
+client outbox/reconnect и physical devices (I2, I3).
+
+| Компонент | Подтверждено тестами | Открыто |
+|-----------|----------------------|---------|
+| `KerugiScoringEngine` | 2 или 3 боковых судьи, quorum и coincidence window (по умолчанию 2 и `1000 мс`); непересекающиеся окна одного участника; distinct configured judges; `BODY=1`/`HEAD=2`, минимальная оценка при конфликте; audit каждого окна, включая insufficient quorum | - |
+| `KerugiScoreJournal`, `JdbcKerugiScoreJournal` (`V3`), `kerugi_score_command` | Raw candidate append до пересчёта; rejection foreign judge и conflicting ID; rebuild; ACK после применения; `kerugi_score_updated` только для нового события | - |
+| `kerugi_operator_action_command` | `THROW`, `SPIN_BONUS` и `GAMJEOM` append-only с автором; Gamjeom увеличивает счёт соперника; отдельная audit projection | Desktop UI (I2) |
+| `kerugi_score_correction_command` | Компенсирующее событие со ссылкой на candidate или action; исходное событие сохраняется, projection исключает эффект | Сброс с причиной `SES-006` (I2) |
+| Gamjeom warning и `kerugi_disqualification_confirmed` | Warning при effective sum `10`; одно подтверждение local owner только после warning | - |
+| `KerugiTimerJournal`, `JdbcKerugiTimerJournal` (`V4`) | `START`/`PAUSE`/`RESUME`/`STOP`, отдельный `ROUND_BREAK`; `kerugi_timer_updated` только для нового события | Длительности по возрасту, remaining time, раунды `KER-010` (I2) |
+| `KerugiResultJournal`, `JdbcKerugiResultJournal` (`V5`) | Одно решение local owner с причиной `final_score` или `golden_round`; второе решение отклоняется | Проверка по authoritative score, связь с session/bracket `SES-007` (I2, I4) |
 
 ### Gate G3
 
@@ -540,6 +459,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 | Английские PDF являются копиями русских     | Высокая     | Среднее     | Не считать English reference complete до замены                                 |
 | iOS local network/TestFlight задержат pilot | Средняя     | Высокое     | Ранний TestFlight и physical-device smoke test                                  |
 | Dirty feature branches расходятся с GitHub  | Высокая     | Среднее     | Зафиксировать release baseline до функциональной разработки                     |
+| Server-only slices не закрывают gates        | Высокая     | Высокое     | Инкременты I1-I8 со сценарием в production entry point и закрытием требований   |
 
 ## 15. После пилота
 
