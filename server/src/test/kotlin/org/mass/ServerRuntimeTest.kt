@@ -93,10 +93,17 @@ class ServerRuntimeTest {
 
         assertEquals(null, pairingStatus(port, requestId, deliveryProof = "other-proof")["reconnectCredential"])
         val credential = requireNotNull(pairingStatus(port, requestId, deliveryProof = "proof-tls")["reconnectCredential"])
-        realtime(port, credential).use { socket -> assertEquals("command_ack", socket.request(command("event-tls"))["type"]) }
+        realtime(port, credential).use { socket ->
+            assertEquals("command_ack", socket.request(command("event-tls"))["type"])
+            assertEquals(DeviceConnectionState.CONNECTED, runtime.pairingRequests.operatorRegistry().devices.single().connectionState)
 
-        runtime.pairingRequests.revoke(requestId)
+            runtime.pairingRequests.revoke(requestId)
+
+            val rejected = socket.request(command("event-after-revoke"))
+            assertEquals("command_rejected" to "invalid_reconnect_credential", rejected["type"] to rejected["code"])
+        }
         realtime(port, credential, expectAccepted = false).close()
+        assertEquals(true, runtime.pairingRequests.operatorRegistry().devices.single().revoked)
     }
 
     @Test
