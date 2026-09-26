@@ -49,7 +49,8 @@ Pilot не считается production-ready до отдельного hardeni
 - [x] Gate G0: baseline обоих репозиториев подтверждён. Server CI и `./gradlew build --no-daemon` подтверждают
   воспроизводимую Java 21 сборку; client baseline закрыт merged [PR #38](https://github.com/Martial-Arts-Sport-Software/u-judge-client/pull/38)
   с Android/shared tests и iOS framework compilation. Physical-device acceptance остаётся доказательством G1 и последующих gates.
-- [ ] Gate G1: single-peer PostgreSQL и mobile realtime spikes не готовы; P2P остаётся post-v1.
+- [ ] Gate G1: single-peer PostgreSQL на macOS и pairing/reconnect на emulator подтверждены I1; clean Windows/macOS (I7) и
+  mobile realtime на физических устройствах (I3) открыты; P2P остаётся post-v1.
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
 - [ ] Gate G4: не готов.
@@ -100,7 +101,7 @@ baseline; при расхождении действует этот план.
 
 | Статус | ID | Недели | Gate | Сценарий, который можно показать | Requirement IDs | Cross-repo |
 |--------|----|--------|------|----------------------------------|-----------------|------------|
-| [ ] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; судья на emulator проходит pairing по local TLS, оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены, client переподключается без повторного pairing | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Да: client pairing и reconnect против desktop server |
+| [x] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; судья на emulator проходит pairing по local TLS, оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены, client переподключается без повторного pairing | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Да: client pairing и reconnect против desktop server |
 | [ ] | I2 | 5-6 | G2, server-часть G3 | Оператор проводит Kerugi-бой на desktop: состав, кворум, окно, таймер по FHR 2024, баллы симулированных судей, действия, коррекции, сброс с причиной, golden round, результат; watcher read-only; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-013`, `KER-015`, `SES-001`-`SES-007`, `UI-001`-`UI-005`, `UI-008`, `NET-001`, `NET-003`, `AUD-002` | Да: client session snapshot и `kerugi_score_command` |
 | [ ] | I3 | 7 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
 | [ ] | I4 | 7-8 | G4 | Оператор импортирует `df-template-v1` (500 участников), видит validation report и preview, правит сетку до старта, проводит поединки, победитель продвигается | `IMP-001`-`IMP-008`, `BRK-001`-`BRK-005`, `SES-003`, `SES-007`, `CMP-005`, `CMP-006`, `CMP-008`, `SYS-003`, `BAK-001`; ADR-005 | Нет |
@@ -108,6 +109,31 @@ baseline; при расхождении действует этот план.
 | [ ] | I6 | 10 | G6 | Результат произвольной сессии объясняется историей и совпадает с XLSX/CSV после backup/restore; русский UI | `AUD-002`-`AUD-004`, `REP-001`-`REP-004`, `BAK-002`-`BAK-004`, `SYS-004` | Нет |
 | [ ] | I7 | 10-11 | G7 | Clean Windows/macOS installers, APK/TestFlight, нагрузка 5-7 clients, packet loss и restart, security check | `SYS-005`, `REL-003`-`REL-007`, `NFR-005`-`NFR-007`, `NFR-014` | Да: mobile builds |
 | [ ] | I8 | 12 | G8 | Полевой пилот по разделу 12 | `REL-001`, `REL-002` | Да |
+
+#### Доказательства I1
+
+Server [#125](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/125),
+[#126](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/126); client
+[u-judge-client#114](https://github.com/Martial-Arts-Sport-Software/u-judge-client/pull/114). Сценарий пройден 26.09.2026 на
+macOS 27 (arm64) с `./gradlew :desktop:run` и Android emulator `sdk_gphone16k_arm64` (Android 17, API 37): pairing по коду
+сверки, подтверждение, kill приложения, `kill -9` desktop и перезапуск, отзыв, отклонение.
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `NFR-004` | Implemented | `kill -9` desktop: журнал, реестр устройств и credential сохранены (emulator); `RealPostgresLifecycleTest`, `ServerRuntimeTest` на PostgreSQL 18.6 |
+| `NFR-008` | Implemented | JSON-логи `logs/server.jsonl` по device/event ID; `ServerLogTest` проверяет отсутствие фамилии, credential и payload |
+| `NFR-009` | Implemented | Upgrade `V5` → `V6` с данными на H2 и PostgreSQL 18.6 в CI |
+| `NFR-010` | Partial | Start/stop, ошибка порта, restart после аварийного завершения на macOS и Linux CI; Windows не проверялась (I7) |
+| `DEV-003` | Implemented | Пустая фамилия отклоняется (`PairingRoutesTest`); оператор видит фамилию на экране устройств |
+| `DEV-004` | Implemented | Credential выдаётся только после подтверждения оператором и только по matching delivery proof на TLS (`ServerRuntimeTest`, emulator) |
+| `DEV-005` | Implemented | Экран устройств показывает Android/iOS и «на связи»/«не на связи» (emulator, `ServerRuntimeTest`) |
+| `DEV-006` | Implemented | Отзыв закрывает сокет устройства сразу, новые handshake и команды отклоняются (emulator, `PairingWebSocketTest`) |
+| `UI-007` | Implemented | Сбой PostgreSQL или порта виден оператору с перезапуском (`ServerRuntimeTest`); ошибка сохранения решения показывается на экране устройств |
+| `NET-006` | Implemented | Server закрывает сокет по `heartbeat_timeout`; client переходит в reconnecting и восстанавливается после `kill -9` desktop (emulator, `ServerClosedSocketTest` в client) |
+| `SYS-007` | Implemented | Решения pairing и доменные события в `domain_events` с автором, источником, временем и payload |
+| `SYS-008` | Implemented | UUID event ID, idempotent retry и отказ конфликтующего ID в едином журнале (`JdbcDomainEventStoreTest`) |
+| `SYS-009` | Implemented | Единая per-peer sequence и four-timestamp `clock_sync` против настоящего server |
+| `AUD-001` | Implemented | Журнал только дописывается; отзыв, отклонение и замена запроса - отдельные события |
 
 Технические задачи, обязательные внутри инкрементов:
 
@@ -171,10 +197,10 @@ architecture. They are not v1 Pilot acceptance gates.
 
 ### PostgreSQL spike
 
-- [ ] Автоматически подготовить локальную PostgreSQL instance.
-- [ ] Выполнить start/stop, schema migration и аварийный restart.
+- [x] Автоматически подготовить локальную PostgreSQL instance (I1).
+- [x] Выполнить start/stop, schema migration и аварийный restart (I1, macOS и Linux CI).
 - [ ] Проверить чистую Windows и macOS machine.
-- [ ] Определить upgrade/backup strategy и размер installer.
+- [x] Определить upgrade/backup strategy и размер installer (ADR-003; macOS DMG 211 MB, I1).
 
 Накопленное доказательство - JVM fixture и H2, не real PostgreSQL на clean machine. Детали в
 [ADR-003](adr/ADR-003-managed-postgresql.md).
@@ -201,13 +227,13 @@ architecture. They are not v1 Pilot acceptance gates.
 | Контракт | Подтверждено тестами | Открыто |
 |----------|----------------------|---------|
 | `GET /v1/metadata` | Version, capabilities, identity площадки, pairing policy и server time до pairing | - |
-| `POST /v1/pairing-requests` | Валидация фамилии и platform, pending request, dedup retry по device ID; хранится только SHA-256 hash client delivery proof | Persistent registry (I1) |
-| Operator pairing service | Идемпотентные approve/reject/revoke; reconnect credential только при принятии и inactive после отзыва; проекция device ID, platform и `connected`/`disconnected` без surname и credential; anonymous LAN decision/revoke endpoints отсутствуют | Desktop UI и durable state (I1) |
+| `POST /v1/pairing-requests` | Валидация фамилии и platform, pending request, dedup retry по device ID; хранится только SHA-256 hash client delivery proof | - |
+| Operator pairing service | Идемпотентные approve/reject/revoke; reconnect credential только при принятии и inactive после отзыва; проекция device ID, platform и `connected`/`disconnected` без surname и credential; anonymous LAN decision/revoke endpoints отсутствуют | - |
 | `GET /v1/pairing-status/{requestId}` | Typed pending/accepted/rejected; rejection code только для rejected; credential только по matching proof на secure transport | - |
 | `/v1/realtime` handshake | Versioned handshake только для active credential; unknown, revoked и incompatible-version отклоняются без pending state | - |
-| Typed commands и ACK | Bounded envelope, idempotent ACK по event ID; с `JdbcPeerJournal` append до ACK, identical retry после recreation, cursor-based resync; typed rejections для malformed, oversized, post-revocation, conflicting и journal failure | Default server in-memory (I1); client outbox/replay (I3) |
-| `clock_sync` | Echo client timestamp и UTC server receive/send timestamps; invalid timestamp получает typed rejection без закрытия сессии | Client offset и artificial delay (I3) |
-| `heartbeat` | `heartbeat_ack`/`heartbeat_rejected`; `heartbeat_timeout` закрывает socket, valid heartbeat продлевает deadline; close помечает устройство disconnected | Client scheduling и reconnect UX (I3) |
+| Typed commands и ACK | Bounded envelope, idempotent ACK по event ID; с `JdbcPeerJournal` append до ACK, identical retry после recreation, cursor-based resync; typed rejections для malformed, oversized, post-revocation, conflicting и journal failure | Client outbox против server (I2) |
+| `clock_sync` | Echo client timestamp и UTC server receive/send timestamps; invalid timestamp получает typed rejection без закрытия сессии | Artificial delay на физических устройствах (I3) |
+| `heartbeat` | `heartbeat_ack`/`heartbeat_rejected`; `heartbeat_timeout` закрывает socket, valid heartbeat продлевает deadline; close помечает устройство disconnected | Physical devices (I3) |
 | Удалённый API | Anonymous `POST /score` и revoke endpoint отсутствуют | - |
 
 ### Gate G1
@@ -239,7 +265,7 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 | `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I1, I2) |
 | `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection | Persistence сетки (I4); P2P claims post-v1 |
 | `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2) |
-| `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | Logging backend и persistence readiness (I1) |
+| `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | - |
 
 ### Client
 
