@@ -21,6 +21,13 @@ object Localization {
             "devices_connection_connected" to "Connected devices",
             "devices_connection_available" to "Available devices",
 
+            //Server Status
+            "server_status_stopped" to "Server is stopped",
+            "server_status_starting" to "Starting the server and database…",
+            "server_status_running" to "Server is running on port %d; events are stored in the local database",
+            "server_status_failed" to "Server or database failure: %s. New events are not accepted.",
+            "server_status_restart" to "Restart",
+
             //Routes Titles
             "entry" to "Entry",
             "devices_connection" to "Devices connection",
@@ -115,6 +122,13 @@ object Localization {
             //Devices Connection Screen
             "devices_connection_connected" to "Подключённые устройства",
             "devices_connection_available" to "Доступные устройства",
+
+            //Server Status
+            "server_status_stopped" to "Сервер остановлен",
+            "server_status_starting" to "Запуск сервера и базы данных…",
+            "server_status_running" to "Сервер работает на порту %d, события сохраняются в локальной базе",
+            "server_status_failed" to "Сбой сервера или базы данных: %s. Новые события не принимаются.",
+            "server_status_restart" to "Перезапустить",
 
             //Routes Titles
             "entry" to "Вход",

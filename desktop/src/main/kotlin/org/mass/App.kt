@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import org.mass.enums.Routes
 import org.mass.screens.DevicesConnectionScreen
 import org.mass.screens.EntryScreen
 import org.mass.ui.TypographyManager.getTypography
+import org.mass.ui.server_status.ServerStatusComponent
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.app_background
 import kotlin.time.Duration.Companion.milliseconds
@@ -75,22 +77,25 @@ fun App() {
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    Box(
-                        Modifier
-                            .padding(10.dp)
-                            .fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        NavHost(
-                            navController = navController!!,
-                            startDestination = Routes.ENTRY.path,
-                            contentAlignment = Alignment.Center,
+                    Column(Modifier.padding(10.dp).fillMaxSize()) {
+                        ServerStatusComponent()
+                        Box(
+                            Modifier
+                                .padding(top = 10.dp)
+                                .fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            animatedComposable(Routes.ENTRY) {
-                                EntryScreen.Load()
-                            }
-                            animatedComposable(Routes.DEVICES_CONNECTION) {
-                                DevicesConnectionScreen.Load()
+                            NavHost(
+                                navController = navController!!,
+                                startDestination = Routes.ENTRY.path,
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                animatedComposable(Routes.ENTRY) {
+                                    EntryScreen.Load()
+                                }
+                                animatedComposable(Routes.DEVICES_CONNECTION) {
+                                    DevicesConnectionScreen.Load()
+                                }
                             }
                         }
                     }
