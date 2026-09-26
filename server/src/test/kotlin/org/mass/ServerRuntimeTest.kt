@@ -101,6 +101,7 @@ class ServerRuntimeTest {
 
             val rejected = socket.request(command("event-after-revoke"))
             assertEquals("command_rejected" to "invalid_reconnect_credential", rejected["type"] to rejected["code"])
+            assertEquals("event-after-revoke", rejected["eventId"])
         }
         realtime(port, credential, expectAccepted = false).close()
         assertEquals(true, runtime.pairingRequests.operatorRegistry().devices.single().revoked)

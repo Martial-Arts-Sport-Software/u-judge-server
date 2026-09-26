@@ -573,6 +573,7 @@ class PairingWebSocketTest {
         assertEquals(firstAck, retryAck)
         assertEquals("command_rejected", conflict.getValue("type").jsonPrimitive.content)
         assertEquals("event_id_conflict", conflict.getValue("code").jsonPrimitive.content)
+        assertEquals("event-1", conflict.getValue("eventId").jsonPrimitive.content)
     }
 
     @Test

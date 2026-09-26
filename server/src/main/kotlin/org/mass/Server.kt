@@ -247,7 +247,8 @@ data class RealtimeCommandRequest(
 data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
 
 @Serializable
-data class RealtimeCommandRejected(val type: String, val code: String)
+/** [eventId] echoes the rejected command's event ID whenever it can be read, so the client can settle that outbox entry. */
+data class RealtimeCommandRejected(val type: String, val code: String, val eventId: String? = null)
 
 @Serializable
 data class RealtimeSessionLifecycleCommandRequest(
@@ -1269,11 +1270,17 @@ fun Application.module(
                         is Frame.Close -> break
                         else -> continue
                     }
+                    val messageEventId = if (commandText.length > 4_096) null else runCatching {
+                        ((Json.parseToJsonElement(commandText) as? JsonObject)?.get("eventId") as? JsonPrimitive)
+                            ?.takeIf(JsonPrimitive::isString)
+                            ?.content
+                    }.getOrNull()
                     if (!pairingRequests.isReconnectCredentialActive(reconnectCredential)) {
+                        ServerLog.commandRejected(deviceId, "invalid_reconnect_credential")
                         send(
                             Frame.Text(
                                 Json.encodeToString(
-                                    RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential"),
+                                    RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential", messageEventId),
                                 ),
                             ),
                         )
@@ -1546,7 +1553,11 @@ fun Application.module(
                         }
                         is RealtimeCommandOutcome.Rejected -> {
                             ServerLog.commandRejected(deviceId, outcome.code)
-                            send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
+                            send(
+                                Frame.Text(
+                                    Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code, messageEventId)),
+                                ),
+                            )
                         }
                     }
                 }
