@@ -450,6 +450,7 @@ object DevicesConnectionScreen : Screen {
                 onclick = {},
                 enabled = false,
                 modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.height(6.dp))
             Text(
