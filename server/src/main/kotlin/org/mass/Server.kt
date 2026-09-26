@@ -156,6 +156,10 @@ enum class PairingStatusState {
 enum class PairingStatusCode {
     @kotlinx.serialization.SerialName("operator_rejected")
     OPERATOR_REJECTED,
+
+    /** The same device sent a newer request, which replaced this one. */
+    @kotlinx.serialization.SerialName("superseded")
+    SUPERSEDED,
 }
 
 @Serializable
@@ -910,11 +914,11 @@ class PairingRequests(private val journal: DeviceRegistryJournal = DeviceRegistr
 
         val existing = devicesByRequestId.values.firstOrNull { it.deviceId == deviceId && it.state == DeviceState.PENDING }
         if (existing != null) {
-            if (deliveryProof != null &&
-                (existing.deliveryProofHash == null || existing.deliveryProofHash != hashHex(deliveryProof))) {
-                return PairingSubmission.Rejected
-            }
-            return PairingSubmission.Pending(existing.pending(), created = false)
+            val sameProof = deliveryProof == null || existing.deliveryProofHash == hashHex(deliveryProof)
+            if (sameProof) return PairingSubmission.Pending(existing.pending(), created = false)
+            // The device lost its earlier proof (app restarted before approval): the old request can never receive the
+            // credential, so the newer one replaces it and the operator still approves it by the verification code.
+            record(deviceId, DeviceRegistryEvent.Superseded(existing.requestId))
         }
 
         val event = DeviceRegistryEvent.Requested(
@@ -1083,6 +1087,10 @@ class PairingRequests(private val journal: DeviceRegistryJournal = DeviceRegistr
             }
             is DeviceRegistryEvent.CredentialIssued -> devicesByRequestId[event.requestId]?.credentialHash = event.credentialHash
             is DeviceRegistryEvent.Rejected -> devicesByRequestId[event.requestId]?.state = DeviceState.REJECTED
+            is DeviceRegistryEvent.Superseded -> devicesByRequestId[event.requestId]?.let {
+                it.state = DeviceState.REJECTED
+                it.rejectionCode = PairingStatusCode.SUPERSEDED
+            }
             is DeviceRegistryEvent.Revoked -> devicesByRequestId[event.requestId]?.state = DeviceState.REVOKED
         }
         mutableChanges.value++
@@ -1106,6 +1114,7 @@ class PairingRequests(private val journal: DeviceRegistryJournal = DeviceRegistr
     ) {
         var state = DeviceState.PENDING
         var credentialHash: String? = null
+        var rejectionCode = PairingStatusCode.OPERATOR_REJECTED
 
         fun pending() = PendingPairingRequest(requestId, deviceId, surname, platform)
 
@@ -1116,7 +1125,7 @@ class PairingRequests(private val journal: DeviceRegistryJournal = DeviceRegistr
         fun rejectedStatus() = PairingStatus(
             state = PairingStatusState.REJECTED,
             deviceId = deviceId,
-            code = PairingStatusCode.OPERATOR_REJECTED,
+            code = rejectionCode,
         )
     }
 

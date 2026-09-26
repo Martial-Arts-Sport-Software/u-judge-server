@@ -35,6 +35,10 @@ sealed interface DeviceRegistryEvent {
     @Serializable
     data class Rejected(override val requestId: String) : DeviceRegistryEvent
 
+    /** The device asked again with a new delivery proof (for example after reinstalling), replacing this request. */
+    @Serializable
+    data class Superseded(override val requestId: String) : DeviceRegistryEvent
+
     @Serializable
     data class Revoked(override val requestId: String) : DeviceRegistryEvent
 }
@@ -59,7 +63,7 @@ class JdbcDeviceRegistryJournal(
 ) : DeviceRegistryJournal {
     override fun append(deviceId: String, event: DeviceRegistryEvent) {
         val (source, author) = when (event) {
-            is DeviceRegistryEvent.Requested -> "judge_device" to "device:$deviceId"
+            is DeviceRegistryEvent.Requested, is DeviceRegistryEvent.Superseded -> "judge_device" to "device:$deviceId"
             else -> "operator" to "operator"
         }
         store.appendPeerEvent(
@@ -83,6 +87,7 @@ class JdbcDeviceRegistryJournal(
             DeviceRegistryEvent.CredentialIssued::class ->
                 json.decodeFromString<DeviceRegistryEvent.CredentialIssued>(stored.payload)
             DeviceRegistryEvent.Rejected::class -> json.decodeFromString<DeviceRegistryEvent.Rejected>(stored.payload)
+            DeviceRegistryEvent.Superseded::class -> json.decodeFromString<DeviceRegistryEvent.Superseded>(stored.payload)
             else -> json.decodeFromString<DeviceRegistryEvent.Revoked>(stored.payload)
         }
     }
@@ -94,6 +99,7 @@ class JdbcDeviceRegistryJournal(
         is DeviceRegistryEvent.Approved -> json.encodeToString(event)
         is DeviceRegistryEvent.CredentialIssued -> json.encodeToString(event)
         is DeviceRegistryEvent.Rejected -> json.encodeToString(event)
+        is DeviceRegistryEvent.Superseded -> json.encodeToString(event)
         is DeviceRegistryEvent.Revoked -> json.encodeToString(event)
     }
 
@@ -104,6 +110,7 @@ class JdbcDeviceRegistryJournal(
             "device_pairing_approved" to DeviceRegistryEvent.Approved::class,
             "device_credential_issued" to DeviceRegistryEvent.CredentialIssued::class,
             "device_pairing_rejected" to DeviceRegistryEvent.Rejected::class,
+            "device_pairing_superseded" to DeviceRegistryEvent.Superseded::class,
             "device_pairing_revoked" to DeviceRegistryEvent.Revoked::class,
         )
     }

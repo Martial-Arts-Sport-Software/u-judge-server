@@ -200,8 +200,9 @@ class PairingRoutesTest {
     }
 
     @Test
-    fun `delivery proof retries must match the pending request`() = testApplication {
-        application { module(pairingRequests = PairingRequests()) }
+    fun `a new delivery proof replaces the pending request of the same device`() = testApplication {
+        val pairingRequests = PairingRequests()
+        application { module(pairingRequests = pairingRequests, credentialDeliveryIsSecure = { true }) }
         val first = client.post("/v1/pairing-requests") {
             header(HttpHeaders.ContentType, "application/json")
             setBody("""{"deviceId":"ios-proof-retry","surname":"Petrova","platform":"ios","deliveryProof":"client-proof-3"}""")
@@ -210,9 +211,19 @@ class PairingRoutesTest {
             header(HttpHeaders.ContentType, "application/json")
             setBody("""{"deviceId":"ios-proof-retry","surname":"Petrova","platform":"ios","deliveryProof":"other-proof"}""")
         }
+        val firstId = Json.parseToJsonElement(first.bodyAsText()).jsonObject.getValue("requestId").jsonPrimitive.content
+        val retryId = Json.parseToJsonElement(retry.bodyAsText()).jsonObject.getValue("requestId").jsonPrimitive.content
 
-        assertEquals(HttpStatusCode.Accepted, first.status)
-        assertEquals(HttpStatusCode.BadRequest, retry.status)
+        assertEquals(HttpStatusCode.Accepted, retry.status)
+        assertEquals(listOf(retryId), pairingRequests.pending().map(PendingPairingRequest::requestId))
+        val replaced = Json.parseToJsonElement(client.get("/v1/pairing-status/$firstId").bodyAsText()).jsonObject
+        assertEquals("rejected" to "superseded", replaced.getValue("state").jsonPrimitive.content to replaced.getValue("code").jsonPrimitive.content)
+
+        pairingRequests.approve(retryId)
+        val credential = Json.parseToJsonElement(
+            client.get("/v1/pairing-status/$retryId") { header(PAIRING_DELIVERY_PROOF_HEADER, "other-proof") }.bodyAsText(),
+        ).jsonObject["reconnectCredential"]?.jsonPrimitive?.content
+        assertTrue(!credential.isNullOrBlank())
     }
 
     @Test

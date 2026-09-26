@@ -7,6 +7,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.sslConnector
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +27,8 @@ import org.mass.persistence.PostgresPlatform
 import org.mass.persistence.PostgresRuntimeConfiguration
 import org.mass.persistence.PostgresState
 import org.mass.replication.JdbcPeerJournal
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -72,8 +75,16 @@ sealed interface ServerRuntimeState {
 
     data object Starting : ServerRuntimeState
 
-    /** [verificationCode] is shown to the operator and compared with the judge's screen before approval (ADR-006). */
-    data class Running(val port: Int, val peerId: PeerId, val verificationCode: String) : ServerRuntimeState
+    /**
+     * [verificationCode] is shown to the operator and compared with the judge's screen before approval (ADR-006);
+     * [addresses] are this computer's LAN IPv4 addresses a judge can enter manually.
+     */
+    data class Running(
+        val port: Int,
+        val peerId: PeerId,
+        val verificationCode: String,
+        val addresses: List<String> = emptyList(),
+    ) : ServerRuntimeState
 
     /** A persistence or network failure the operator must see; the diagnostic contains no personal data. */
     data class Failed(val diagnostic: String) : ServerRuntimeState
@@ -195,15 +206,25 @@ class ServerRuntime(
             return failStartup("HTTPS port ${configuration.port} is unavailable: ${exception.message}")
         }
 
+        val addresses = lanAddresses()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { runtimeScope ->
-            runtimeScope.launch {
-                runCatching {
-                    publishService(type = "_u-judge._tcp", name = configuration.serviceName) { port = configuration.port }
+            // dns-sd-kt binds one JmDNS instance to a single address (by default the first site-local one, which may be
+            // a VM or VPN interface), so the service is published on every LAN address judges can reach.
+            addresses.forEach { address ->
+                runtimeScope.launch {
+                    runCatching {
+                        publishService(type = "_u-judge._tcp", name = configuration.serviceName) {
+                            port = configuration.port
+                            this.addresses = listOf(address)
+                        }
+                    }.onFailure { failure ->
+                        if (failure !is CancellationException) ServerLog.mdnsFailed(address, failure.message.orEmpty())
+                    }
                 }
             }
             runtimeScope.launch { supervisePostgres(runtime) }
         }
-        return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode)
+        return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode, addresses)
     }
 
     private suspend fun supervisePostgres(runtime: ManagedPostgresRuntime) {
@@ -231,6 +252,18 @@ class ServerRuntime(
                 "into a writable folder such as Applications"
         }
     }
+
+    /** Site-local IPv4 addresses of active non-loopback interfaces, the ones reachable from the venue Wi-Fi. */
+    private fun lanAddresses(): List<String> = runCatching {
+        NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback && !it.isVirtual }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .filter { it.isSiteLocalAddress }
+            .map { it.hostAddress }
+            .distinct()
+            .sorted()
+    }.getOrDefault(emptyList())
 
     private fun failStartup(diagnostic: String): ServerRuntimeState {
         httpServer?.stop(0, 0)

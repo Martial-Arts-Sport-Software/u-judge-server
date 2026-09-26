@@ -28,12 +28,16 @@ import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.mass.ui.button.ButtonComponent
 
-/** Shows whether the server and its database accept work, and never hides a persistence failure (`UI-007`). */
+/**
+ * Shows whether the server and its database accept work. With [failuresOnly] it stays hidden while the server runs, so
+ * other screens show only a failure, which is never hidden from the operator (`UI-007`).
+ */
 @Composable
-fun ServerStatusComponent(modifier: Modifier = Modifier) {
+fun ServerStatusComponent(modifier: Modifier = Modifier, failuresOnly: Boolean = false) {
     val state by Server.runtime.state.collectAsState()
     val scope = rememberCoroutineScope()
     val failed = state as? ServerRuntimeState.Failed
+    if (failuresOnly && failed == null && state != ServerRuntimeState.Stopped) return
     val text = when (val current = state) {
         ServerRuntimeState.Stopped -> Localization.getString("server_status_stopped")
         ServerRuntimeState.Starting -> Localization.getString("server_status_starting")

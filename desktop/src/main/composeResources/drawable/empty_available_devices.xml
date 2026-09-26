@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp" android:viewportWidth="120" android:viewportHeight="120">
+    <!-- Phone being looked for: the empty "available devices" list. -->
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4"
+        android:pathData="M34,12 h36 a8,8 0 0 1 8,8 v80 a8,8 0 0 1 -8,8 h-36 a8,8 0 0 1 -8,-8 v-80 a8,8 0 0 1 8,-8 z" />
+    <path android:strokeColor="#7C45E2" android:strokeWidth="4" android:strokeLineCap="round" android:pathData="M46,21 h12" />
+    <path android:strokeColor="#BC9DF6" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M38,40 h26 M38,50 h18 M38,60 h22" />
+    <path android:fillColor="#FFFFFF" android:strokeColor="#7C45E2" android:strokeWidth="5"
+        android:pathData="M78,76 m-14,0 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0" />
+    <path android:strokeColor="#7C45E2" android:strokeWidth="6" android:strokeLineCap="round" android:pathData="M88,86 L102,100" />
+</vector>
