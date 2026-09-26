@@ -108,15 +108,23 @@ object DevicesConnectionScreen : Screen {
                         .padding(25.dp),
                 ) {
                     val paired = registry.devices.filterNot(OperatorDevice::revoked)
-                    DeviceList(Localization.getString("devices_connection_connected"), Modifier.weight(1f)) {
-                        if (paired.isEmpty()) item { EmptyState(Res.drawable.empty_connected_devices, "devices_paired_empty", "devices_paired_empty_hint") }
+                    DeviceList(
+                        Localization.getString("devices_connection_connected"),
+                        Modifier.weight(1f),
+                        empty = paired.isEmpty(),
+                        emptyState = { EmptyState(Res.drawable.empty_connected_devices, "devices_paired_empty", "devices_paired_empty_hint") },
+                    ) {
                         itemsIndexed(paired, key = { _, device -> device.requestId }) { index, device ->
                             PairedRow(index + 1, device, onRevoke = { revokeCandidate = device })
                         }
                     }
                     Spacer(Modifier.width(25.dp))
-                    DeviceList(Localization.getString("devices_connection_available"), Modifier.weight(1f)) {
-                        if (registry.pending.isEmpty()) item { EmptyState(Res.drawable.empty_available_devices, "devices_pending_empty", "devices_pending_empty_hint") }
+                    DeviceList(
+                        Localization.getString("devices_connection_available"),
+                        Modifier.weight(1f),
+                        empty = registry.pending.isEmpty(),
+                        emptyState = { EmptyState(Res.drawable.empty_available_devices, "devices_pending_empty", "devices_pending_empty_hint") },
+                    ) {
                         itemsIndexed(registry.pending, key = { _, request -> request.requestId }) { index, request ->
                             PendingRow(
                                 index + 1,
@@ -321,8 +329,15 @@ object DevicesConnectionScreen : Screen {
         )
     }
 
+    /** A titled list; when [empty], [emptyState] is centered in the remaining height instead of the rows. */
     @Composable
-    private fun DeviceList(title: String, modifier: Modifier, content: LazyListScope.() -> Unit) {
+    private fun DeviceList(
+        title: String,
+        modifier: Modifier,
+        empty: Boolean,
+        emptyState: @Composable () -> Unit,
+        content: LazyListScope.() -> Unit,
+    ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color).padding(10.dp),
@@ -330,7 +345,11 @@ object DevicesConnectionScreen : Screen {
             Spacer(Modifier.height(20.dp))
             Text(text = title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(25.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(15.dp), modifier = Modifier.fillMaxSize(), content = content)
+            if (empty) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) { emptyState() }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(15.dp), modifier = Modifier.fillMaxSize(), content = content)
+            }
         }
     }
 
@@ -392,7 +411,7 @@ object DevicesConnectionScreen : Screen {
     private fun EmptyState(image: DrawableResource, titleKey: String, hintKey: String) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 20.dp, end = 20.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
         ) {
             Image(painterResource(image), contentDescription = null, modifier = Modifier.size(110.dp))
             Spacer(Modifier.height(16.dp))
