@@ -1,8 +1,19 @@
 package org.mass.screens
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.TooltipPlacement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.sp
+import java.net.InetAddress
+import u_judge_server.desktop.generated.resources.empty_available_devices
+import u_judge_server.desktop.generated.resources.empty_connected_devices
+import u_judge_server.desktop.generated.resources.server_computer
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,19 +105,18 @@ object DevicesConnectionScreen : Screen {
                         .fillMaxHeight()
                         .clip(PANEL_SHAPE)
                         .background(Colors.GRAY.color)
-                        .border(1.dp, PANEL_BORDER, PANEL_SHAPE)
                         .padding(25.dp),
                 ) {
                     val paired = registry.devices.filterNot(OperatorDevice::revoked)
                     DeviceList(Localization.getString("devices_connection_connected"), Modifier.weight(1f)) {
-                        if (paired.isEmpty()) item { EmptyText("devices_paired_empty") }
+                        if (paired.isEmpty()) item { EmptyState(Res.drawable.empty_connected_devices, "devices_paired_empty", "devices_paired_empty_hint") }
                         itemsIndexed(paired, key = { _, device -> device.requestId }) { index, device ->
                             PairedRow(index + 1, device, onRevoke = { revokeCandidate = device })
                         }
                     }
                     Spacer(Modifier.width(25.dp))
                     DeviceList(Localization.getString("devices_connection_available"), Modifier.weight(1f)) {
-                        if (registry.pending.isEmpty()) item { EmptyText("devices_pending_empty") }
+                        if (registry.pending.isEmpty()) item { EmptyState(Res.drawable.empty_available_devices, "devices_pending_empty", "devices_pending_empty_hint") }
                         itemsIndexed(registry.pending, key = { _, request -> request.requestId }) { index, request ->
                             PendingRow(
                                 index + 1,
@@ -146,49 +156,40 @@ object DevicesConnectionScreen : Screen {
         }
     }
 
-    /** "Конфигурация устройств": where judges connect, the code they must see and whether the server accepts work. */
+    /** "Конфигурация устройств": this computer, where judges connect, the code they must see and component health. */
     @Composable
     private fun ServerPanel(state: ServerRuntimeState, error: String?, modifier: Modifier) {
         val running = state as? ServerRuntimeState.Running
+        val host = remember { hostDescription() }
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = modifier
                 .fillMaxHeight()
                 .clip(PANEL_SHAPE)
                 .background(Colors.GRAY.color)
-                .border(1.dp, PANEL_BORDER, PANEL_SHAPE)
-                .padding(25.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
         ) {
             Text(
                 text = Localization.getString("devices_config_title"),
                 color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(20.dp))
-            if (running == null) {
-                InfoPill(
-                    when (state) {
-                        is ServerRuntimeState.Failed -> Localization.getString("devices_server_failed")
-                        else -> Localization.getString("devices_code_unavailable")
-                    },
-                    background = if (state is ServerRuntimeState.Failed) FAILURE_COLOR else ROW_COLOR,
-                )
-                return@Column
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(72.dp))
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(host.name, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                    Text(host.system, color = Colors.SECONDARY.color, style = MaterialTheme.typography.bodySmall)
+                }
             }
-            val address = running.addresses.firstOrNull()?.let { "$it:${running.port}" }
-                ?: Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString())
-            InfoPill(Localization.getString("devices_server_address").replace("%s", address))
-            running.addresses.drop(1).forEach { other ->
-                Spacer(Modifier.height(8.dp))
-                InfoPill(Localization.getString("devices_server_address_other").replace("%s", "$other:${running.port}"))
-            }
-            Spacer(Modifier.height(12.dp))
-            InfoPill(
-                Localization.getString("devices_code")
-                    .replace("%s", "${running.verificationCode.take(3)} ${running.verificationCode.drop(3)}"),
-            )
+            Spacer(Modifier.height(14.dp))
+            if (running != null) AddressPill(running) else InfoPill(Localization.getString("devices_code_unavailable"))
+            Spacer(Modifier.height(16.dp))
+            CodeTile(running?.verificationCode)
             Spacer(Modifier.height(8.dp))
             Text(
                 text = Localization.getString("devices_code_hint"),
@@ -196,16 +197,111 @@ object DevicesConnectionScreen : Screen {
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.weight(1f))
-            error?.let { InfoPill(it, background = FAILURE_COLOR) }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = Localization.getString("devices_server_running"),
-                color = Colors.SECONDARY.color,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
+            Spacer(Modifier.height(16.dp))
+            StatusItems(state)
+            error?.let {
+                Spacer(Modifier.height(12.dp))
+                InfoPill(it, background = FAILURE_COLOR)
+            }
         }
+    }
+
+    /** The main address judges type in; other interfaces of this computer appear in a tooltip on hover. */
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun AddressPill(running: ServerRuntimeState.Running) {
+        val primary = running.addresses.firstOrNull()?.let { "$it:${running.port}" }
+            ?: Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString())
+        val others = running.addresses.drop(1).map { "$it:${running.port}" }
+        val text = Localization.getString("devices_server_address").replace("%s", primary) +
+            if (others.isEmpty()) "" else "  +${others.size}"
+        if (others.isEmpty()) {
+            InfoPill(text)
+            return
+        }
+        TooltipArea(
+            tooltip = {
+                Column(
+                    Modifier.clip(ROW_SHAPE).background(Colors.SECONDARY.color).padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        Localization.getString("devices_server_address_other"),
+                        color = Colors.PRIMARY.color,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    others.forEach { Text(it, color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodyMedium) }
+                }
+            },
+            tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 16.dp)),
+        ) {
+            InfoPill(text)
+        }
+    }
+
+    /** The verification code alone in a square, where a judge would expect to look for a pairing code. */
+    @Composable
+    private fun CodeTile(code: String?) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.White)
+                .semantics { contentDescription = code?.let { "${Localization.getString("devices_code_label")} $it" }.orEmpty() },
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = Localization.getString("devices_code_label"),
+                    color = Colors.PRIMARY.color,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = code?.let { "${it.take(3)}\n${it.drop(3)}" } ?: "— — —",
+                    color = ROW_COLOR,
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 6.sp,
+                    lineHeight = 50.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+
+    /** One line per component with a round indicator: green works, amber starts, red failed. */
+    @Composable
+    private fun StatusItems(state: ServerRuntimeState) {
+        val color = when (state) {
+            is ServerRuntimeState.Running -> APPROVE_COLOR
+            ServerRuntimeState.Starting -> STARTING_COLOR
+            else -> FAILURE_COLOR
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            listOf("devices_status_server", "devices_status_database", "devices_status_tls").forEach { key ->
+                val text = Localization.getString(key)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.semantics { contentDescription = text }) {
+                    Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(color))
+                    Spacer(Modifier.width(10.dp))
+                    Text(text, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (state is ServerRuntimeState.Failed) {
+                Text(Localization.getString("devices_server_failed"), color = Colors.SECONDARY.color, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+
+    private data class HostDescription(val name: String, val system: String)
+
+    private fun hostDescription(): HostDescription {
+        val name = runCatching { InetAddress.getLocalHost().hostName.removeSuffix(".local") }.getOrDefault("")
+            .ifBlank { Localization.getString("devices_host_unknown") }
+        val system = "${System.getProperty("os.name")} ${System.getProperty("os.version")} · ${System.getProperty("os.arch")}"
+        return HostDescription(name, system)
     }
 
     @Composable
@@ -291,9 +387,30 @@ object DevicesConnectionScreen : Screen {
         )
     }
 
+    /** Illustrated empty list: what is missing and what to do about it. */
     @Composable
-    private fun EmptyText(key: String) {
-        Text(text = Localization.getString(key), color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodyMedium)
+    private fun EmptyState(image: DrawableResource, titleKey: String, hintKey: String) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 20.dp, end = 20.dp),
+        ) {
+            Image(painterResource(image), contentDescription = null, modifier = Modifier.size(110.dp))
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = Localization.getString(titleKey),
+                color = Colors.PRIMARY.color,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = Localization.getString(hintKey),
+                color = Colors.PRIMARY.color.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 
     private fun platformName(platform: String) = when (platform) {
@@ -306,7 +423,7 @@ object DevicesConnectionScreen : Screen {
     private val LIST_SHAPE = RoundedCornerShape(15.dp)
     private val ROW_SHAPE = RoundedCornerShape(8.dp)
     private val ROW_COLOR = Color(0xFF6A2BDD)
-    private val PANEL_BORDER = Color(0xFF4B2A8F)
     private val APPROVE_COLOR = Color(0xFF3FD37B)
     private val FAILURE_COLOR = Color(0xFFB3261E)
+    private val STARTING_COLOR = Color(0xFFF2B233)
 }
