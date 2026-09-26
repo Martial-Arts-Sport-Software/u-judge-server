@@ -42,4 +42,30 @@ class RealPostgresLifecycleTest {
             root.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `upgrades the legacy pilot schema into the unified domain journal on real PostgreSQL`() {
+        val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
+        assumeTrue(
+            !installationDirectory.isNullOrBlank(),
+            "Set -DuJudge.postgres.installationDirectory to a PostgreSQL bundle root to run this acceptance test",
+        )
+        val root = createTempDirectory()
+        val runtime = ManagedPostgresRuntime(
+            PostgresRuntimeConfiguration(
+                installationDirectory = Path.of(installationDirectory),
+                applicationDataDirectory = root.resolve("application-data"),
+                port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
+                platform = PostgresPlatform.current(),
+            ),
+        )
+
+        try {
+            assertIs<PostgresState.Running>(runtime.start())
+            DomainJournalFixture.verifyLegacyUpgrade(requireNotNull(runtime.dataSource))
+        } finally {
+            runtime.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
 }
