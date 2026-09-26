@@ -36,6 +36,8 @@ PostgreSQL bundle, но на CI пропускается без этого bundl
 distribution и mobile reconnect evidence ещё не подтверждены.
 Решение и ограничения зафиксированы в [ADR-003](docs/adr/ADR-003-managed-postgresql.md).
 
+Перечисленные server-компоненты пока проверены тестами, но `Server.start()` не подключает JDBC journals и Kerugi handlers,
+а desktop только запускает `Server.start()` без operator pairing service и проекций; это закрывают инкременты I1 и I2 из [roadmap](docs/ROADMAP.md#инкременты-поставки).
 Подробное разделение текущего и целевого состояния находится в [описании проекта](docs/PROJECT.md).
 
 ## Модули
@@ -78,7 +80,7 @@ distribution и mobile reconnect evidence ещё не подтверждены.
 
 - [Описание U'Judge System](docs/PROJECT.md)
 - [Системные и серверные требования](docs/REQUIREMENTS.md)
-- [Roadmap U'Judge v1 Pilot](docs/ROADMAP.md)
+- [Roadmap U'Judge v1 Pilot](docs/ROADMAP.md) и [инкременты поставки](docs/ROADMAP.md#инкременты-поставки)
 - [Клиент U'Judge](https://github.com/Martial-Arts-Sport-Software/u-judge-client)
 - [Макеты Figma](https://www.figma.com/design/x5vY9DbXh3a0kv0lBPcNru/Judging-app)
 
