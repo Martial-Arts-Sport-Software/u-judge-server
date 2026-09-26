@@ -43,7 +43,7 @@ required capabilities.
 Every new mobile device requires explicit operator approval. Approval issues a reconnect credential stored in platform secure
 storage; it remains valid until revocation or rotation. The realtime protocol uses one authenticated WebSocket per paired
 client and typed messages for handshake, pairing status, session snapshot, command/event, ACK, rejection, heartbeat,
-resync request/response, and server notice. TLS uses the local certificate/trust flow selected in ADR-002.
+resync request/response, and server notice. TLS uses the local certificate/trust flow selected in [ADR-006](ADR-006-local-tls-trust.md).
 
 The current server slice keeps approval and rejection in a transport-agnostic local operator application service. It
 transitions a pending request to accepted or rejected idempotently, issues an opaque reconnect credential for acceptance and
@@ -129,4 +129,4 @@ ADR-004 can be accepted only after contract/integration tests prove:
 | Reconnect/resync rule | Cursor-based resync and current active-session snapshot before scoring controls re-enable. |
 | Clock-offset method and bound | `clock_sync` echoes the ISO-8601 UTC client send timestamp with UTC server receive/send timestamps; the client calculates the four-timestamp offset/round-trip estimate. The telemetry-validated quality threshold does not change the `1000 ms` coincidence window. |
 | Kerugi coincidence conflict | Same-participant score candidates in one `1000 ms` window resolve to the minimum score, regardless of arrival order; retain all candidates and the resolution for audit. |
-| Transport security | TLS with locally managed certificate and trust flow. |
+| Transport security | TLS with locally managed certificate and trust flow: per-peer self-signed certificate pinned by SPKI hash on first use with an operator-compared verification code ([ADR-006](ADR-006-local-tls-trust.md)). |

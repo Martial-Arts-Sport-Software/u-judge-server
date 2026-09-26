@@ -145,6 +145,7 @@ baseline; при расхождении действует этот план.
 | [x]    | [ADR-003](adr/ADR-003-managed-postgresql.md) | Управляемая установка PostgreSQL на Windows/macOS |
 | [x]    | [ADR-004](adr/ADR-004-http-websocket-contract.md) | HTTP/WebSocket contract и version negotiation     |
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
+| [x]    | [ADR-006](adr/ADR-006-local-tls-trust.md) | Local TLS: self-signed сертификат peer и SPKI pin на телефоне с кодом сверки |
 
 ### Gate G0
 
