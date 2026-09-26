@@ -1,6 +1,12 @@
 package org.mass.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.TooltipPlacement
@@ -49,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -115,7 +122,9 @@ object DevicesConnectionScreen : Screen {
                         emptyState = { EmptyState(Res.drawable.empty_connected_devices, "devices_paired_empty", "devices_paired_empty_hint") },
                     ) {
                         itemsIndexed(paired, key = { _, device -> device.requestId }) { index, device ->
-                            PairedRow(index + 1, device, onRevoke = { revokeCandidate = device })
+                            Box(Modifier.animateItem(fadeInSpec = tween(300), placementSpec = tween(300), fadeOutSpec = tween(300))) {
+                                PairedRow(index + 1, device, onRevoke = { revokeCandidate = device })
+                            }
                         }
                     }
                     Spacer(Modifier.width(25.dp))
@@ -126,12 +135,14 @@ object DevicesConnectionScreen : Screen {
                         emptyState = { EmptyState(Res.drawable.empty_available_devices, "devices_pending_empty", "devices_pending_empty_hint") },
                     ) {
                         itemsIndexed(registry.pending, key = { _, request -> request.requestId }) { index, request ->
-                            PendingRow(
-                                index + 1,
-                                request,
-                                onApprove = { decide { approve(request.requestId) } },
-                                onReject = { decide { reject(request.requestId) } },
-                            )
+                            Box(Modifier.animateItem(fadeInSpec = tween(300), placementSpec = tween(300), fadeOutSpec = tween(300))) {
+                                PendingRow(
+                                    index + 1,
+                                    request,
+                                    onApprove = { decide { approve(request.requestId) } },
+                                    onReject = { decide { reject(request.requestId) } },
+                                )
+                            }
                         }
                     }
                 }
@@ -171,10 +182,11 @@ object DevicesConnectionScreen : Screen {
         val host = remember { hostDescription() }
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = modifier
                 .fillMaxHeight()
                 .clip(PANEL_SHAPE)
-                .background(Colors.GRAY.color)
+                .background(PANEL_DARK)
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
@@ -185,120 +197,192 @@ object DevicesConnectionScreen : Screen {
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(14.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(72.dp))
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(host.name, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                    Text(host.system, color = Colors.SECONDARY.color, style = MaterialTheme.typography.bodySmall)
-                }
+            HostCard(host)
+            if (running != null) {
+                AddressPill(running)
+                CodeCard(running.verificationCode)
+            } else {
+                InfoPill(Localization.getString("devices_code_unavailable"))
             }
-            Spacer(Modifier.height(14.dp))
-            if (running != null) AddressPill(running) else InfoPill(Localization.getString("devices_code_unavailable"))
-            Spacer(Modifier.height(16.dp))
-            CodeTile(running?.verificationCode)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = Localization.getString("devices_code_hint"),
-                color = Colors.SECONDARY.color,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(16.dp))
             StatusItems(state)
-            error?.let {
-                Spacer(Modifier.height(12.dp))
-                InfoPill(it, background = FAILURE_COLOR)
-            }
+            error?.let { InfoPill(it, background = FAILURE_COLOR) }
         }
     }
 
-    /** The main address judges type in; other interfaces of this computer appear in a tooltip on hover. */
+    @Composable
+    private fun HostCard(host: HostDescription) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(CARD_SHAPE)
+                .background(CARD_COLOR)
+                .border(1.dp, CARD_BORDER, CARD_SHAPE)
+                .padding(vertical = 18.dp, horizontal = 12.dp),
+        ) {
+            Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(84.dp))
+            Spacer(Modifier.height(10.dp))
+            Text(host.name, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            Text(host.system, color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+    /** The main address judges type in; a "+N" chip shows the other interfaces of this computer on hover. */
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun AddressPill(running: ServerRuntimeState.Running) {
         val primary = running.addresses.firstOrNull()?.let { "$it:${running.port}" }
-            ?: Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString())
         val others = running.addresses.drop(1).map { "$it:${running.port}" }
-        val text = Localization.getString("devices_server_address").replace("%s", primary) +
-            if (others.isEmpty()) "" else "  +${others.size}"
-        if (others.isEmpty()) {
-            InfoPill(text)
-            return
-        }
-        TooltipArea(
-            tooltip = {
-                Column(
-                    Modifier.clip(ROW_SHAPE).background(Colors.SECONDARY.color).padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        Localization.getString("devices_server_address_other"),
-                        color = Colors.PRIMARY.color,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    others.forEach { Text(it, color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodyMedium) }
-                }
-            },
-            tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 16.dp)),
-        ) {
-            InfoPill(text)
-        }
-    }
-
-    /** The verification code alone in a square, where a judge would expect to look for a pairing code. */
-    @Composable
-    private fun CodeTile(code: String?) {
-        Box(
-            contentAlignment = Alignment.Center,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Color.White)
-                .semantics { contentDescription = code?.let { "${Localization.getString("devices_code_label")} $it" }.orEmpty() },
+                .fillMaxWidth()
+                .clip(CARD_SHAPE)
+                .background(ROW_COLOR)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .semantics(mergeDescendants = true) {},
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (primary == null) {
                 Text(
-                    text = Localization.getString("devices_code_label"),
-                    color = Colors.PRIMARY.color,
-                    style = MaterialTheme.typography.bodySmall,
+                    Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString()),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Text(
+                    Localization.getString("devices_server_address_label"),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(
-                    text = code?.let { "${it.take(3)}\n${it.drop(3)}" } ?: "— — —",
-                    color = ROW_COLOR,
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 6.sp,
-                    lineHeight = 50.sp,
-                    textAlign = TextAlign.Center,
+                    primary,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
                 )
+            }
+            if (others.isNotEmpty()) {
+                TooltipArea(
+                    tooltip = {
+                        Column(
+                            Modifier.clip(ROW_SHAPE).background(Colors.SECONDARY.color).padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                Localization.getString("devices_server_address_other"),
+                                color = Colors.PRIMARY.color,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            others.forEach {
+                                Text(it, color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+                    },
+                    tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 16.dp)),
+                ) {
+                    Text(
+                        "+${others.size}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.18f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .semantics { contentDescription = others.joinToString() },
+                    )
+                }
             }
         }
     }
 
-    /** One line per component with a round indicator: green works, amber starts, red failed. */
+    /** The verification code judges compare before approval, in one line. */
+    @Composable
+    private fun CodeCard(code: String) {
+        val formatted = "${code.take(3)} ${code.drop(3)}"
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(CODE_CARD_COLOR)
+                .padding(vertical = 20.dp, horizontal = 16.dp)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "${Localization.getString("devices_code_label")} $formatted"
+                },
+        ) {
+            Text(
+                text = Localization.getString("devices_code_label").uppercase(),
+                color = LAVENDER_TEXT,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = formatted,
+                color = Color.White,
+                fontSize = 46.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 4.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = Localization.getString("devices_code_hint"),
+                color = LAVENDER_TEXT,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+
+    /** One card per component: a check when it works, an amber dot while starting, a cross after a failure. */
     @Composable
     private fun StatusItems(state: ServerRuntimeState) {
-        val color = when (state) {
-            is ServerRuntimeState.Running -> APPROVE_COLOR
-            ServerRuntimeState.Starting -> STARTING_COLOR
-            else -> FAILURE_COLOR
-        }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             listOf("devices_status_server", "devices_status_database", "devices_status_tls").forEach { key ->
                 val text = Localization.getString(key)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.semantics { contentDescription = text }) {
-                    Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(color))
-                    Spacer(Modifier.width(10.dp))
-                    Text(text, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(CARD_COLOR)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = text },
+                ) {
+                    StatusMark(state)
+                    Spacer(Modifier.width(12.dp))
+                    Text(text, color = Color(0xFFE4E1EA), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
             }
             if (state is ServerRuntimeState.Failed) {
-                Text(Localization.getString("devices_server_failed"), color = Colors.SECONDARY.color, style = MaterialTheme.typography.bodySmall)
+                Text(Localization.getString("devices_server_failed"), color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+
+    @Composable
+    private fun StatusMark(state: ServerRuntimeState) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(26.dp).clip(RoundedCornerShape(50))) {
+            when (state) {
+                is ServerRuntimeState.Running -> {
+                    Box(Modifier.matchParentSize().background(CHECK_BACKGROUND))
+                    Image(painterResource(Res.drawable.check_icon), contentDescription = null, modifier = Modifier.size(14.dp))
+                }
+                ServerRuntimeState.Starting -> Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(STARTING_COLOR))
+                else -> {
+                    Box(Modifier.matchParentSize().background(FAILURE_COLOR.copy(alpha = 0.25f)))
+                    Image(painterResource(Res.drawable.cross_icon), contentDescription = null, modifier = Modifier.size(12.dp))
+                }
             }
         }
     }
@@ -307,6 +391,7 @@ object DevicesConnectionScreen : Screen {
 
     private fun hostDescription(): HostDescription {
         val name = runCatching { InetAddress.getLocalHost().hostName.removeSuffix(".local") }.getOrDefault("")
+            .let { if (it == it.uppercase()) it.lowercase().replaceFirstChar(Char::uppercase) else it }
             .ifBlank { Localization.getString("devices_host_unknown") }
         val system = "${System.getProperty("os.name")} ${System.getProperty("os.version")} · ${System.getProperty("os.arch")}"
         return HostDescription(name, system)
@@ -345,10 +430,17 @@ object DevicesConnectionScreen : Screen {
             Spacer(Modifier.height(20.dp))
             Text(text = title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(25.dp))
-            if (empty) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) { emptyState() }
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(15.dp), modifier = Modifier.fillMaxSize(), content = content)
+            // The empty illustration and the rows cross-fade, like the popups of the app.
+            AnimatedContent(
+                targetState = empty,
+                transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                modifier = Modifier.fillMaxSize(),
+            ) { isEmpty ->
+                if (isEmpty) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) { emptyState() }
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(15.dp), modifier = Modifier.fillMaxSize(), content = content)
+                }
             }
         }
     }
@@ -445,4 +537,12 @@ object DevicesConnectionScreen : Screen {
     private val APPROVE_COLOR = Color(0xFF3FD37B)
     private val FAILURE_COLOR = Color(0xFFB3261E)
     private val STARTING_COLOR = Color(0xFFF2B233)
+    private val CARD_SHAPE = RoundedCornerShape(16.dp)
+    private val PANEL_DARK = Color(0xFF1F1E24)
+    private val CARD_COLOR = Color(0xFF27262D)
+    private val CARD_BORDER = Color(0xFF34333B)
+    private val CODE_CARD_COLOR = Color(0xFF5A12D4)
+    private val LAVENDER_TEXT = Color(0xFFC9B6F2)
+    private val MUTED_TEXT = Color(0xFF9E9AA7)
+    private val CHECK_BACKGROUND = Color(0xFF1F3B2C)
 }
