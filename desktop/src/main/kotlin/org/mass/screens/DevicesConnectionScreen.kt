@@ -6,14 +6,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
+import u_judge_server.desktop.generated.resources.copy_icon
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.TooltipArea
-import androidx.compose.foundation.TooltipPlacement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import java.net.InetAddress
 import u_judge_server.desktop.generated.resources.empty_available_devices
@@ -182,11 +187,11 @@ object DevicesConnectionScreen : Screen {
         val host = remember { hostDescription() }
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = modifier
                 .fillMaxHeight()
                 .clip(PANEL_SHAPE)
-                .background(PANEL_DARK)
+                .background(Colors.GRAY.color)
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
@@ -218,87 +223,165 @@ object DevicesConnectionScreen : Screen {
                 .clip(CARD_SHAPE)
                 .background(CARD_COLOR)
                 .border(1.dp, CARD_BORDER, CARD_SHAPE)
-                .padding(vertical = 18.dp, horizontal = 12.dp),
+                .padding(vertical = 12.dp, horizontal = 12.dp),
         ) {
-            Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(84.dp))
-            Spacer(Modifier.height(10.dp))
+            Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(56.dp))
+            Spacer(Modifier.height(6.dp))
             Text(host.name, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
             Text(host.system, color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
         }
     }
 
-    /** The main address judges type in; a "+N" chip shows the other interfaces of this computer on hover. */
-    @OptIn(ExperimentalFoundationApi::class)
+    /** The main address judges type in, with copy; a "+N" chip opens every address of this computer. */
     @Composable
     private fun AddressPill(running: ServerRuntimeState.Running) {
-        val primary = running.addresses.firstOrNull()?.let { "$it:${running.port}" }
-        val others = running.addresses.drop(1).map { "$it:${running.port}" }
+        val addresses = running.addresses.map { "$it:${running.port}" }
+        var showAll by remember { mutableStateOf(false) }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(CARD_SHAPE)
                 .background(ROW_COLOR)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .semantics(mergeDescendants = true) {},
+                .padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
         ) {
-            if (primary == null) {
-                Text(
-                    Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString()),
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
+            val primary = addresses.firstOrNull()
+            Column(Modifier.weight(1f)) {
                 Text(
                     Localization.getString("devices_server_address_label"),
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
+                    color = LAVENDER_TEXT,
+                    style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(Modifier.width(6.dp))
                 Text(
-                    primary,
+                    primary ?: Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString()),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = if (primary != null) FontFamily.Monospace else FontFamily.Default,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
                 )
             }
-            if (others.isNotEmpty()) {
-                TooltipArea(
-                    tooltip = {
-                        Column(
-                            Modifier.clip(ROW_SHAPE).background(Colors.SECONDARY.color).padding(horizontal = 12.dp, vertical = 8.dp),
+            if (primary != null) CopyButton(primary)
+            if (addresses.size > 1) {
+                Spacer(Modifier.width(6.dp))
+                val label = "+${addresses.size - 1}"
+                Text(
+                    label,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.18f))
+                        .clickable(role = Role.Button, onClickLabel = Localization.getString("devices_addresses_title")) { showAll = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
+        AddressesDialog(visible = showAll, addresses = addresses, onDismiss = { showAll = false })
+    }
+
+    /** Every LAN address of this computer with copy buttons; the first one is the address shown on the panel. */
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    private fun AddressesDialog(visible: Boolean, addresses: List<String>, onDismiss: () -> Unit) {
+        if (!visible) return
+        Dialog(
+            onDismissRequest = onDismiss,
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                scrimColor = Color.Black.copy(alpha = 0.6f),
+                animateTransition = true,
+            ),
+        ) {
+            Box(
+                Modifier
+                    .width(460.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DIALOG_COLOR)
+                    .padding(22.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        Localization.getString("devices_addresses_title"),
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(end = 36.dp),
+                    )
+                    Text(Localization.getString("devices_addresses_hint"), color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
+                    addresses.forEachIndexed { index, address ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (index == 0) ROW_COLOR else CARD_COLOR)
+                                .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                         ) {
                             Text(
-                                Localization.getString("devices_server_address_other"),
-                                color = Colors.PRIMARY.color,
-                                style = MaterialTheme.typography.bodySmall,
+                                address,
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
                             )
-                            others.forEach {
-                                Text(it, color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                            if (index == 0) {
+                                Text(
+                                    Localization.getString("devices_addresses_main"),
+                                    color = LAVENDER_TEXT,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(Modifier.width(8.dp))
                             }
+                            CopyButton(address)
                         }
-                    },
-                    tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 16.dp)),
-                ) {
-                    Text(
-                        "+${others.size}",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.18f))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                            .semantics { contentDescription = others.joinToString() },
-                    )
+                    }
                 }
+                Image(
+                    painterResource(Res.drawable.cross_icon),
+                    contentDescription = Localization.getString("devices_cancel"),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(24.dp)
+                        .clickable(role = Role.Button, onClickLabel = Localization.getString("devices_cancel"), onClick = onDismiss),
+                )
             }
+        }
+    }
+
+    /** Copies [text] to the system clipboard and confirms it for a moment. */
+    @Composable
+    private fun CopyButton(text: String) {
+        var copied by remember(text) { mutableStateOf(false) }
+        LaunchedEffect(copied) {
+            if (copied) {
+                delay(1_500)
+                copied = false
+            }
+        }
+        val label = Localization.getString(if (copied) "devices_copied" else "devices_copy")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.16f))
+                .clickable(role = Role.Button, onClickLabel = label) {
+                    Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+                    copied = true
+                }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Image(
+                painterResource(if (copied) Res.drawable.check_icon else Res.drawable.copy_icon),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
         }
     }
 
@@ -312,7 +395,7 @@ object DevicesConnectionScreen : Screen {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(CODE_CARD_COLOR)
-                .padding(vertical = 20.dp, horizontal = 16.dp)
+                .padding(vertical = 14.dp, horizontal = 14.dp)
                 .semantics(mergeDescendants = true) {
                     contentDescription = "${Localization.getString("devices_code_label")} $formatted"
                 },
@@ -324,16 +407,16 @@ object DevicesConnectionScreen : Screen {
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 2.sp,
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 text = formatted,
                 color = Color.White,
-                fontSize = 46.sp,
+                fontSize = 34.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 4.sp,
+                letterSpacing = 3.sp,
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = Localization.getString("devices_code_hint"),
                 color = LAVENDER_TEXT,
@@ -347,7 +430,7 @@ object DevicesConnectionScreen : Screen {
     /** One card per component: a check when it works, an amber dot while starting, a cross after a failure. */
     @Composable
     private fun StatusItems(state: ServerRuntimeState) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
             listOf("devices_status_server", "devices_status_database", "devices_status_tls").forEach { key ->
                 val text = Localization.getString(key)
                 Row(
@@ -356,7 +439,7 @@ object DevicesConnectionScreen : Screen {
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .background(CARD_COLOR)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
                         .semantics(mergeDescendants = true) { contentDescription = text },
                 ) {
                     StatusMark(state)
@@ -372,7 +455,7 @@ object DevicesConnectionScreen : Screen {
 
     @Composable
     private fun StatusMark(state: ServerRuntimeState) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(26.dp).clip(RoundedCornerShape(50))) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))) {
             when (state) {
                 is ServerRuntimeState.Running -> {
                     Box(Modifier.matchParentSize().background(CHECK_BACKGROUND))
@@ -538,7 +621,7 @@ object DevicesConnectionScreen : Screen {
     private val FAILURE_COLOR = Color(0xFFB3261E)
     private val STARTING_COLOR = Color(0xFFF2B233)
     private val CARD_SHAPE = RoundedCornerShape(16.dp)
-    private val PANEL_DARK = Color(0xFF1F1E24)
+    private val DIALOG_COLOR = Color(0xFF1F1E24)
     private val CARD_COLOR = Color(0xFF27262D)
     private val CARD_BORDER = Color(0xFF34333B)
     private val CODE_CARD_COLOR = Color(0xFF5A12D4)
