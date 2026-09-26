@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-09-26
 - Decision: option A, approved by the product owner on 2026-09-26
+- Amended: 2026-09-26, option B (QR) becomes the primary pairing path in I3; option A stays as the fallback with an entered
+  code (see "Amendment: QR pairing")
 - Requirements: `DEV-004`, `DEV-006`, `NFR-005`, `NFR-006`, `SYS-001`; client `CLI-014`, `CLI-015`, `CLI-017`, `CLI-091`, `CLI-093`
 - Refines: ADR-002 and ADR-004 "TLS with locally managed certificate and trust flow"
 
@@ -22,7 +24,7 @@ The Ktor CIO server engine has no TLS connector; the Netty engine supports one.
 | Option | Description | Advantages | Risks | Pilot fit |
 | --- | --- | --- | --- | --- |
 | A. Self-signed peer certificate, pinned on first use with a verification code | Desktop generates one certificate per peer; the client pins its public-key hash on first contact and shows a short code that the operator compares with the desktop before approval | No OS settings, no camera, works offline and with any IP; approval step already exists | TOFU is only as strong as the code comparison; certificate rotation requires re-pairing | Recommended |
-| B. Self-signed certificate delivered by QR code | Desktop shows a QR code with host, port and fingerprint; the judge scans it | Strong binding without manual comparison; replaces manual host entry | Camera permission and QR scanning on Android and iOS; extra UI in both apps | Post-v1 upgrade path |
+| B. Self-signed certificate delivered by QR code | Desktop shows a QR code with host, port and fingerprint; the judge scans it | Strong binding without manual comparison; replaces manual host entry | Camera permission and QR scanning on Android and iOS; extra UI in both apps | Primary path from I3 (amendment) |
 | C. Local CA installed on phones | Desktop creates a CA; devices install it as a trusted root | Standard TLS validation | iOS profile install and Android user-CA opt-in per device; operator burden at every event | Rejected |
 | D. Public CA certificate for a real domain | DNS name resolving to the LAN address | Standard validation | Requires internet, a domain and fixed IP; violates `SYS-001` | Rejected |
 | E. Plain HTTP with application-level encryption | Custom key exchange over HTTP | No certificates | Non-standard cryptography; WebSocket and HTTP both need it | Rejected |
@@ -51,9 +53,27 @@ The Ktor CIO server engine has no TLS connector; the Netty engine supports one.
    and the client does not fall back to TOFU silently. Recovery is an explicit "forget server" action followed by new
    pairing.
 6. Certificate rotation in v1 is deleting the peer certificate, which forces re-pairing of all devices. Automatic rotation
-   and QR delivery (option B) are post-v1.
+   is post-v1; QR delivery (option B) is added in I3 by the amendment below.
 7. The server treats every request on the TLS connector as secure delivery; the `credentialDeliveryIsSecure` check stays and
    rejects plain transports in tests.
+
+## Amendment: QR pairing (I3)
+
+Approved by the product owner on 2026-09-26 after the I1 run: comparing codes by eye depends on the operator's attention.
+
+1. The desktop devices screen shows a QR code with the pairing URI
+   `ujudge://pair?v=1&h=<ipv4>[,<ipv4>...]&p=<port>&k=<base64url SHA-256 SPKI>`: every LAN address of the peer, the TLS
+   port and the key pin. The six-digit code stays visible next to it.
+2. Scanning is the primary path. The client pins `k` before its first connection, so there is no trust on first use: a
+   server presenting another key fails the TLS handshake and nothing is sent. It tries the addresses in order.
+3. mDNS and manual host entry remain as the fallback for a missing or denied camera. On that path the judge types the six
+   digits shown on the desktop; the client compares them with the code derived from the presented key and sends the pairing
+   request only on a match. A mismatch is a typed `verification_code_mismatch` error. The operator no longer has to
+   compare codes on either path.
+4. Libraries: ZXing core (Apache-2.0) generates the QR on the desktop; Android scans with CameraX and ML Kit barcode
+   scanning or ZXing; iOS uses `AVCaptureMetadataOutput`. Both apps request camera permission only on the scan screen.
+5. Evidence: physical Honor 50 Lite and iPhone 15 in I3 scan the QR through the venue router; a QR with a wrong pin and a
+   wrong typed code are rejected without sending the surname or requesting a credential.
 
 ## Consequences
 
@@ -85,4 +105,5 @@ The Ktor CIO server engine has no TLS connector; the Netty engine supports one.
 | Pin storage | Platform secure storage with the reconnect credential, scoped to `peerId` |
 | Pin mismatch | Terminal `server_identity_changed`; explicit forget and re-pairing |
 | Rotation | Manual, forces re-pairing; automatic rotation post-v1 |
-| QR delivery | Post-v1 |
+| QR delivery | Primary pairing path from I3: `ujudge://pair` URI with addresses, port and SPKI pin |
+| Fallback | mDNS or manual entry with the six-digit code typed by the judge and checked by the client |
