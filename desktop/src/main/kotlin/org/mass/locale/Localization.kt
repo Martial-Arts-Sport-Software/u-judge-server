@@ -18,8 +18,23 @@ object Localization {
             "entry_judge_surname" to "Judge surname",
 
             //Devices Connection Screen
-            "devices_connection_connected" to "Connected devices",
-            "devices_connection_available" to "Available devices",
+            "devices_connection_connected" to "Paired devices",
+            "devices_connection_available" to "Waiting for approval",
+            "devices_code" to "Server code: %s. Approve a judge only if the phone shows the same code.",
+            "devices_code_unavailable" to "The server is not running, pairing is unavailable",
+            "devices_pending_empty" to "No requests",
+            "devices_paired_empty" to "No paired devices",
+            "devices_state_pending" to "waiting",
+            "devices_state_connected" to "connected",
+            "devices_state_disconnected" to "disconnected",
+            "devices_state_revoked" to "revoked",
+            "devices_approve" to "Approve",
+            "devices_reject" to "Reject",
+            "devices_revoke" to "Revoke",
+            "devices_cancel" to "Cancel",
+            "devices_revoke_title" to "Revoke the device?",
+            "devices_revoke_text" to "%s (%s) will be disconnected and its new events rejected. The judge will have to pair again.",
+            "devices_action_failed" to "The decision was not saved: %s",
 
             //Server Status
             "server_status_stopped" to "Server is stopped",
@@ -121,7 +136,22 @@ object Localization {
 
             //Devices Connection Screen
             "devices_connection_connected" to "Подключённые устройства",
-            "devices_connection_available" to "Доступные устройства",
+            "devices_connection_available" to "Ожидают подтверждения",
+            "devices_code" to "Код сервера: %s. Подтверждайте судью, только если на телефоне тот же код.",
+            "devices_code_unavailable" to "Сервер не запущен, подключение устройств недоступно",
+            "devices_pending_empty" to "Запросов нет",
+            "devices_paired_empty" to "Подключённых устройств нет",
+            "devices_state_pending" to "ожидает",
+            "devices_state_connected" to "на связи",
+            "devices_state_disconnected" to "не на связи",
+            "devices_state_revoked" to "отозвано",
+            "devices_approve" to "Подтвердить",
+            "devices_reject" to "Отклонить",
+            "devices_revoke" to "Отозвать",
+            "devices_cancel" to "Отмена",
+            "devices_revoke_title" to "Отозвать устройство?",
+            "devices_revoke_text" to "%s (%s) будет отключено, новые события с него будут отклоняться. Судье придётся подключиться заново.",
+            "devices_action_failed" to "Решение не сохранено: %s",
 
             //Server Status
             "server_status_stopped" to "Сервер остановлен",
