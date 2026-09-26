@@ -7,6 +7,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.sslConnector
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -205,15 +206,25 @@ class ServerRuntime(
             return failStartup("HTTPS port ${configuration.port} is unavailable: ${exception.message}")
         }
 
+        val addresses = lanAddresses()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { runtimeScope ->
-            runtimeScope.launch {
-                runCatching {
-                    publishService(type = "_u-judge._tcp", name = configuration.serviceName) { port = configuration.port }
+            // dns-sd-kt binds one JmDNS instance to a single address (by default the first site-local one, which may be
+            // a VM or VPN interface), so the service is published on every LAN address judges can reach.
+            addresses.forEach { address ->
+                runtimeScope.launch {
+                    runCatching {
+                        publishService(type = "_u-judge._tcp", name = configuration.serviceName) {
+                            port = configuration.port
+                            this.addresses = listOf(address)
+                        }
+                    }.onFailure { failure ->
+                        if (failure !is CancellationException) ServerLog.mdnsFailed(address, failure.message.orEmpty())
+                    }
                 }
             }
             runtimeScope.launch { supervisePostgres(runtime) }
         }
-        return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode, lanAddresses())
+        return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode, addresses)
     }
 
     private suspend fun supervisePostgres(runtime: ManagedPostgresRuntime) {
