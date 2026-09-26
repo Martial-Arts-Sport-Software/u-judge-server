@@ -46,6 +46,7 @@ import org.mass.locale.Localization
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
 import org.mass.ui.screen_header.ScreenHeaderComponent
+import org.mass.ui.server_status.ServerStatusComponent
 
 /**
  * Operator pairing (`DEV-004`-`DEV-006`): the server verification code, pending judges to approve or reject, and paired
@@ -76,6 +77,8 @@ object DevicesConnectionScreen : Screen {
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             ScreenHeaderComponent(modifier = Modifier.fillMaxHeight(0.08f).fillMaxWidth())
             Column(Modifier.fillMaxSize().padding(vertical = 10.dp, horizontal = 15.dp)) {
+                ServerStatusComponent()
+                Spacer(Modifier.height(10.dp))
                 VerificationCode(runtimeState)
                 error?.let {
                     Spacer(Modifier.height(10.dp))
