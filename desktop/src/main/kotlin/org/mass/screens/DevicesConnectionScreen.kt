@@ -200,14 +200,15 @@ object DevicesConnectionScreen : Screen {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
-            // The host and code cards share the free height, so the status cards sit at the bottom edge.
-            HostCard(host, Modifier.weight(1f))
+            // Code first, then this computer and its address; the two cards share the free height, so the status
+            // cards sit at the bottom edge.
             if (running != null) {
+                CodeCard(running.verificationCode, Modifier.weight(0.8f))
+                HostCard(host, Modifier.weight(1f))
                 AddressPill(running)
-                CodeCard(running.verificationCode, Modifier.weight(1f))
             } else {
                 InfoPill(Localization.getString("devices_code_unavailable"))
-                Spacer(Modifier.weight(1f))
+                HostCard(host, Modifier.weight(1f))
             }
             StatusItems(state)
             error?.let { InfoPill(it, background = FAILURE_COLOR) }
@@ -413,7 +414,7 @@ object DevicesConnectionScreen : Screen {
             Text(
                 text = formatted,
                 color = Color.White,
-                fontSize = 34.sp,
+                fontSize = 30.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 3.sp,
