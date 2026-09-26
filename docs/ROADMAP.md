@@ -100,9 +100,9 @@ baseline; при расхождении действует этот план.
 
 | Статус | ID | Недели | Gate | Сценарий, который можно показать | Requirement IDs | Cross-repo |
 |--------|----|--------|------|----------------------------------|-----------------|------------|
-| [ ] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Нет; client использует существующий контракт |
-| [ ] | I2 | 5-6 | G2, server-часть G3 | Оператор проводит Kerugi-бой на desktop: состав, кворум, окно, таймер по FHR 2024, баллы симулированных судей, действия, коррекции, сброс с причиной, golden round, результат; watcher read-only; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-013`, `KER-015`, `SES-001`-`SES-007`, `UI-001`-`UI-005`, `UI-008`, `NET-001`, `NET-003`, `AUD-002` | Contract fixtures для client |
-| [ ] | I3 | 7 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing по local TLS, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
+| [ ] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; судья на emulator проходит pairing по local TLS, оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены, client переподключается без повторного pairing | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Да: client pairing и reconnect против desktop server |
+| [ ] | I2 | 5-6 | G2, server-часть G3 | Оператор проводит Kerugi-бой на desktop: состав, кворум, окно, таймер по FHR 2024, баллы симулированных судей, действия, коррекции, сброс с причиной, golden round, результат; watcher read-only; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-013`, `KER-015`, `SES-001`-`SES-007`, `UI-001`-`UI-005`, `UI-008`, `NET-001`, `NET-003`, `AUD-002` | Да: client session snapshot и `kerugi_score_command` |
+| [ ] | I3 | 7 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
 | [ ] | I4 | 7-8 | G4 | Оператор импортирует `df-template-v1` (500 участников), видит validation report и preview, правит сетку до старта, проводит поединки, победитель продвигается | `IMP-001`-`IMP-008`, `BRK-001`-`BRK-005`, `SES-003`, `SES-007`, `CMP-005`, `CMP-006`, `CMP-008`, `SYS-003`, `BAK-001`; ADR-005 | Нет |
 | [ ] | I5 | 8-9 | G5 | Tanbon переиспользует Kerugi pipeline; Hosinsool и технические режимы считают итог по нормативным векторам; client и server дают одинаковые суммы | `TAN-001`-`TAN-005`, `TEC-001`-`TEC-014`, `NFR-011` | Да: экраны дисциплин и vectors |
 | [ ] | I6 | 10 | G6 | Результат произвольной сессии объясняется историей и совпадает с XLSX/CSV после backup/restore; русский UI | `AUD-002`-`AUD-004`, `REP-001`-`REP-004`, `BAK-002`-`BAK-004`, `SYS-004` | Нет |
@@ -114,10 +114,13 @@ baseline; при расхождении действует этот план.
 - I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence и один realtime command dispatcher
   вместо отдельных `Realtime*Commands`; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
   `RealPostgresLifecycleTest` в CI на PostgreSQL из образа runner; ручной прогон macOS/Windows фиксируется в PR, а
-  недоступная платформа остаётся открытым пунктом G1.
+  недоступная платформа остаётся открытым пунктом G1; local TLS для credential delivery вместе с client, иначе pairing
+  не завершается end-to-end.
 - I2: Kerugi bout aggregate поверх единого журнала; длительности и раунды по [FHR 2024](FHR-RULES-2024.md) §4.1.2,
-  §4.1.13, §4.1.14; resync snapshot после reconnect; симулятор судей для acceptance test.
-- I3: local TLS для credential delivery согласуется с client до начала реализации.
+  §4.1.13, §4.1.14; session snapshot/assignment для client (`DEV-008`) и resync после reconnect; симулятор судей для
+  acceptance test. Сейчас client отправляет удар как generic `command` с payload `kerugi_score`, который server ACK-ит без
+  scoring: I2 переводит client на `kerugi_score_command` с audit context из snapshot.
+- I3: physical-device evidence не заменяется emulator-прогонами I1-I2.
 
 ## 4. Этап 0: фиксация baseline
 
