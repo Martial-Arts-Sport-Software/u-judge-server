@@ -101,12 +101,13 @@ baseline; при расхождении действует этот план.
 | Статус | ID | Недели | Gate | Сценарий, который можно показать | Requirement IDs | Cross-repo |
 |--------|----|--------|------|----------------------------------|-----------------|------------|
 | [ ] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; судья на emulator проходит pairing по local TLS, оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены, client переподключается без повторного pairing | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Да: client pairing и reconnect против desktop server |
-| [ ] | I2 | 5-6 | G2, server-часть G3 | Оператор проводит Kerugi-бой на desktop: состав, кворум, окно, таймер по FHR 2024, баллы симулированных судей, действия, коррекции, сброс с причиной, golden round, результат; watcher read-only; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-013`, `KER-015`, `SES-001`-`SES-007`, `UI-001`-`UI-005`, `UI-008`, `NET-001`, `NET-003`, `AUD-002` | Да: client session snapshot и `kerugi_score_command` |
-| [ ] | I3 | 7 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
-| [ ] | I4 | 7-8 | G4 | Оператор импортирует `df-template-v1` (500 участников), видит validation report и preview, правит сетку до старта, проводит поединки, победитель продвигается | `IMP-001`-`IMP-008`, `BRK-001`-`BRK-005`, `SES-003`, `SES-007`, `CMP-005`, `CMP-006`, `CMP-008`, `SYS-003`, `BAK-001`; ADR-005 | Нет |
-| [ ] | I5 | 8-9 | G5 | Tanbon переиспользует Kerugi pipeline; Hosinsool и технические режимы считают итог по нормативным векторам; client и server дают одинаковые суммы | `TAN-001`-`TAN-005`, `TEC-001`-`TEC-014`, `NFR-011` | Да: экраны дисциплин и vectors |
+| [ ] | I4 | 5-6 | G4 | Оператор импортирует `df-template-v1` (500 участников), видит validation report и preview, правит сетку до старта и выбирает текущий поединок; повторный и ошибочный импорт не портят данные | `IMP-001`-`IMP-008`, `BRK-001`, `BRK-002`, `BRK-005`, `SES-003`, `CMP-005`, `CMP-006`, `CMP-008`, `SYS-003`, `BAK-001`; ADR-005 | Нет |
+| [ ] | I2a | 6-7 | G2, server-часть G3 | Kerugi: бой по баллам. Оператор стартует поединок импортированной сетки; состав судей фиксируется из подключённых устройств (2 или 3), кворум и окно; судьи на emulator ставят `HEAD`/`BODY` через `kerugi_score_command`, оператор вводит броски, вращение и Gamjeom, делает коррекцию и сброс с причиной и подтверждением, фиксирует результат по финальному счёту; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-009`, `KER-015`, `SES-001`, `SES-002`, `SES-004`-`SES-006`, `UI-002`, `UI-008`, `NET-001`, `NET-003`, `AUD-002`, `DEV-008` | Да: client session snapshot, `kerugi_score_command`, outbox после app kill |
+| [ ] | I2b | 7-8 | server-часть G3 | Kerugi: время боя и ход сетки. Таймер по FHR 2024 для возрастной категории, два раунда, перерыв, golden round и победа по нему; экран оператора и экран зрителей на втором мониторе (то же без операторских кнопок); победитель продвигается по сетке, судьи переходят к следующему поединку без перезапуска | `KER-010`-`KER-013`, `UI-001`, `UI-003`-`UI-005`, `SES-007`, `BRK-003`, `BRK-004` | Да: client последовательные сессии |
+| [ ] | I3 | 8-9 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
+| [ ] | I5 | 9-10 | G5 | Tanbon переиспользует Kerugi pipeline; Hosinsool и технические режимы считают итог по нормативным векторам; client и server дают одинаковые суммы | `TAN-001`-`TAN-005`, `TEC-001`-`TEC-014`, `NFR-011` | Да: экраны дисциплин и vectors |
 | [ ] | I6 | 10 | G6 | Результат произвольной сессии объясняется историей и совпадает с XLSX/CSV после backup/restore; русский UI | `AUD-002`-`AUD-004`, `REP-001`-`REP-004`, `BAK-002`-`BAK-004`, `SYS-004` | Нет |
-| [ ] | I7 | 10-11 | G7 | Clean Windows/macOS installers, APK/TestFlight, нагрузка 5-7 clients, packet loss и restart, security check | `SYS-005`, `REL-003`-`REL-007`, `NFR-005`-`NFR-007`, `NFR-014` | Да: mobile builds |
+| [ ] | I7 | 11 | G7 | Clean Windows/macOS installers, APK/TestFlight, нагрузка 5-7 clients, packet loss и restart, security check | `SYS-005`, `REL-003`-`REL-007`, `NFR-005`-`NFR-007`, `NFR-014` | Да: mobile builds |
 | [ ] | I8 | 12 | G8 | Полевой пилот по разделу 12 | `REL-001`, `REL-002` | Да |
 
 Технические задачи, обязательные внутри инкрементов:
@@ -115,13 +116,20 @@ baseline; при расхождении действует этот план.
   `RealPostgresLifecycleTest` в CI на PostgreSQL из образа runner; ручной прогон macOS/Windows фиксируется в PR, а
   недоступная платформа остаётся открытым пунктом G1; local TLS для credential delivery вместе с client, иначе pairing
   не завершается end-to-end.
-- I2: Kerugi bout aggregate поверх единого журнала и один realtime command dispatcher вместо отдельных `Realtime*Commands`
-  (перенесено из I1 26.09.2026: до I2 Kerugi-команды недостижимы из production, а их контракт меняется вместе с session
-  snapshot); длительности и раунды по [FHR 2024](FHR-RULES-2024.md) §4.1.2,
-  §4.1.13, §4.1.14; session snapshot/assignment для client (`DEV-008`) и resync после reconnect; симулятор судей для
-  acceptance test. Сейчас client отправляет удар как generic `command` с payload `kerugi_score`, который server ACK-ит без
-  scoring: I2 переводит client на `kerugi_score_command` с audit context из snapshot.
-- I3: physical-device evidence не заменяется emulator-прогонами I1-I2.
+- I4: идёт сразу после I1 (решение 26.09.2026): поединки I2a/I2b берутся из импортированной сетки, а не из ручной
+  настройки; проведение поединков и продвижение победителя перенесены в I2b.
+- I2a: Kerugi bout aggregate поверх единого журнала и один realtime command dispatcher вместо отдельных `Realtime*Commands`
+  (перенесено из I1 26.09.2026: до I2a Kerugi-команды недостижимы из production, а их контракт меняется вместе с session
+  snapshot); session snapshot/assignment для client (`DEV-008`) и resync после reconnect; симулятор судей для acceptance
+  test. Состав судей - подключённые устройства на момент старта поединка, 2 или 3; он сохраняется в журнале и не меняется
+  до конца боя, отключившийся судья возвращается на своё место. Сейчас client отправляет удар как generic `command` с
+  payload `kerugi_score`, который server ACK-ит без scoring: I2a переводит client на `kerugi_score_command` с audit
+  context из snapshot.
+- I2b: длительности и раунды по [FHR 2024](FHR-RULES-2024.md) §4.1.2, §4.1.13; причины победы только финальный счёт и
+  golden round (`KER-013`), остальные причины §4.1.14 (`KER-014`, Should) - после пилотного Must-scope. После
+  восстановления server таймер стоит на паузе на последнем сохранённом времени, продолжение - действие оператора.
+  Экран зрителей - второе окно desktop на внешнем мониторе с той же проекцией, без изменяющих действий.
+- I3: physical-device evidence не заменяется emulator-прогонами I1-I2b.
 
 ## 4. Этап 0: фиксация baseline
 
@@ -236,9 +244,9 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 | Typed UUID IDs | Competition, peer, court, bracket, session, judge, device и event; canonical generation и rejection malformed/noncanonical | - |
 | `DomainCommand` → `DomainEvent` | Полный typed audit context, source, author, UTC timestamp, type и raw payload; event только с назначенными ID и timestamp; rejection blank fields | - |
 | `SequencedDomainEvent`, `DomainEventOrder`, `PeerEventSequence` | Positive per-owner sequence, deterministic order, rejection owner/sequence conflicts | Sequence уникальна только внутри каждой таблицы `V2`-`V5` (I1) |
-| `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I1, I2) |
+| `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I2a) |
 | `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection | Persistence сетки (I4); P2P claims post-v1 |
-| `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2) |
+| `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2a) |
 | `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | Logging backend и persistence readiness (I1) |
 
 ### Client
@@ -287,17 +295,17 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 
 Domain, JDBC/H2 recovery и two-socket Ktor contract tests. Это partial evidence для `KER-001`-`KER-009`, `KER-011`-`KER-013`,
 `KER-015`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`. Общий пробел: production wiring, desktop arbiter/watcher,
-client outbox/reconnect и physical devices (I2, I3).
+client outbox/reconnect и physical devices (I2a, I2b, I3).
 
 | Компонент | Подтверждено тестами | Открыто |
 |-----------|----------------------|---------|
 | `KerugiScoringEngine` | 2 или 3 боковых судьи, quorum и coincidence window (по умолчанию 2 и `1000 мс`); непересекающиеся окна одного участника; distinct configured judges; `BODY=1`/`HEAD=2`, минимальная оценка при конфликте; audit каждого окна, включая insufficient quorum | - |
 | `KerugiScoreJournal`, `JdbcKerugiScoreJournal` (`V3`), `kerugi_score_command` | Raw candidate append до пересчёта; rejection foreign judge и conflicting ID; rebuild; ACK после применения; `kerugi_score_updated` только для нового события | - |
-| `kerugi_operator_action_command` | `THROW`, `SPIN_BONUS` и `GAMJEOM` append-only с автором; Gamjeom увеличивает счёт соперника; отдельная audit projection | Desktop UI (I2) |
-| `kerugi_score_correction_command` | Компенсирующее событие со ссылкой на candidate или action; исходное событие сохраняется, projection исключает эффект | Сброс с причиной `SES-006` (I2) |
+| `kerugi_operator_action_command` | `THROW`, `SPIN_BONUS` и `GAMJEOM` append-only с автором; Gamjeom увеличивает счёт соперника; отдельная audit projection | Desktop UI (I2a) |
+| `kerugi_score_correction_command` | Компенсирующее событие со ссылкой на candidate или action; исходное событие сохраняется, projection исключает эффект | Сброс с причиной `SES-006` (I2a) |
 | Gamjeom warning и `kerugi_disqualification_confirmed` | Warning при effective sum `10`; одно подтверждение local owner только после warning | - |
-| `KerugiTimerJournal`, `JdbcKerugiTimerJournal` (`V4`) | `START`/`PAUSE`/`RESUME`/`STOP`, отдельный `ROUND_BREAK`; `kerugi_timer_updated` только для нового события | Длительности по возрасту, remaining time, раунды `KER-010` (I2) |
-| `KerugiResultJournal`, `JdbcKerugiResultJournal` (`V5`) | Одно решение local owner с причиной `final_score` или `golden_round`; второе решение отклоняется | Проверка по authoritative score, связь с session/bracket `SES-007` (I2, I4) |
+| `KerugiTimerJournal`, `JdbcKerugiTimerJournal` (`V4`) | `START`/`PAUSE`/`RESUME`/`STOP`, отдельный `ROUND_BREAK`; `kerugi_timer_updated` только для нового события | Длительности по возрасту, remaining time, раунды `KER-010` (I2b) |
+| `KerugiResultJournal`, `JdbcKerugiResultJournal` (`V5`) | Одно решение local owner с причиной `final_score` или `golden_round`; второе решение отклоняется | Проверка по authoritative score, связь с session/bracket `SES-007` (I2a, I2b) |
 
 ### Gate G3
 
