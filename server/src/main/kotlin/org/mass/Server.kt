@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -1262,6 +1263,11 @@ fun Application.module(
                 }
             }
             var timeoutJob = scheduleHeartbeatTimeout()
+            // Revocation ends the session at once instead of waiting for the device's next message (`DEV-006`).
+            val revocationJob = launch {
+                pairingRequests.changes.first { !pairingRequests.isReconnectCredentialActive(reconnectCredential) }
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "credential_revoked"))
+            }
             try {
                 while (true) {
                     val frame = incoming.receiveCatching().getOrNull() ?: break
@@ -1563,6 +1569,7 @@ fun Application.module(
                 }
             } finally {
                 timeoutJob.cancel()
+                revocationJob.cancel()
                 heartbeatTracker.disconnected(reconnectCredential)
                 pairingRequests.disconnected(reconnectCredential)
                 ServerLog.deviceDisconnected(deviceId)

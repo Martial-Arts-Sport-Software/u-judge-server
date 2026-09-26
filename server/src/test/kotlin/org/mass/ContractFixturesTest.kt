@@ -85,8 +85,10 @@ class ContractFixturesTest {
         assertMatches("heartbeat_ack", socket.exchange(fixture("heartbeat_request")))
         assertMatches("command_ack", socket.exchange(fixture("command_request")))
 
+        val conflicting = JsonObject(fixture("command_request") + ("sequence" to JsonPrimitive(2)))
+        assertMatches("command_rejected", socket.exchange(conflicting))
+
         pairing.revoke(submitted.request.requestId)
-        assertMatches("command_rejected", socket.exchange(fixture("command_request")))
 
         val revokedSocket = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
         assertMatches("handshake_rejected", revokedSocket.exchange(withCredential(fixture("handshake_request"), credential)))

@@ -633,7 +633,7 @@ class PairingWebSocketTest {
     }
 
     @Test
-    fun `revoked credential cannot submit a command after handshake`() = testApplication {
+    fun `revocation closes the authenticated session at once`() = testApplication {
         val pairingRequests = PairingRequests()
         val pending = assertIs<PairingSubmission.Pending>(
             pairingRequests.submit(PairingRequestCommand("android-revoked", "Ivanov", "android")),
@@ -648,15 +648,7 @@ class PairingWebSocketTest {
         session.receiveJson()
         pairingRequests.revoke(accepted.request.requestId)
 
-        session.send(
-            Frame.Text(
-                """{"type":"command","eventId":"event-revoked","sequence":1,"clientTimestamp":"2026-09-01T10:00:00Z","sessionId":"session-1","payload":{"type":"attention"}}""",
-            ),
-        )
-
-        val rejection = session.receiveJson()
-        assertEquals("command_rejected", rejection.getValue("type").jsonPrimitive.content)
-        assertEquals("invalid_reconnect_credential", rejection.getValue("code").jsonPrimitive.content)
+        assertEquals("credential_revoked", withTimeout(5_000) { session.closeReason.await() }?.message)
     }
 
     @Test

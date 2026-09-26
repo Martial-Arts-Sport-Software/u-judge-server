@@ -1,1 +1,1 @@
-{"type":"command_rejected","code":"invalid_reconnect_credential","eventId":"event-contract"}
+{"type":"command_rejected","code":"event_id_conflict","eventId":"event-contract"}

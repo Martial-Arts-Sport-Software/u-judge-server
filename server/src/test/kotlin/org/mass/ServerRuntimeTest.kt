@@ -99,9 +99,7 @@ class ServerRuntimeTest {
 
             runtime.pairingRequests.revoke(requestId)
 
-            val rejected = socket.request(command("event-after-revoke"))
-            assertEquals("command_rejected" to "invalid_reconnect_credential", rejected["type"] to rejected["code"])
-            assertEquals("event-after-revoke", rejected["eventId"])
+            assertEquals("credential_revoked", socket.closeReason.get(5, TimeUnit.SECONDS))
         }
         realtime(port, credential, expectAccepted = false).close()
         assertEquals(true, runtime.pairingRequests.operatorRegistry().devices.single().revoked)
@@ -248,6 +246,12 @@ class ServerRuntimeTest {
         private val messages = LinkedBlockingQueue<String>()
         private val partial = StringBuilder()
         var lastText: String = ""
+        val closeReason = CompletableFuture<String>()
+
+        override fun onClose(webSocket: WebSocket, statusCode: Int, reason: String): CompletionStage<*>? {
+            closeReason.complete(reason)
+            return null
+        }
 
         override fun onText(webSocket: WebSocket, data: CharSequence, last: Boolean): CompletionStage<*> {
             partial.append(data)
