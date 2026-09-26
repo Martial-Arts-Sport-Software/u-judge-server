@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.mass.domain.PeerId
+import org.mass.persistence.JdbcDomainEventStore
 import org.mass.persistence.LocalPeerIdentity
 import org.mass.persistence.ManagedPostgresRuntime
 import org.mass.persistence.PostgresCommand
@@ -157,7 +158,11 @@ class ServerRuntime(
         }
         val metadata = ServerMetadata.local(peerId = peerId.value)
         val realtimeCommands = RealtimeCommands(journal = JdbcPeerJournal(peerId.value, dataSource))
-        val pairing = PairingRequests().also { pairingRequests = it }
+        val pairing = try {
+            PairingRequests(JdbcDeviceRegistryJournal(JdbcDomainEventStore(dataSource), peerId))
+        } catch (exception: Exception) {
+            return failStartup("Device registry could not be restored: ${exception.message}")
+        }.also { pairingRequests = it }
 
         httpServer = try {
             embeddedServer(CIO, port = configuration.httpPort, host = "0.0.0.0") {

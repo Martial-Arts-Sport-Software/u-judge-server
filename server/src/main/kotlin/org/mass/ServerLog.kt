@@ -20,6 +20,9 @@ object ServerLog {
 
     internal fun runtimeStopped() = logger.atInfo().setMessage("runtime_stopped").log()
 
+    internal fun deviceRegistryChanged(change: String, deviceId: String) = logger.atInfo().setMessage("device_registry_changed")
+        .addKeyValue("change", change).addKeyValue("deviceId", deviceId).log()
+
     internal fun handshakeRejected(code: String) = logger.atWarn().setMessage("realtime_handshake_rejected")
         .addKeyValue("code", code).log()
 

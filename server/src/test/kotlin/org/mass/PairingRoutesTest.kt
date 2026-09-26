@@ -11,6 +11,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.assertIs
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -39,8 +40,9 @@ class PairingRoutesTest {
 
     @Test
     fun `repeated pairing request for a device keeps one pending request`() = testApplication {
+        val pairingRequests = PairingRequests()
         application {
-            module(pairingRequests = PairingRequests())
+            module(pairingRequests = pairingRequests)
         }
 
         val first = client.post("/v1/pairing-requests") {
@@ -51,33 +53,48 @@ class PairingRoutesTest {
             header(HttpHeaders.ContentType, "application/json")
             setBody("""{"deviceId":"ios-3","surname":"Petrova","platform":"ios"}""")
         }
-        val requests = client.get("/v1/pairing-requests")
         val firstId = Json.parseToJsonElement(first.bodyAsText()).jsonObject.getValue("requestId").jsonPrimitive.content
         val retryId = Json.parseToJsonElement(retry.bodyAsText()).jsonObject.getValue("requestId").jsonPrimitive.content
-        val pendingRequests = Json.parseToJsonElement(requests.bodyAsText()).jsonArray
 
         assertEquals(HttpStatusCode.Accepted, first.status)
         assertEquals(HttpStatusCode.OK, retry.status)
         assertEquals(firstId, retryId)
-        assertEquals(1, pendingRequests.size)
+        assertEquals(1, pairingRequests.pending().size)
     }
 
     @Test
     fun `invalid pairing request is rejected without creating pending state`() = testApplication {
+        val pairingRequests = PairingRequests()
         application {
-            module(pairingRequests = PairingRequests())
+            module(pairingRequests = pairingRequests)
         }
 
         val response = client.post("/v1/pairing-requests") {
             header(HttpHeaders.ContentType, "application/json")
             setBody("""{"deviceId":"unknown-1","surname":" ","platform":"desktop"}""")
         }
-        val requests = client.get("/v1/pairing-requests")
         val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertEquals("invalid_pairing_request", body.getValue("code").jsonPrimitive.content)
-        assertEquals(0, Json.parseToJsonElement(requests.bodyAsText()).jsonArray.size)
+        assertEquals(emptyList(), pairingRequests.pending())
+    }
+
+    @Test
+    fun `pending surnames are not listed to anonymous LAN clients`() = testApplication {
+        val pairingRequests = PairingRequests()
+        application {
+            module(pairingRequests = pairingRequests)
+        }
+        client.post("/v1/pairing-requests") {
+            header(HttpHeaders.ContentType, "application/json")
+            setBody("""{"deviceId":"ios-private","surname":"Petrova","platform":"ios"}""")
+        }
+
+        val response = client.get("/v1/pairing-requests")
+
+        assertEquals(HttpStatusCode.MethodNotAllowed, response.status)
+        assertTrue("Petrova" !in response.bodyAsText())
     }
 
     @Test

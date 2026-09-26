@@ -38,7 +38,7 @@ class ServerRuntimeTest {
     }
 
     @Test
-    fun `keeps the peer identity and acknowledged commands across a restart`() {
+    fun `keeps the peer identity, device approval and acknowledged commands across a restart`() {
         val port = freePort()
         val firstRun = runtime(port)
         val running = assertIs<ServerRuntimeState.Running>(firstRun.start())
@@ -53,8 +53,8 @@ class ServerRuntimeTest {
 
         val secondRun = runtime(port)
         assertEquals(running.peerId, assertIs<ServerRuntimeState.Running>(secondRun.start()).peerId)
-        val reconnectCredential = pairAndApprove(secondRun, port)
-        realtime(port, reconnectCredential).use { socket ->
+        assertEquals(listOf("device-1"), secondRun.pairingRequests.operatorRegistry().devices.map(OperatorDevice::deviceId))
+        realtime(port, credential).use { socket ->
             assertEquals("command_ack", socket.request(command)["type"])
             val resync = socket.request("""{"type":"resync_request","cursor":null}""")
             assertEquals("resync_response", resync["type"])
