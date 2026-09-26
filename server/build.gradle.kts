@@ -101,4 +101,11 @@ application {
 
 tasks.named<JavaExec>("run") {
     standardInput = System.`in`
+    val bundle = preparePostgresBundle.flatMap(PreparePostgresBundle::bundleDirectory)
+    inputs.dir(bundle).withPropertyName("postgresBundle")
+    jvmArgumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf("-DuJudge.postgres.installationDirectory=${bundle.get().asFile.absolutePath}")
+        },
+    )
 }

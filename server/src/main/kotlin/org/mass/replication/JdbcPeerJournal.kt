@@ -207,6 +207,7 @@ internal object JournalSchema {
         Migration(4, "/db/migration/V4__kerugi_timer_events.sql"),
         Migration(5, "/db/migration/V5__kerugi_result_events.sql"),
         Migration(6, "/db/migration/V6__domain_events.sql"),
+        Migration(7, "/db/migration/V7__local_peer.sql"),
     )
 
     private fun Connection.inTransaction(block: () -> Unit) {

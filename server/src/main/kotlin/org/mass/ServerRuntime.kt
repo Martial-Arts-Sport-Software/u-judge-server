@@ -1,0 +1,188 @@
+package org.mass
+
+import com.appstractive.dnssd.publishService
+import io.ktor.server.cio.CIO
+import io.ktor.server.cio.CIOApplicationEngine
+import io.ktor.server.engine.EmbeddedServer
+import io.ktor.server.engine.embeddedServer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import org.mass.domain.PeerId
+import org.mass.persistence.LocalPeerIdentity
+import org.mass.persistence.ManagedPostgresRuntime
+import org.mass.persistence.PostgresCommand
+import org.mass.persistence.PostgresPlatform
+import org.mass.persistence.PostgresRuntimeConfiguration
+import org.mass.persistence.PostgresState
+import org.mass.replication.JdbcPeerJournal
+import java.nio.file.Files
+import java.nio.file.Path
+import java.time.Duration
+
+/** Where the bundled PostgreSQL lives and where this peer keeps its cluster, logs and other local state. */
+data class ServerRuntimeConfiguration(
+    val installationDirectory: Path?,
+    val applicationDataDirectory: Path,
+    val httpPort: Int = DEFAULT_HTTP_PORT,
+    val serviceName: String = "JudgeServer-1",
+) {
+    companion object {
+        const val DEFAULT_HTTP_PORT = 8080
+
+        /**
+         * Uses `uJudge.postgres.installationDirectory` or the Compose Desktop resources directory for the PostgreSQL bundle,
+         * and `uJudge.dataDirectory` or the OS application-data directory for local state.
+         */
+        fun fromEnvironment(): ServerRuntimeConfiguration = ServerRuntimeConfiguration(
+            installationDirectory = (
+                System.getProperty("uJudge.postgres.installationDirectory")
+                    ?: System.getProperty("compose.application.resources.dir")
+                )?.let(Path::of),
+            applicationDataDirectory = System.getProperty("uJudge.dataDirectory")?.let(Path::of)
+                ?: defaultApplicationDataDirectory(),
+        )
+
+        fun defaultApplicationDataDirectory(
+            osName: String = System.getProperty("os.name"),
+            userHome: Path = Path.of(System.getProperty("user.home")),
+            environment: Map<String, String> = System.getenv(),
+        ): Path = when {
+            osName.startsWith("Mac") -> userHome.resolve("Library/Application Support/UJudge")
+            osName.startsWith("Windows") ->
+                (environment["LOCALAPPDATA"]?.let(Path::of) ?: userHome.resolve("AppData/Local")).resolve("UJudge")
+            else -> (environment["XDG_DATA_HOME"]?.let(Path::of) ?: userHome.resolve(".local/share")).resolve("ujudge")
+        }
+    }
+}
+
+sealed interface ServerRuntimeState {
+    data object Stopped : ServerRuntimeState
+
+    data object Starting : ServerRuntimeState
+
+    data class Running(val httpPort: Int, val peerId: PeerId) : ServerRuntimeState
+
+    /** A persistence or network failure the operator must see; the diagnostic contains no personal data. */
+    data class Failed(val diagnostic: String) : ServerRuntimeState
+}
+
+/**
+ * Production composition of one desktop peer: managed PostgreSQL, schema migration, durable journals, the HTTP/WebSocket
+ * module and mDNS publication. Supervises PostgreSQL while running and reports its failure instead of silently continuing.
+ */
+class ServerRuntime(
+    private val configuration: ServerRuntimeConfiguration,
+    private val supervisionInterval: Duration = Duration.ofSeconds(2),
+) {
+    private val mutableState = MutableStateFlow<ServerRuntimeState>(ServerRuntimeState.Stopped)
+    val state: StateFlow<ServerRuntimeState> = mutableState.asStateFlow()
+
+    /** Operator pairing service of the current run, used in-process by the desktop UI. */
+    @Volatile
+    var pairingRequests: PairingRequests = PairingRequests()
+        private set
+
+    private var postgres: ManagedPostgresRuntime? = null
+    private var httpServer: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    private var scope: CoroutineScope? = null
+
+    @Synchronized
+    fun start(): ServerRuntimeState {
+        if (mutableState.value is ServerRuntimeState.Running) return mutableState.value
+        mutableState.value = ServerRuntimeState.Starting
+        return startComponents().also { mutableState.value = it }
+    }
+
+    @Synchronized
+    fun stop() {
+        scope?.cancel()
+        scope = null
+        httpServer?.stop(1_000, 5_000)
+        httpServer = null
+        postgres?.stop()
+        postgres = null
+        mutableState.value = ServerRuntimeState.Stopped
+    }
+
+    @Synchronized
+    fun restart(): ServerRuntimeState {
+        stop()
+        return start()
+    }
+
+    private fun startComponents(): ServerRuntimeState {
+        val installationDirectory = configuration.installationDirectory
+        if (installationDirectory == null || !Files.isDirectory(installationDirectory.resolve("postgresql").resolve("bin"))) {
+            return ServerRuntimeState.Failed("Bundled PostgreSQL was not found in ${installationDirectory ?: "the application resources"}")
+        }
+        val runtime = ManagedPostgresRuntime(
+            PostgresRuntimeConfiguration(
+                installationDirectory = installationDirectory,
+                applicationDataDirectory = configuration.applicationDataDirectory,
+                port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
+                platform = PostgresPlatform.current(),
+            ),
+        )
+        postgres = runtime
+        when (val postgresState = runtime.start()) {
+            is PostgresState.Failed -> return failStartup(postgresState.diagnostic)
+            PostgresState.Stopped -> return failStartup("PostgreSQL did not start")
+            is PostgresState.Running -> Unit
+        }
+        val dataSource = runtime.dataSource ?: return failStartup("PostgreSQL stopped during startup")
+
+        val peerId = try {
+            LocalPeerIdentity.loadOrCreate(dataSource)
+        } catch (exception: Exception) {
+            return failStartup("Database migration failed: ${exception.message}")
+        }
+        val metadata = ServerMetadata.local(peerId = peerId.value)
+        val realtimeCommands = RealtimeCommands(journal = JdbcPeerJournal(peerId.value, dataSource))
+        val pairing = PairingRequests().also { pairingRequests = it }
+
+        httpServer = try {
+            embeddedServer(CIO, port = configuration.httpPort, host = "0.0.0.0") {
+                module(metadata = metadata, pairingRequests = pairing, realtimeCommands = realtimeCommands)
+            }.start(wait = false)
+        } catch (exception: Exception) {
+            return failStartup("HTTP port ${configuration.httpPort} is unavailable: ${exception.message}")
+        }
+
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { runtimeScope ->
+            runtimeScope.launch {
+                runCatching {
+                    publishService(type = "_u-judge._tcp", name = configuration.serviceName) { port = configuration.httpPort }
+                }
+            }
+            runtimeScope.launch { supervisePostgres(runtime) }
+        }
+        return ServerRuntimeState.Running(configuration.httpPort, peerId)
+    }
+
+    private suspend fun supervisePostgres(runtime: ManagedPostgresRuntime) {
+        while (scope?.isActive != false) {
+            delay(supervisionInterval.toMillis())
+            val postgresState = runtime.state
+            if (postgresState is PostgresState.Failed && mutableState.value is ServerRuntimeState.Running) {
+                mutableState.value = ServerRuntimeState.Failed(postgresState.diagnostic)
+                return
+            }
+        }
+    }
+
+    private fun failStartup(diagnostic: String): ServerRuntimeState {
+        httpServer?.stop(0, 0)
+        httpServer = null
+        postgres?.stop()
+        postgres = null
+        return ServerRuntimeState.Failed(diagnostic)
+    }
+}
