@@ -37,7 +37,7 @@ fun ServerStatusComponent(modifier: Modifier = Modifier) {
     val text = when (val current = state) {
         ServerRuntimeState.Stopped -> Localization.getString("server_status_stopped")
         ServerRuntimeState.Starting -> Localization.getString("server_status_starting")
-        is ServerRuntimeState.Running -> Localization.getString("server_status_running").format(current.httpPort)
+        is ServerRuntimeState.Running -> Localization.getString("server_status_running").format(current.port)
         is ServerRuntimeState.Failed -> Localization.getString("server_status_failed").format(current.diagnostic)
     }
 

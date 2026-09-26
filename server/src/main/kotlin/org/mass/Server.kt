@@ -1567,7 +1567,10 @@ fun Application.module(
 fun main() {
     ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
     when (val state = Server.start()) {
-        is ServerRuntimeState.Running -> println("U'Judge server peer ${state.peerId.value} listens on port ${state.httpPort}")
+        is ServerRuntimeState.Running -> println(
+            "U'Judge server peer ${state.peerId.value} listens on https://0.0.0.0:${state.port}, " +
+                "verification code ${state.verificationCode}",
+        )
         else -> System.err.println("U'Judge server did not start: $state")
     }
     Runtime.getRuntime().addShutdownHook(Thread(Server::stop))
