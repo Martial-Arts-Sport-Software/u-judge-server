@@ -108,9 +108,10 @@ Authoritative source для v1 Pilot — предоставленный «Про
 ## 7. Текущее состояние
 
 Раздел описывает состояние `main`. Статусы требований, доказательства и следующий инкремент ведутся только в
-[roadmap](ROADMAP.md#инкременты-поставки). Большая часть перечисленных server-компонентов пока проверена только тестами:
-`Server.start()` не подключает JDBC journals и Kerugi handlers, а desktop только запускает `Server.start()` без operator pairing service и проекций; это
-закрывают инкременты I1 и I2.
+[roadmap](ROADMAP.md#инкременты-поставки). `Server.start()` и desktop запускают bundled PostgreSQL 18.6 в application-data каталоге ОС, применяют миграции единого
+журнала `domain_events`, сохраняют peer ID и generic realtime commands, пишут JSON-логи и показывают сбой server/БД оператору;
+после аварийного завершения оставшийся PostgreSQL останавливается при следующем запуске. Реестр устройств, local TLS и экран
+pairing остаются in-memory/незавершёнными до конца I1, Kerugi handlers подключает I2.
 
 ### 7.1. Реализовано в server
 
