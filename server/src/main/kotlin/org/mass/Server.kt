@@ -1073,6 +1073,7 @@ fun Application.module(
     kerugiResultPublisher: RealtimeKerugiResultPublisher = RealtimeKerugiResultPublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
     credentialDeliveryIsSecure: (ApplicationCall) -> Boolean = { call -> call.request.local.scheme == "https" },
+    clock: () -> Instant = Instant::now,
 ) {
     install(ContentNegotiation) {
         json(Json {
@@ -1090,7 +1091,7 @@ fun Application.module(
             call.respond(HealthStatus())
         }
         get("/v1/metadata") {
-            call.respond(metadata)
+            call.respond(metadata.copy(serverTime = clock().toString()))
         }
         post("/v1/pairing-requests") {
             when (val submission = pairingRequests.submit(call.receive())) {

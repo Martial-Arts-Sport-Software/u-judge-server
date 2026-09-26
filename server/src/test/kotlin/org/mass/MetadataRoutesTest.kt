@@ -22,10 +22,10 @@ class MetadataRoutesTest {
             courtId = "court-2",
             serverName = "Court Two",
             pairingPolicy = "operator-approval",
-            serverTime = "2026-08-31T12:00:00Z",
+            serverTime = "2026-08-31T11:00:00Z",
         )
         application {
-            module(configuredMetadata)
+            module(configuredMetadata, clock = { java.time.Instant.parse("2026-08-31T12:00:00Z") })
         }
 
         val response = client.get("/v1/metadata")
@@ -38,6 +38,7 @@ class MetadataRoutesTest {
         assertEquals("Court Two", metadata.getValue("serverName").jsonPrimitive.content)
         assertEquals("operator-approval", metadata.getValue("pairingPolicy").jsonPrimitive.content)
         assertTrue(metadata.getValue("capabilities").jsonObject.isNotEmpty())
+        // Server time is read on every request, not frozen when the module starts.
         assertEquals("2026-08-31T12:00:00Z", metadata.getValue("serverTime").jsonPrimitive.content)
     }
 
