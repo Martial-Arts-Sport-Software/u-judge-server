@@ -31,9 +31,9 @@ Read-only `GET /v1/health` возвращает typed liveness status `healthy` 
 `PostgresProvisioner` готовит configured data directory через `initdb` без перезаписи неизвестных данных до того, как
 `ManagedPostgres` супервизирует сконфигурированный дочерний процесс, и сообщает конфликт loopback-порта, ошибку запуска или
 аварийный exit; `ManagedPostgresRuntime` ждёт JDBC readiness, создаёт configured database и публикует datasource только после
-успешного запуска. `RealPostgresLifecycleTest` выполняет init/start/migration/restart/journal-recovery против явно указанного
-PostgreSQL bundle, но на CI пропускается без этого bundle. Реальный PostgreSQL lifecycle на clean Windows/macOS, bundled
-distribution и mobile reconnect evidence ещё не подтверждены.
+успешного запуска. `RealPostgresLifecycleTest` выполняет init/start/migration/restart/journal-recovery против PostgreSQL
+18.6 из зафиксированных бинарников zonky, которые Gradle распаковывает для текущей ОС; тест входит в `./gradlew build` и CI.
+Реальный PostgreSQL lifecycle на clean Windows/macOS и mobile reconnect evidence ещё не подтверждены.
 Решение и ограничения зафиксированы в [ADR-003](docs/adr/ADR-003-managed-postgresql.md).
 
 Перечисленные server-компоненты пока проверены тестами, но `Server.start()` не подключает JDBC journals и Kerugi handlers,
@@ -70,10 +70,12 @@ distribution и mobile reconnect evidence ещё не подтверждены.
 ./gradlew :server:run
 ```
 
-Проверка managed PostgreSQL против реального bundle (bundle root содержит `postgresql/bin/initdb` и `postgresql/bin/postgres`):
+Проверка managed PostgreSQL против реального PostgreSQL. Задача `:server:preparePostgresBundle` распаковывает
+зафиксированные бинарники `io.zonky.test.postgres:embedded-postgres-binaries-*` в `server/build/postgres-bundle/postgresql`
+и передаёт этот путь тестам; нужен `tar` с поддержкой xz (есть в macOS, Windows 10+ и Linux):
 
 ```shell
-./gradlew :server:test --tests org.mass.persistence.RealPostgresLifecycleTest -DuJudge.postgres.installationDirectory=/path/to/bundle
+./gradlew :server:test --tests org.mass.persistence.RealPostgresLifecycleTest
 ```
 
 ## Документация

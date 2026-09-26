@@ -12,9 +12,20 @@ import javax.sql.DataSource
 enum class PostgresPlatform(private val executableSuffix: String) {
     Windows(".exe"),
     MacOs(""),
+
+    /** Only for CI acceptance runs; the pilot desktop targets Windows and macOS. */
+    Linux(""),
     ;
 
     fun executable(name: String): String = "$name$executableSuffix"
+
+    companion object {
+        fun current(osName: String = System.getProperty("os.name")): PostgresPlatform = when {
+            osName.startsWith("Windows") -> Windows
+            osName.startsWith("Mac") -> MacOs
+            else -> Linux
+        }
+    }
 }
 
 /** Defines one bundled PostgreSQL cluster and the commands required to run it. */

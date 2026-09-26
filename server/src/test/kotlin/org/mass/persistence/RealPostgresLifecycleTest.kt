@@ -21,7 +21,7 @@ class RealPostgresLifecycleTest {
             installationDirectory = Path.of(installationDirectory),
             applicationDataDirectory = root.resolve("application-data"),
             port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
-            platform = if (System.getProperty("os.name").startsWith("Windows")) PostgresPlatform.Windows else PostgresPlatform.MacOs,
+            platform = PostgresPlatform.current(),
         )
         val runtime = ManagedPostgresRuntime(configuration)
 
