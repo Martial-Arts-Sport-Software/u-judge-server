@@ -17,8 +17,6 @@ import u_judge_server.desktop.generated.resources.copy_icon
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.sp
 import java.net.InetAddress
 import u_judge_server.desktop.generated.resources.empty_available_devices
@@ -192,7 +190,6 @@ object DevicesConnectionScreen : Screen {
                 .fillMaxHeight()
                 .clip(PANEL_SHAPE)
                 .background(Colors.GRAY.color)
-                .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
             Text(
@@ -201,13 +198,16 @@ object DevicesConnectionScreen : Screen {
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 6.dp),
             )
-            HostCard(host)
+            // The host and code cards share the free height, so the status cards sit at the bottom edge.
+            HostCard(host, Modifier.weight(1f))
             if (running != null) {
                 AddressPill(running)
-                CodeCard(running.verificationCode)
+                CodeCard(running.verificationCode, Modifier.weight(1f))
             } else {
                 InfoPill(Localization.getString("devices_code_unavailable"))
+                Spacer(Modifier.weight(1f))
             }
             StatusItems(state)
             error?.let { InfoPill(it, background = FAILURE_COLOR) }
@@ -215,17 +215,18 @@ object DevicesConnectionScreen : Screen {
     }
 
     @Composable
-    private fun HostCard(host: HostDescription) {
+    private fun HostCard(host: HostDescription, modifier: Modifier) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
+            verticalArrangement = Arrangement.Center,
+            modifier = modifier
                 .fillMaxWidth()
                 .clip(CARD_SHAPE)
                 .background(CARD_COLOR)
                 .border(1.dp, CARD_BORDER, CARD_SHAPE)
                 .padding(vertical = 12.dp, horizontal = 12.dp),
         ) {
-            Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(56.dp))
+            Image(painterResource(Res.drawable.server_computer), contentDescription = null, modifier = Modifier.size(64.dp))
             Spacer(Modifier.height(6.dp))
             Text(host.name, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
             Text(host.system, color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
@@ -387,11 +388,12 @@ object DevicesConnectionScreen : Screen {
 
     /** The verification code judges compare before approval, in one line. */
     @Composable
-    private fun CodeCard(code: String) {
+    private fun CodeCard(code: String, modifier: Modifier) {
         val formatted = "${code.take(3)} ${code.drop(3)}"
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
+            verticalArrangement = Arrangement.Center,
+            modifier = modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(CODE_CARD_COLOR)
