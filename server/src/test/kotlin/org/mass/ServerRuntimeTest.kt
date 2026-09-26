@@ -92,6 +92,18 @@ class ServerRuntimeTest {
         assertIs<ServerRuntimeState.Failed>(runtime.start())
     }
 
+    @Test
+    fun `restores executable permissions that desktop packaging dropped`() {
+        val bin = Files.createDirectories(root.resolve("bundle/postgresql/bin"))
+        val postgres = Files.writeString(bin.resolve("postgres"), "#!/bin/sh\n")
+        postgres.toFile().setExecutable(false, false)
+
+        val runtime = ServerRuntime(ServerRuntimeConfiguration(root.resolve("bundle"), root.resolve("application-data"), freePort()))
+
+        assertEquals(null, runtime.restoreExecutablePermissions(bin))
+        assertTrue(Files.isExecutable(postgres))
+    }
+
     private fun runtime(port: Int): ServerRuntime {
         val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
         assumeTrue(!installationDirectory.isNullOrBlank(), "Requires the PostgreSQL bundle prepared by Gradle")

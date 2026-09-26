@@ -131,6 +131,9 @@ class ServerRuntime(
         if (installationDirectory == null || !Files.isDirectory(installationDirectory.resolve("postgresql").resolve("bin"))) {
             return ServerRuntimeState.Failed("Bundled PostgreSQL was not found in ${installationDirectory ?: "the application resources"}")
         }
+        restoreExecutablePermissions(installationDirectory.resolve("postgresql").resolve("bin"))?.let {
+            return ServerRuntimeState.Failed(it)
+        }
         val runtime = ManagedPostgresRuntime(
             PostgresRuntimeConfiguration(
                 installationDirectory = installationDirectory,
@@ -184,6 +187,20 @@ class ServerRuntime(
                 ServerLog.runtimeFailed(postgresState.diagnostic)
                 return
             }
+        }
+    }
+
+    /**
+     * Desktop packaging drops Unix permission bits of app resources, so the bundled PostgreSQL binaries arrive without `+x`.
+     * Restores them before the first start; a read-only location (for example a mounted DMG) is reported to the operator.
+     */
+    internal fun restoreExecutablePermissions(binDirectory: Path): String? {
+        if (PostgresPlatform.current() == PostgresPlatform.Windows) return null
+        val binaries = Files.list(binDirectory).use { files -> files.filter(Files::isRegularFile).toList() }
+        val notExecutable = binaries.filterNot(Files::isExecutable).filterNot { it.toFile().setExecutable(true, false) }
+        return notExecutable.takeIf { it.isNotEmpty() }?.let {
+            "Bundled PostgreSQL binaries are not executable and cannot be fixed in $binDirectory; install the application " +
+                "into a writable folder such as Applications"
         }
     }
 
