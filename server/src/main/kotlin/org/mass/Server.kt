@@ -1,15 +1,10 @@
 package org.mass
 
-import com.appstractive.dnssd.publishService
 import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.cio.CIO
-import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.request.receive
-import io.ktor.server.engine.EmbeddedServer
-import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -25,10 +20,6 @@ import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -90,10 +81,10 @@ data class ServerMetadata(
     val serverTime: String,
 ) {
     companion object {
-        fun local() = ServerMetadata(
+        fun local(peerId: String = "peer-local") = ServerMetadata(
             protocolVersion = "1.0",
             capabilities = mapOf("metadata" to true),
-            peerId = "peer-local",
+            peerId = peerId,
             courtId = "court-local",
             serverName = "U'Judge Server",
             pairingPolicy = "operator-approval",
@@ -985,6 +976,10 @@ class PairingRequests {
         }
     }
 
+    fun deviceIdFor(reconnectCredential: String): String? = synchronized(this) {
+        acceptedByRequestId.values.firstOrNull { it.reconnectCredential == reconnectCredential }?.deviceId
+    }
+
     fun connected(reconnectCredential: String) = synchronized(this) {
         if (isReconnectCredentialActive(reconnectCredential)) {
             connectionsByCredential.merge(reconnectCredential, 1, Int::plus)
@@ -1082,6 +1077,7 @@ fun Application.module(
     kerugiResultPublisher: RealtimeKerugiResultPublisher = RealtimeKerugiResultPublisher(),
     heartbeatTimeout: Duration = Duration.ofSeconds(30),
     credentialDeliveryIsSecure: (ApplicationCall) -> Boolean = { call -> call.request.local.scheme == "https" },
+    clock: () -> Instant = Instant::now,
 ) {
     install(ContentNegotiation) {
         json(Json {
@@ -1099,7 +1095,7 @@ fun Application.module(
             call.respond(HealthStatus())
         }
         get("/v1/metadata") {
-            call.respond(metadata)
+            call.respond(metadata.copy(serverTime = clock().toString()))
         }
         post("/v1/pairing-requests") {
             when (val submission = pairingRequests.submit(call.receive())) {
@@ -1141,12 +1137,15 @@ fun Application.module(
                 else -> null
             }
             if (rejectionCode != null) {
+                ServerLog.handshakeRejected(rejectionCode)
                 send(Frame.Text(Json.encodeToString(RealtimeHandshakeRejected("handshake_rejected", rejectionCode))))
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, rejectionCode))
                 return@webSocket
             }
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
+            val deviceId = pairingRequests.deviceIdFor(reconnectCredential)
             pairingRequests.connected(reconnectCredential)
+            ServerLog.deviceConnected(deviceId)
             lifecycleStatePublisher.subscribe(this)
             kerugiScorePublisher.subscribe(this)
             kerugiTimerPublisher.subscribe(this)
@@ -1440,8 +1439,12 @@ fun Application.module(
                     val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
                     val outcome = command?.let(realtimeCommands::accept) ?: RealtimeCommandOutcome.Rejected("invalid_command")
                     when (outcome) {
-                        is RealtimeCommandOutcome.Acknowledged -> send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                        is RealtimeCommandOutcome.Acknowledged -> {
+                            ServerLog.commandAcknowledged(deviceId, outcome.acknowledgement.eventId)
+                            send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                        }
                         is RealtimeCommandOutcome.Rejected -> {
+                            ServerLog.commandRejected(deviceId, outcome.code)
                             send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
                         }
                     }
@@ -1450,6 +1453,7 @@ fun Application.module(
                 timeoutJob.cancel()
                 heartbeatTracker.disconnected(reconnectCredential)
                 pairingRequests.disconnected(reconnectCredential)
+                ServerLog.deviceDisconnected(deviceId)
                 lifecycleStatePublisher.unsubscribe(this)
                 kerugiScorePublisher.unsubscribe(this)
                 kerugiTimerPublisher.unsubscribe(this)
@@ -1460,33 +1464,20 @@ fun Application.module(
 }
 
 fun main() {
-    Server.start()
+    ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
+    when (val state = Server.start()) {
+        is ServerRuntimeState.Running -> println("U'Judge server peer ${state.peerId.value} listens on port ${state.httpPort}")
+        else -> System.err.println("U'Judge server did not start: $state")
+    }
     Runtime.getRuntime().addShutdownHook(Thread(Server::stop))
     Thread.currentThread().join()
 }
 
+/** Production entry point shared by the desktop application and `:server:run`. */
 object Server {
-    private var ktorServer: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
-    private var mdnsScope: CoroutineScope? = null
-    fun start() {
-        ktorServer = embeddedServer(
-            CIO,
-            port = 8080,
-            host = "0.0.0.0",
-        ) { module() }.start(wait = false)
+    val runtime: ServerRuntime by lazy { ServerRuntime(ServerRuntimeConfiguration.fromEnvironment()) }
 
-        mdnsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        mdnsScope?.launch {
-            publishService(type = "_u-judge._tcp", name = "JudgeServer-1") {
-                port = 8080
-            }
-        }
-    }
+    fun start(): ServerRuntimeState = runtime.start()
 
-    fun stop() {
-        ktorServer?.stop(1000, 5000)
-        mdnsScope?.cancel()
-        ktorServer = null
-        mdnsScope = null
-    }
+    fun stop() = runtime.stop()
 }

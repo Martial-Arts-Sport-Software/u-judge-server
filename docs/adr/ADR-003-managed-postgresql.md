@@ -35,16 +35,15 @@ does not duplicate it. `ManagedPostgresRuntime` waits for a JDBC connection to t
 database when absent, and exposes its datasource only after both steps succeed. A readiness or database-creation failure stops
 the child and returns a diagnostic rather than publishing a nonfunctional JDBC URL.
 
-`RealPostgresLifecycleTest` is an opt-in acceptance test for an actual bundled PostgreSQL binary. It initializes a disposable
+`RealPostgresLifecycleTest` is an acceptance test for an actual bundled PostgreSQL binary. It initializes a disposable
 cluster outside the repository, starts the process, applies ordered journal migrations, persists an event, restarts, and proves
-journal recovery and sequence continuity. Run it with
-`./gradlew :server:test --tests org.mass.persistence.RealPostgresLifecycleTest -DuJudge.postgres.installationDirectory=/path/to/bundle`,
-where the bundle root contains `postgresql/bin/initdb` and `postgresql/bin/postgres` (use `.exe` on Windows). It is skipped when
-the property is absent, so normal CI does not claim real-binary evidence.
+journal recovery and sequence continuity. The `:server:preparePostgresBundle` Gradle task extracts the pinned
+`io.zonky.test.postgres:embedded-postgres-binaries-<platform>` artifact for the build OS into
+`server/build/postgres-bundle/postgresql/{bin,lib,share}` and passes that root to the test JVM, so `./gradlew build` and CI
+run it against real PostgreSQL 18.6 (Linux binaries on CI, macOS or Windows binaries locally).
 
-This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. The
-real-binary test has not run on the current development machine because no PostgreSQL bundle is installed. It does not
-demonstrate clean Windows/macOS installation, backup/restore, or the cross-repository mobile reconnect flow, so `NFR-004`,
+This is partial evidence for the durable-journal adapter, cluster-initialization and process-supervision boundaries. It does
+not demonstrate clean Windows/macOS installation, backup/restore, or the cross-repository mobile reconnect flow, so `NFR-004`,
 `NFR-009`, `NFR-010` and `P2P-010` remain Partial and Gate G1 remains open.
 
 ## Options
@@ -82,7 +81,7 @@ ADR-003 can be accepted only after the selected option proves on clean Windows a
 
 | Field | Approved value |
 | --- | --- |
-| PostgreSQL distribution | Bundled, tested Windows/macOS distribution. |
+| PostgreSQL distribution | Bundled, tested Windows/macOS distribution: pinned `io.zonky.test.postgres:embedded-postgres-binaries-*` Maven artifacts (PostgreSQL License), resolved by Gradle and extracted into the build; no manual download. |
 | Data directory | OS application-data directory outside the installer path. |
 | Port-conflict policy | Automatically choose an unused localhost port. |
 | Process lifecycle | One supervised PostgreSQL child process per desktop peer; stop on normal app exit. |

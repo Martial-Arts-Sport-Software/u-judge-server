@@ -2,7 +2,6 @@ package org.mass.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,12 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import org.mass.Server
-import org.mass.State.coroutinesScope
 import org.mass.enums.Colors
 import org.mass.locale.Localization
-import org.mass.ui.button.ButtonComponent
 import org.mass.ui.screen_header.ScreenHeaderComponent
 
 object DevicesConnectionScreen : Screen {
@@ -52,7 +47,7 @@ object DevicesConnectionScreen : Screen {
             ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth(0.7f)
+                        .fillMaxWidth()
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(15.dp))
                         .background(Colors.GRAY.color)
@@ -69,36 +64,6 @@ object DevicesConnectionScreen : Screen {
                             .weight(1f),
                         title = Localization.getString("devices_connection_available"),
                     )
-                }
-                Spacer(Modifier.width(20.dp))
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(15.dp))
-                        .background(Colors.GRAY.color)
-                        .padding(25.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(Colors.SECONDARY.color)
-                            .padding(15.dp),
-                    ) {
-                        ButtonComponent(
-                            modifier = Modifier.fillMaxWidth(1f),
-                            text = "Start scan",
-                            onclick = {
-                                coroutinesScope?.launch {
-                                    Server.stop()
-                                    Server.start()
-                                }
-                            },
-                        )
-                    }
                 }
             }
         }

@@ -163,14 +163,15 @@ class JdbcPeerJournal(
 }
 
 internal object JournalSchema {
-    fun migrate(dataSource: DataSource) {
+    /** Applies ordered migrations up to [targetVersion]; tests use a lower target to prepare an earlier pilot schema. */
+    fun migrate(dataSource: DataSource, targetVersion: Int = Int.MAX_VALUE) {
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeUpdate(
                     "CREATE TABLE IF NOT EXISTS u_judge_schema_migrations (version INTEGER PRIMARY KEY)",
                 )
             }
-            migrations.forEach { migration ->
+            migrations.filter { it.version <= targetVersion }.forEach { migration ->
                 if (!isApplied(connection, migration.version)) {
                     connection.inTransaction {
                         val statements = checkNotNull(JournalSchema::class.java.getResourceAsStream(migration.resourcePath))
@@ -205,6 +206,8 @@ internal object JournalSchema {
         Migration(3, "/db/migration/V3__kerugi_score_events.sql"),
         Migration(4, "/db/migration/V4__kerugi_timer_events.sql"),
         Migration(5, "/db/migration/V5__kerugi_result_events.sql"),
+        Migration(6, "/db/migration/V6__domain_events.sql"),
+        Migration(7, "/db/migration/V7__local_peer.sql"),
     )
 
     private fun Connection.inTransaction(block: () -> Unit) {

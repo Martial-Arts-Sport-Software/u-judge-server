@@ -111,12 +111,13 @@ baseline; при расхождении действует этот план.
 
 Технические задачи, обязательные внутри инкрементов:
 
-- I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence и один realtime command dispatcher
-  вместо отдельных `Realtime*Commands`; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
+- I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
   `RealPostgresLifecycleTest` в CI на PostgreSQL из образа runner; ручной прогон macOS/Windows фиксируется в PR, а
   недоступная платформа остаётся открытым пунктом G1; local TLS для credential delivery вместе с client, иначе pairing
   не завершается end-to-end.
-- I2: Kerugi bout aggregate поверх единого журнала; длительности и раунды по [FHR 2024](FHR-RULES-2024.md) §4.1.2,
+- I2: Kerugi bout aggregate поверх единого журнала и один realtime command dispatcher вместо отдельных `Realtime*Commands`
+  (перенесено из I1 26.09.2026: до I2 Kerugi-команды недостижимы из production, а их контракт меняется вместе с session
+  snapshot); длительности и раунды по [FHR 2024](FHR-RULES-2024.md) §4.1.2,
   §4.1.13, §4.1.14; session snapshot/assignment для client (`DEV-008`) и resync после reconnect; симулятор судей для
   acceptance test. Сейчас client отправляет удар как generic `command` с payload `kerugi_score`, который server ACK-ит без
   scoring: I2 переводит client на `kerugi_score_command` с audit context из snapshot.
@@ -179,11 +180,12 @@ architecture. They are not v1 Pilot acceptance gates.
 
 | Компонент | Подтверждено тестами | Открыто |
 |-----------|----------------------|---------|
-| Versioned JDBC migrations `V1`-`V5` | Durable journal, restart и idempotency на H2 | Единая схема журнала (I1) |
+| Versioned JDBC migrations `V1`-`V7` | Durable journal, restart и idempotency на H2 и PostgreSQL 18.6; `V6` переносит `V2`-`V5` в единый `domain_events` с одной per-peer sequence | - |
 | `PostgresProvisioner` | Configured `initdb`, требование `PG_VERSION`, reuse готового cluster, отказ перезаписывать nonempty directory без PostgreSQL marker | - |
-| `ManagedPostgres` | Supervision child process; диагностика конфликта loopback-порта, ошибки запуска и аварийного exit; `restart()` после exit | - |
-| `ManagedPostgresRuntime`, `PostgresRuntimeConfiguration` | JDBC readiness, создание database, JDBC URL публикуется только пока child запущен; platform-specific commands, cluster вне installation directory; `withAvailableLoopbackPort()` выбирает `127.0.0.1` port, поэтому проверка занятости в `start()` обязательна | Не подключены к `Server.start()` и desktop (I1) |
-| `RealPostgresLifecycleTest` | init/start/migration/restart/journal recovery против явно указанного bundle | На CI пропускается без bundle; clean Windows/macOS (I1, I7) |
+| `ManagedPostgres` | Supervision child process; диагностика конфликта loopback-порта, ошибки запуска и аварийного exit; `restart()` после exit; вывод child в `logs/postgres.log`; остановка PostgreSQL, оставшегося после аварийного завершения приложения | - |
+| `ManagedPostgresRuntime`, `PostgresRuntimeConfiguration` | JDBC readiness, создание database, JDBC URL публикуется только пока child запущен; platform-specific commands, cluster вне installation directory; `withAvailableLoopbackPort()` выбирает `127.0.0.1` port, поэтому проверка занятости в `start()` обязательна | - |
+| `ServerRuntime` | `Server.start()` и desktop: bundled PostgreSQL → миграции → peer ID → JDBC journal → `module()` → mDNS; сбой PostgreSQL во время работы и конфликт HTTP-порта видны как `Failed` | Durable реестр устройств и local TLS (I1) |
+| `RealPostgresLifecycleTest` | init/start/migration/restart/journal recovery, upgrade `V5` → `V6` и восстановление после аварийного завершения на PostgreSQL 18.6 из zonky; входит в `./gradlew build` и CI | Clean Windows/macOS installers (I7) |
 
 ### Realtime spike
 

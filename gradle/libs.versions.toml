@@ -11,6 +11,7 @@ kotlinx-datetime = "0.8.0-0.6.x-compat"
 ktor = "3.5.2"
 exposed = "1.5.0"
 postgresql = "42.7.13"
+postgres-binaries = "18.6.0"
 hikari = "7.1.0"
 h2 = "2.4.240"
 

@@ -3,6 +3,8 @@ package org.mass.persistence
 import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
@@ -35,6 +37,8 @@ class ManagedPostgres(
     private val command: PostgresCommand,
     private val provisioner: PostgresProvisioner? = null,
     private val stopTimeout: Duration = Duration.ofSeconds(5),
+    /** Receives the child's stdout and stderr; without it output is discarded so a full pipe never blocks PostgreSQL. */
+    private val logFile: Path? = null,
 ) {
     private var currentState: PostgresState = PostgresState.Stopped
 
@@ -57,7 +61,15 @@ class ManagedPostgres(
         }
 
         return try {
-            PostgresState.Running(ProcessBuilder(command.arguments).start()).also { currentState = it }
+            val process = ProcessBuilder(command.arguments).redirectErrorStream(true).apply {
+                if (logFile == null) {
+                    redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                } else {
+                    Files.createDirectories(logFile.toAbsolutePath().parent)
+                    redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()))
+                }
+            }.start()
+            PostgresState.Running(process).also { currentState = it }
         } catch (exception: IOException) {
             PostgresState.Failed("Unable to start PostgreSQL: ${exception.message}").also { currentState = it }
         }

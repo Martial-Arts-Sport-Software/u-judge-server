@@ -44,11 +44,20 @@ dependencies {
     implementation(project(":server"))
 }
 
+/** Places the PostgreSQL bundle prepared by `:server` into the app resources shipped with the desktop application. */
+val preparePostgresResources = tasks.register<Sync>("preparePostgresResources") {
+    from(project(":server").tasks.named("preparePostgresBundle"))
+    into(layout.buildDirectory.dir("app-resources/common"))
+}
+
 compose.desktop {
     application {
         mainClass = "org.mass.MainKt"
 
         nativeDistributions {
+            appResourcesRootDir.set(preparePostgresResources.map { layout.buildDirectory.dir("app-resources").get() })
+            // From `:desktop:suggestRuntimeModules`; java.sql carries the JDBC API used by the PostgreSQL driver.
+            modules("java.instrument", "java.management", "java.naming", "java.security.jgss", "java.sql", "jdk.unsupported")
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "UJudgeServer"
             packageVersion = "1.0.0"
@@ -59,6 +68,13 @@ compose.desktop {
 afterEvaluate {
     tasks.named<JavaExec>("run") {
         standardInput = System.`in`
-        jvmArgs = listOf("-Duser.timezone=UTC")
+        // Appends to the Compose arguments, which carry `compose.application.resources.dir` with the PostgreSQL bundle.
+        jvmArgs(
+            listOfNotNull(
+                "-Duser.timezone=UTC",
+                // `-PuJudgeDataDirectory=/path` runs against a separate cluster instead of the OS application-data directory.
+                providers.gradleProperty("uJudgeDataDirectory").orNull?.let { "-DuJudge.dataDirectory=$it" },
+            ),
+        )
     }
 }
