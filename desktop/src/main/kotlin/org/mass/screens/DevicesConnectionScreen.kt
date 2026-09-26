@@ -75,6 +75,7 @@ import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
+import org.mass.ui.button.ButtonComponent
 import org.mass.ui.screen_header.ScreenHeaderComponent
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.check_icon
@@ -115,7 +116,7 @@ object DevicesConnectionScreen : Screen {
                         .fillMaxHeight()
                         .clip(PANEL_SHAPE)
                         .background(Colors.GRAY.color)
-                        .padding(25.dp),
+                        .padding(20.dp),
                 ) {
                     val paired = registry.devices.filterNot(OperatorDevice::revoked)
                     DeviceList(
@@ -130,7 +131,7 @@ object DevicesConnectionScreen : Screen {
                             }
                         }
                     }
-                    Spacer(Modifier.width(25.dp))
+                    Spacer(Modifier.width(20.dp))
                     DeviceList(
                         Localization.getString("devices_connection_available"),
                         Modifier.weight(1f),
@@ -200,18 +201,18 @@ object DevicesConnectionScreen : Screen {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
-            // Code first, then this computer and its address; the two cards share the free height, so the status
-            // cards sit at the bottom edge.
             if (running != null) {
-                CodeCard(running.verificationCode, Modifier.weight(0.8f))
-                HostCard(host, Modifier.weight(1f))
+                CodeCard(running.verificationCode, Modifier)
+                HostCard(host, Modifier)
                 AddressPill(running)
             } else {
                 InfoPill(Localization.getString("devices_code_unavailable"))
-                HostCard(host, Modifier.weight(1f))
+                HostCard(host, Modifier)
             }
             StatusItems(state)
             error?.let { InfoPill(it, background = FAILURE_COLOR) }
+            Spacer(Modifier.weight(1f))
+            ConfirmBlock()
         }
     }
 
@@ -425,6 +426,36 @@ object DevicesConnectionScreen : Screen {
                 color = LAVENDER_TEXT,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+
+    /**
+     * Figma V1 bottom block: confirming the device configuration leads to the next operator step, the bracket import,
+     * which arrives with I4; until then the action is shown disabled with that explanation instead of doing nothing.
+     */
+    @Composable
+    private fun ConfirmBlock() {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(CARD_SHAPE)
+                .background(Colors.SECONDARY.color)
+                .padding(12.dp),
+        ) {
+            ButtonComponent(
+                text = Localization.getString("devices_confirm"),
+                onclick = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                Localization.getString("devices_confirm_next"),
+                color = Colors.PRIMARY.color,
+                style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
             )
         }
