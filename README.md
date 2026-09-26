@@ -41,7 +41,7 @@ Read-only `GET /v1/health` возвращает typed liveness status `healthy` 
 после аварийного завершения оставшийся PostgreSQL останавливается при следующем запуске. Server
 принимает только HTTPS/WSS на `8443` с self-signed сертификатом peer (ADR-006), выдаёт credential только по matching
 delivery proof, хранит решения pairing в журнале, а desktop показывает код сверки и позволяет подтвердить, отклонить и
-отозвать устройство. Kerugi handlers подключает I2. Подробности в [roadmap](docs/ROADMAP.md#инкременты-поставки).
+отозвать устройство. Kerugi handlers подключают I2a и I2b после импорта сеток (I4). Подробности в [roadmap](docs/ROADMAP.md#инкременты-поставки).
 Подробное разделение текущего и целевого состояния находится в [описании проекта](docs/PROJECT.md).
 
 ## Модули
