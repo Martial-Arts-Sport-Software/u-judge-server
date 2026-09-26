@@ -1,7 +1,11 @@
 package org.mass.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,9 +14,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.material3.AlertDialog
@@ -29,8 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,14 +52,16 @@ import org.mass.Server
 import org.mass.ServerRuntimeState
 import org.mass.enums.Colors
 import org.mass.locale.Localization
-import org.mass.ui.button.ButtonComponent
-import org.mass.ui.button.ButtonStyles
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
 import org.mass.ui.screen_header.ScreenHeaderComponent
-import org.mass.ui.server_status.ServerStatusComponent
+import u_judge_server.desktop.generated.resources.Res
+import u_judge_server.desktop.generated.resources.check_icon
+import u_judge_server.desktop.generated.resources.cross_icon
 
 /**
- * Operator pairing (`DEV-004`-`DEV-006`): the server verification code, pending judges to approve or reject, and paired
- * devices with platform, connection state and revocation. Decisions are written to the journal before the list changes.
+ * Operator pairing (`DEV-004`-`DEV-006`) laid out as Figma "Device configuration" V1: paired and available devices on the
+ * left, the server information on the right. Decisions are written to the journal before the lists change.
  */
 object DevicesConnectionScreen : Screen {
     @Composable
@@ -69,47 +80,45 @@ object DevicesConnectionScreen : Screen {
                     withContext(Dispatchers.IO) { pairing.action() }
                     null
                 } catch (exception: Exception) {
-                    Localization.getString("devices_action_failed").format(exception.message ?: exception::class.simpleName)
+                    Localization.getString("devices_action_failed").replace("%s", exception.message ?: exception::class.simpleName.orEmpty())
                 }
             }
         }
 
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             ScreenHeaderComponent(modifier = Modifier.fillMaxHeight(0.08f).fillMaxWidth())
-            Column(Modifier.fillMaxSize().padding(vertical = 10.dp, horizontal = 15.dp)) {
-                ServerStatusComponent()
-                Spacer(Modifier.height(10.dp))
-                VerificationCode(runtimeState)
-                error?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = it,
-                        color = Color.White,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(FAILURE_COLOR).padding(10.dp),
-                    )
-                }
-                Spacer(Modifier.height(15.dp))
+            Row(Modifier.fillMaxSize().padding(vertical = 10.dp, horizontal = 15.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(15.dp)).background(Colors.GRAY.color).padding(25.dp),
+                    modifier = Modifier
+                        .weight(0.65f)
+                        .fillMaxHeight()
+                        .clip(PANEL_SHAPE)
+                        .background(Colors.GRAY.color)
+                        .border(1.dp, PANEL_BORDER, PANEL_SHAPE)
+                        .padding(25.dp),
                 ) {
-                    Panel(Localization.getString("devices_connection_available"), Modifier.weight(1f)) {
+                    val paired = registry.devices.filterNot(OperatorDevice::revoked)
+                    DeviceList(Localization.getString("devices_connection_connected"), Modifier.weight(1f)) {
+                        if (paired.isEmpty()) item { EmptyText("devices_paired_empty") }
+                        itemsIndexed(paired, key = { _, device -> device.requestId }) { index, device ->
+                            PairedRow(index + 1, device, onRevoke = { revokeCandidate = device })
+                        }
+                    }
+                    Spacer(Modifier.width(25.dp))
+                    DeviceList(Localization.getString("devices_connection_available"), Modifier.weight(1f)) {
                         if (registry.pending.isEmpty()) item { EmptyText("devices_pending_empty") }
-                        items(registry.pending, key = PendingPairingRequest::requestId) { request ->
+                        itemsIndexed(registry.pending, key = { _, request -> request.requestId }) { index, request ->
                             PendingRow(
+                                index + 1,
                                 request,
                                 onApprove = { decide { approve(request.requestId) } },
                                 onReject = { decide { reject(request.requestId) } },
                             )
                         }
                     }
-                    Spacer(Modifier.width(25.dp))
-                    Panel(Localization.getString("devices_connection_connected"), Modifier.weight(1f)) {
-                        if (registry.devices.isEmpty()) item { EmptyText("devices_paired_empty") }
-                        items(registry.devices, key = OperatorDevice::requestId) { device ->
-                            DeviceRow(device, onRevoke = { revokeCandidate = device })
-                        }
-                    }
                 }
+                Spacer(Modifier.width(25.dp))
+                ServerPanel(runtimeState, error, Modifier.weight(0.35f))
             }
         }
 
@@ -117,7 +126,13 @@ object DevicesConnectionScreen : Screen {
             AlertDialog(
                 onDismissRequest = { revokeCandidate = null },
                 title = { Text(Localization.getString("devices_revoke_title")) },
-                text = { Text(Localization.getString("devices_revoke_text").format(device.surname, platformName(device.platform))) },
+                text = {
+                    Text(
+                        Localization.getString("devices_revoke_text")
+                            .replaceFirst("%s", device.surname)
+                            .replaceFirst("%s", platformName(device.platform)),
+                    )
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         revokeCandidate = null
@@ -131,75 +146,149 @@ object DevicesConnectionScreen : Screen {
         }
     }
 
+    /** "Конфигурация устройств": where judges connect, the code they must see and whether the server accepts work. */
     @Composable
-    private fun VerificationCode(state: ServerRuntimeState) {
-        val code = (state as? ServerRuntimeState.Running)?.verificationCode
-        val text = if (code == null) {
-            Localization.getString("devices_code_unavailable")
-        } else {
-            Localization.getString("devices_code").format("${code.take(3)} ${code.drop(3)}")
+    private fun ServerPanel(state: ServerRuntimeState, error: String?, modifier: Modifier) {
+        val running = state as? ServerRuntimeState.Running
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = modifier
+                .fillMaxHeight()
+                .clip(PANEL_SHAPE)
+                .background(Colors.GRAY.color)
+                .border(1.dp, PANEL_BORDER, PANEL_SHAPE)
+                .padding(25.dp),
+        ) {
+            Text(
+                text = Localization.getString("devices_config_title"),
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(20.dp))
+            if (running == null) {
+                InfoPill(
+                    when (state) {
+                        is ServerRuntimeState.Failed -> Localization.getString("devices_server_failed")
+                        else -> Localization.getString("devices_code_unavailable")
+                    },
+                    background = if (state is ServerRuntimeState.Failed) FAILURE_COLOR else ROW_COLOR,
+                )
+                return@Column
+            }
+            val address = running.addresses.firstOrNull()?.let { "$it:${running.port}" }
+                ?: Localization.getString("devices_server_address_unknown").replace("%s", running.port.toString())
+            InfoPill(Localization.getString("devices_server_address").replace("%s", address))
+            running.addresses.drop(1).forEach { other ->
+                Spacer(Modifier.height(8.dp))
+                InfoPill(Localization.getString("devices_server_address_other").replace("%s", "$other:${running.port}"))
+            }
+            Spacer(Modifier.height(12.dp))
+            InfoPill(
+                Localization.getString("devices_code")
+                    .replace("%s", "${running.verificationCode.take(3)} ${running.verificationCode.drop(3)}"),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = Localization.getString("devices_code_hint"),
+                color = Colors.SECONDARY.color,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.weight(1f))
+            error?.let { InfoPill(it, background = FAILURE_COLOR) }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = Localization.getString("devices_server_running"),
+                color = Colors.SECONDARY.color,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
         }
+    }
+
+    @Composable
+    private fun InfoPill(text: String, background: Color = ROW_COLOR) {
         Text(
             text = text,
-            color = Colors.PRIMARY.color,
-            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(15.dp))
-                .background(Colors.SECONDARY.color)
-                .padding(15.dp)
+                .clip(ROW_SHAPE)
+                .background(background)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
                 .semantics { contentDescription = text },
         )
     }
 
     @Composable
-    private fun Panel(
-        title: String,
-        modifier: Modifier,
-        content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
-    ) {
+    private fun DeviceList(title: String, modifier: Modifier, content: LazyListScope.() -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = modifier.fillMaxSize().clip(RoundedCornerShape(15.dp)).background(Colors.SECONDARY.color).padding(15.dp),
+            modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color).padding(10.dp),
         ) {
-            Text(text = title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(20.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize(), content = content)
+            Text(text = title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(25.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(15.dp), modifier = Modifier.fillMaxSize(), content = content)
         }
     }
 
     @Composable
-    private fun PendingRow(request: PendingPairingRequest, onApprove: () -> Unit, onReject: () -> Unit) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            DeviceText(request.surname, platformName(request.platform), Localization.getString("devices_state_pending"), Modifier.weight(1f))
-            ButtonComponent(text = Localization.getString("devices_approve"), onclick = onApprove)
-            Spacer(Modifier.width(8.dp))
-            ButtonComponent(text = Localization.getString("devices_reject"), style = ButtonStyles.Secondary, onclick = onReject)
+    private fun PendingRow(number: Int, request: PendingPairingRequest, onApprove: () -> Unit, onReject: () -> Unit) {
+        DeviceRow("$number. ${request.surname} - ${platformName(request.platform)}", null) {
+            ActionIcon(Localization.getString("devices_reject"), Res.drawable.cross_icon, size = 22, onClick = onReject)
+            Spacer(Modifier.width(14.dp))
+            ActionIcon(Localization.getString("devices_approve"), Res.drawable.check_icon, size = 30, onClick = onApprove)
         }
     }
 
     @Composable
-    private fun DeviceRow(device: OperatorDevice, onRevoke: () -> Unit) {
-        val state = when {
-            device.revoked -> Localization.getString("devices_state_revoked")
-            device.connectionState == DeviceConnectionState.CONNECTED -> Localization.getString("devices_state_connected")
-            else -> Localization.getString("devices_state_disconnected")
+    private fun PairedRow(number: Int, device: OperatorDevice, onRevoke: () -> Unit) {
+        val connected = device.connectionState == DeviceConnectionState.CONNECTED
+        val state = Localization.getString(if (connected) "devices_state_connected" else "devices_state_disconnected")
+        DeviceRow("$number. ${device.surname} - ${platformName(device.platform)}", state, connected) {
+            ActionIcon(Localization.getString("devices_revoke"), Res.drawable.cross_icon, size = 30, onClick = onRevoke)
         }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            DeviceText(device.surname, platformName(device.platform), state, Modifier.weight(1f))
-            if (!device.revoked) {
-                ButtonComponent(text = Localization.getString("devices_revoke"), style = ButtonStyles.Secondary, onclick = onRevoke)
+    }
+
+    @Composable
+    private fun DeviceRow(title: String, state: String?, connected: Boolean = false, actions: @Composable () -> Unit) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ROW_SHAPE)
+                .background(ROW_COLOR)
+                .padding(horizontal = 12.dp, vertical = 14.dp)
+                .semantics { contentDescription = listOfNotNull(title, state).joinToString(", ") },
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(text = title, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                if (state != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(if (connected) APPROVE_COLOR else Color.LightGray))
+                        Spacer(Modifier.width(6.dp))
+                        Text(text = state, color = Colors.SECONDARY.color, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
+            actions()
         }
     }
 
+    /** Figma check or cross icon; the label names the action for screen readers. */
     @Composable
-    private fun DeviceText(surname: String, platform: String, state: String, modifier: Modifier) {
-        val description = "$surname, $platform, $state"
-        Column(modifier.semantics { contentDescription = description }) {
-            Text(text = surname, color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodyLarge)
-            Text(text = "$platform · $state", color = Colors.PRIMARY.color, style = MaterialTheme.typography.bodySmall)
-        }
+    private fun ActionIcon(label: String, icon: DrawableResource, size: Int, onClick: () -> Unit) {
+        Image(
+            painter = painterResource(icon),
+            contentDescription = label,
+            modifier = Modifier.size(size.dp).clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+        )
     }
 
     @Composable
@@ -213,5 +302,11 @@ object DevicesConnectionScreen : Screen {
         else -> platform
     }
 
+    private val PANEL_SHAPE = RoundedCornerShape(15.dp)
+    private val LIST_SHAPE = RoundedCornerShape(15.dp)
+    private val ROW_SHAPE = RoundedCornerShape(8.dp)
+    private val ROW_COLOR = Color(0xFF6A2BDD)
+    private val PANEL_BORDER = Color(0xFF4B2A8F)
+    private val APPROVE_COLOR = Color(0xFF3FD37B)
     private val FAILURE_COLOR = Color(0xFFB3261E)
 }
