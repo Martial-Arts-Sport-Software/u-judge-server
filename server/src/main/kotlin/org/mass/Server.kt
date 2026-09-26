@@ -976,6 +976,10 @@ class PairingRequests {
         }
     }
 
+    fun deviceIdFor(reconnectCredential: String): String? = synchronized(this) {
+        acceptedByRequestId.values.firstOrNull { it.reconnectCredential == reconnectCredential }?.deviceId
+    }
+
     fun connected(reconnectCredential: String) = synchronized(this) {
         if (isReconnectCredentialActive(reconnectCredential)) {
             connectionsByCredential.merge(reconnectCredential, 1, Int::plus)
@@ -1133,12 +1137,15 @@ fun Application.module(
                 else -> null
             }
             if (rejectionCode != null) {
+                ServerLog.handshakeRejected(rejectionCode)
                 send(Frame.Text(Json.encodeToString(RealtimeHandshakeRejected("handshake_rejected", rejectionCode))))
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, rejectionCode))
                 return@webSocket
             }
             val reconnectCredential = requireNotNull(handshake).reconnectCredential
+            val deviceId = pairingRequests.deviceIdFor(reconnectCredential)
             pairingRequests.connected(reconnectCredential)
+            ServerLog.deviceConnected(deviceId)
             lifecycleStatePublisher.subscribe(this)
             kerugiScorePublisher.subscribe(this)
             kerugiTimerPublisher.subscribe(this)
@@ -1432,8 +1439,12 @@ fun Application.module(
                     val command = runCatching { Json.decodeFromString<RealtimeCommandRequest>(commandText) }.getOrNull()
                     val outcome = command?.let(realtimeCommands::accept) ?: RealtimeCommandOutcome.Rejected("invalid_command")
                     when (outcome) {
-                        is RealtimeCommandOutcome.Acknowledged -> send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                        is RealtimeCommandOutcome.Acknowledged -> {
+                            ServerLog.commandAcknowledged(deviceId, outcome.acknowledgement.eventId)
+                            send(Frame.Text(Json.encodeToString(outcome.acknowledgement)))
+                        }
                         is RealtimeCommandOutcome.Rejected -> {
+                            ServerLog.commandRejected(deviceId, outcome.code)
                             send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
                         }
                     }
@@ -1442,6 +1453,7 @@ fun Application.module(
                 timeoutJob.cancel()
                 heartbeatTracker.disconnected(reconnectCredential)
                 pairingRequests.disconnected(reconnectCredential)
+                ServerLog.deviceDisconnected(deviceId)
                 lifecycleStatePublisher.unsubscribe(this)
                 kerugiScorePublisher.unsubscribe(this)
                 kerugiTimerPublisher.unsubscribe(this)
@@ -1452,6 +1464,7 @@ fun Application.module(
 }
 
 fun main() {
+    ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
     when (val state = Server.start()) {
         is ServerRuntimeState.Running -> println("U'Judge server peer ${state.peerId.value} listens on port ${state.httpPort}")
         else -> System.err.println("U'Judge server did not start: $state")

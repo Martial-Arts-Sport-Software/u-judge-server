@@ -98,7 +98,14 @@ class ServerRuntime(
     fun start(): ServerRuntimeState {
         if (mutableState.value is ServerRuntimeState.Running) return mutableState.value
         mutableState.value = ServerRuntimeState.Starting
-        return startComponents().also { mutableState.value = it }
+        return startComponents().also { state ->
+            mutableState.value = state
+            when (state) {
+                is ServerRuntimeState.Running -> ServerLog.runtimeStarted(state.peerId.value, state.httpPort)
+                is ServerRuntimeState.Failed -> ServerLog.runtimeFailed(state.diagnostic)
+                else -> Unit
+            }
+        }
     }
 
     @Synchronized
@@ -109,6 +116,7 @@ class ServerRuntime(
         httpServer = null
         postgres?.stop()
         postgres = null
+        if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
 
@@ -173,6 +181,7 @@ class ServerRuntime(
             val postgresState = runtime.state
             if (postgresState is PostgresState.Failed && mutableState.value is ServerRuntimeState.Running) {
                 mutableState.value = ServerRuntimeState.Failed(postgresState.diagnostic)
+                ServerLog.runtimeFailed(postgresState.diagnostic)
                 return
             }
         }

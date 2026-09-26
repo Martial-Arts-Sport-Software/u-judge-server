@@ -16,6 +16,11 @@ dependencies {
 
     implementation(libs.kotlinx.coroutinesSwing)
 
+    // Logging: the API here, logback with the JSON file configuration at runtime
+    implementation(libs.slf4j.api)
+    runtimeOnly(libs.logback.classic)
+    testImplementation(libs.logback.classic)
+
     // Postgres & ORM
     implementation(libs.postgresql)
     implementation(libs.exposed.core)

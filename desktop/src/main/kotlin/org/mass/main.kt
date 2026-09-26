@@ -10,7 +10,12 @@ import kotlinx.coroutines.withContext
 import org.mass.State.currentRoute
 import org.mass.locale.Localization
 
-fun main() = application {
+fun main() {
+    ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
+    desktopApplication()
+}
+
+private fun desktopApplication() = application {
     LaunchedEffect(Unit) {
         Runtime.getRuntime().addShutdownHook(Thread(Server::stop))
         withContext(Dispatchers.IO) { Server.start() }
