@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp" android:viewportWidth="120" android:viewportHeight="120">
+    <!-- Phone without a connection: the empty "connected devices" list. -->
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4"
+        android:pathData="M42,12 h36 a8,8 0 0 1 8,8 v80 a8,8 0 0 1 -8,8 h-36 a8,8 0 0 1 -8,-8 v-80 a8,8 0 0 1 8,-8 z" />
+    <path android:strokeColor="#7C45E2" android:strokeWidth="4" android:strokeLineCap="round" android:pathData="M54,21 h12" />
+    <path android:fillColor="#7C45E2" android:pathData="M60,99 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0" />
+    <path android:strokeColor="#BC9DF6" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M45,54 a21,21 0 0 1 30,0 M51,61 a12,12 0 0 1 18,0" />
+    <path android:fillColor="#BC9DF6" android:pathData="M60,68 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0" />
+    <path android:strokeColor="#B0194F" android:strokeWidth="4" android:strokeLineCap="round" android:pathData="M44,78 L76,42" />
+</vector>

@@ -135,13 +135,6 @@ object EntryScreen : Screen {
                         modifier = Modifier.weight(0.5f),
                         enabled = State.judgeSurname.isNotBlank()
                     )
-                    Spacer(Modifier.weight(0.2f))
-                    ButtonComponent(
-                        text = Localization.getString("entry_devices_connection"),
-                        onclick = devicesConnectionOnClick,
-                        modifier = Modifier.weight(0.5f),
-                        enabled = State.judgeSurname.isNotBlank()
-                    )
 
                     Spacer(Modifier.weight(0.3f))
                     Text(

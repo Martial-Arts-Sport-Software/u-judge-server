@@ -56,8 +56,12 @@ compose.desktop {
 
         nativeDistributions {
             appResourcesRootDir.set(preparePostgresResources.map { layout.buildDirectory.dir("app-resources").get() })
-            // From `:desktop:suggestRuntimeModules`; java.sql carries the JDBC API used by the PostgreSQL driver.
-            modules("java.instrument", "java.management", "java.naming", "java.security.jgss", "java.sql", "jdk.unsupported")
+            // From `:desktop:suggestRuntimeModules`; java.sql carries the JDBC API used by the PostgreSQL driver and
+            // jdk.crypto.ec the ECDSA provider of the peer TLS certificate, which jdeps cannot detect.
+            modules(
+                "java.instrument", "java.management", "java.naming", "java.security.jgss", "java.sql", "jdk.crypto.ec",
+                "jdk.unsupported",
+            )
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "UJudgeServer"
             packageVersion = "1.0.0"

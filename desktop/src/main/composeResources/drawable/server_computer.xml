@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp" android:viewportWidth="120" android:viewportHeight="120">
+    <!-- Outline monitor of the operator's computer, drawn in one light stroke. -->
+    <path android:strokeColor="#C9C0D9" android:strokeWidth="4" android:strokeLineJoin="round"
+        android:pathData="M24,20 h72 a8,8 0 0 1 8,8 v44 a8,8 0 0 1 -8,8 h-72 a8,8 0 0 1 -8,-8 v-44 a8,8 0 0 1 8,-8 z" />
+    <path android:fillColor="#C9C0D9" android:pathData="M60,50 m-3.5,0 a3.5,3.5 0 1 0 7,0 a3.5,3.5 0 1 0 -7,0" />
+    <path android:strokeColor="#C9C0D9" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M60,80 v10 M50,90 h20 M38,100 h44" />
+</vector>

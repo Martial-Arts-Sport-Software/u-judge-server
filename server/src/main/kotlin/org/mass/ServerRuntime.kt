@@ -1,10 +1,12 @@
 package org.mass
 
 import com.appstractive.dnssd.publishService
-import io.ktor.server.cio.CIO
-import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.engine.EmbeddedServer
+import io.ktor.server.engine.applicationEnvironment
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.engine.sslConnector
+import io.ktor.server.netty.Netty
+import io.ktor.server.netty.NettyApplicationEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.mass.domain.PeerId
+import org.mass.persistence.JdbcDomainEventStore
 import org.mass.persistence.LocalPeerIdentity
 import org.mass.persistence.ManagedPostgresRuntime
 import org.mass.persistence.PostgresCommand
@@ -23,6 +26,8 @@ import org.mass.persistence.PostgresPlatform
 import org.mass.persistence.PostgresRuntimeConfiguration
 import org.mass.persistence.PostgresState
 import org.mass.replication.JdbcPeerJournal
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -31,11 +36,12 @@ import java.time.Duration
 data class ServerRuntimeConfiguration(
     val installationDirectory: Path?,
     val applicationDataDirectory: Path,
-    val httpPort: Int = DEFAULT_HTTP_PORT,
+    /** The only listener: HTTPS and WSS with the peer certificate (ADR-006). */
+    val port: Int = DEFAULT_PORT,
     val serviceName: String = "JudgeServer-1",
 ) {
     companion object {
-        const val DEFAULT_HTTP_PORT = 8080
+        const val DEFAULT_PORT = 8443
 
         /**
          * Uses `uJudge.postgres.installationDirectory` or the Compose Desktop resources directory for the PostgreSQL bundle,
@@ -68,7 +74,16 @@ sealed interface ServerRuntimeState {
 
     data object Starting : ServerRuntimeState
 
-    data class Running(val httpPort: Int, val peerId: PeerId) : ServerRuntimeState
+    /**
+     * [verificationCode] is shown to the operator and compared with the judge's screen before approval (ADR-006);
+     * [addresses] are this computer's LAN IPv4 addresses a judge can enter manually.
+     */
+    data class Running(
+        val port: Int,
+        val peerId: PeerId,
+        val verificationCode: String,
+        val addresses: List<String> = emptyList(),
+    ) : ServerRuntimeState
 
     /** A persistence or network failure the operator must see; the diagnostic contains no personal data. */
     data class Failed(val diagnostic: String) : ServerRuntimeState
@@ -91,7 +106,7 @@ class ServerRuntime(
         private set
 
     private var postgres: ManagedPostgresRuntime? = null
-    private var httpServer: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
 
     @Synchronized
@@ -101,7 +116,7 @@ class ServerRuntime(
         return startComponents().also { state ->
             mutableState.value = state
             when (state) {
-                is ServerRuntimeState.Running -> ServerLog.runtimeStarted(state.peerId.value, state.httpPort)
+                is ServerRuntimeState.Running -> ServerLog.runtimeStarted(state.peerId.value, state.port)
                 is ServerRuntimeState.Failed -> ServerLog.runtimeFailed(state.diagnostic)
                 else -> Unit
             }
@@ -157,25 +172,48 @@ class ServerRuntime(
         }
         val metadata = ServerMetadata.local(peerId = peerId.value)
         val realtimeCommands = RealtimeCommands(journal = JdbcPeerJournal(peerId.value, dataSource))
-        val pairing = PairingRequests().also { pairingRequests = it }
+        val pairing = try {
+            PairingRequests(JdbcDeviceRegistryJournal(JdbcDomainEventStore(dataSource), peerId))
+        } catch (exception: Exception) {
+            return failStartup("Device registry could not be restored: ${exception.message}")
+        }.also { pairingRequests = it }
 
+        val certificate = try {
+            PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
+        } catch (exception: Exception) {
+            return failStartup("TLS certificate could not be loaded: ${exception.message}")
+        }
         httpServer = try {
-            embeddedServer(CIO, port = configuration.httpPort, host = "0.0.0.0") {
+            embeddedServer(
+                Netty,
+                environment = applicationEnvironment(),
+                configure = {
+                    sslConnector(
+                        keyStore = certificate.keyStore,
+                        keyAlias = PeerCertificate.ALIAS,
+                        keyStorePassword = { certificate.password.toCharArray() },
+                        privateKeyPassword = { certificate.password.toCharArray() },
+                    ) {
+                        host = "0.0.0.0"
+                        port = configuration.port
+                    }
+                },
+            ) {
                 module(metadata = metadata, pairingRequests = pairing, realtimeCommands = realtimeCommands)
             }.start(wait = false)
         } catch (exception: Exception) {
-            return failStartup("HTTP port ${configuration.httpPort} is unavailable: ${exception.message}")
+            return failStartup("HTTPS port ${configuration.port} is unavailable: ${exception.message}")
         }
 
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { runtimeScope ->
             runtimeScope.launch {
                 runCatching {
-                    publishService(type = "_u-judge._tcp", name = configuration.serviceName) { port = configuration.httpPort }
+                    publishService(type = "_u-judge._tcp", name = configuration.serviceName) { port = configuration.port }
                 }
             }
             runtimeScope.launch { supervisePostgres(runtime) }
         }
-        return ServerRuntimeState.Running(configuration.httpPort, peerId)
+        return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode, lanAddresses())
     }
 
     private suspend fun supervisePostgres(runtime: ManagedPostgresRuntime) {
@@ -203,6 +241,18 @@ class ServerRuntime(
                 "into a writable folder such as Applications"
         }
     }
+
+    /** Site-local IPv4 addresses of active non-loopback interfaces, the ones reachable from the venue Wi-Fi. */
+    private fun lanAddresses(): List<String> = runCatching {
+        NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback && !it.isVirtual }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .filter { it.isSiteLocalAddress }
+            .map { it.hostAddress }
+            .distinct()
+            .sorted()
+    }.getOrDefault(emptyList())
 
     private fun failStartup(diagnostic: String): ServerRuntimeState {
         httpServer?.stop(0, 0)

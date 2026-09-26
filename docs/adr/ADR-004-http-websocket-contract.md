@@ -43,7 +43,7 @@ required capabilities.
 Every new mobile device requires explicit operator approval. Approval issues a reconnect credential stored in platform secure
 storage; it remains valid until revocation or rotation. The realtime protocol uses one authenticated WebSocket per paired
 client and typed messages for handshake, pairing status, session snapshot, command/event, ACK, rejection, heartbeat,
-resync request/response, and server notice. TLS uses the local certificate/trust flow selected in ADR-002.
+resync request/response, and server notice. TLS uses the local certificate/trust flow selected in [ADR-006](ADR-006-local-tls-trust.md).
 
 The current server slice keeps approval and rejection in a transport-agnostic local operator application service. It
 transitions a pending request to accepted or rejected idempotently, issues an opaque reconnect credential for acceptance and
@@ -53,9 +53,11 @@ state, device ID and a rejection code only when rejected; it never exposes a sur
 accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
 incompatible-version requests. A client may include an opaque delivery proof with its pairing request; the server retains only
 a SHA-256 hash and includes the reconnect credential in an accepted status response only when the request carries the matching
-proof over a secure transport. The current HTTP-only runtime intentionally does not pass this boundary, so it remains
-credential-free until the locally managed TLS flow is wired. Credential storage, persistent device state and client heartbeat
-scheduling remain unimplemented.
+proof over a secure transport. The production runtime serves only HTTPS/WSS with the peer certificate of ADR-006, so every
+request on it is secure delivery. Pairing decisions are appended to the peer journal with only credential and proof hashes,
+and the registry is rebuilt on start; a credential lost with the process before delivery is re-issued on the next matching
+status request. Message shapes are pinned by the contract fixtures in `server/src/test/resources/contract/v1`, which the
+client checks in CI.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
@@ -129,4 +131,4 @@ ADR-004 can be accepted only after contract/integration tests prove:
 | Reconnect/resync rule | Cursor-based resync and current active-session snapshot before scoring controls re-enable. |
 | Clock-offset method and bound | `clock_sync` echoes the ISO-8601 UTC client send timestamp with UTC server receive/send timestamps; the client calculates the four-timestamp offset/round-trip estimate. The telemetry-validated quality threshold does not change the `1000 ms` coincidence window. |
 | Kerugi coincidence conflict | Same-participant score candidates in one `1000 ms` window resolve to the minimum score, regardless of arrival order; retain all candidates and the resolution for audit. |
-| Transport security | TLS with locally managed certificate and trust flow. |
+| Transport security | TLS with locally managed certificate and trust flow: per-peer self-signed certificate pinned by SPKI hash on first use with an operator-compared verification code ([ADR-006](ADR-006-local-tls-trust.md)). |
