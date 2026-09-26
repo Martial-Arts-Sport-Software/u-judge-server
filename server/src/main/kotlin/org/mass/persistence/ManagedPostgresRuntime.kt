@@ -1,12 +1,15 @@
 package org.mass.persistence
 
 import org.postgresql.ds.PGSimpleDataSource
+import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 enum class PostgresPlatform(private val executableSuffix: String) {
@@ -38,6 +41,8 @@ data class PostgresRuntimeConfiguration(
     val databaseUser: String = "postgres",
 ) {
     val dataDirectory: Path = applicationDataDirectory.resolve("postgres")
+    val logFile: Path = applicationDataDirectory.resolve("logs").resolve("postgres.log")
+    val pgCtlExecutable: Path = executablePath("pg_ctl")
     val initdbCommand: List<String> = listOf(
         executablePath("initdb").toString(),
         "--username",
@@ -83,8 +88,10 @@ class ManagedPostgresRuntime(
     private val managedPostgres: ManagedPostgres = ManagedPostgres(
         command = configuration.postgresCommand,
         provisioner = PostgresProvisioner(configuration.initdbCommand, configuration.dataDirectory),
+        logFile = configuration.logFile,
     ),
     private val readinessTimeout: Duration = Duration.ofSeconds(30),
+    private val orphanStopTimeout: Duration = Duration.ofSeconds(30),
 ) {
     val state: PostgresState
         get() = managedPostgres.state
@@ -101,6 +108,9 @@ class ManagedPostgresRuntime(
         }
 
     fun start(): PostgresState {
+        if (managedPostgres.state !is PostgresState.Running) {
+            stopOrphanedServer()?.let { return managedPostgres.fail(it) }
+        }
         val started = managedPostgres.start()
         if (started !is PostgresState.Running) return started
 
@@ -118,6 +128,38 @@ class ManagedPostgresRuntime(
     fun restart(): PostgresState {
         stop()
         return start()
+    }
+
+    /**
+     * A forced exit of the application (for example `kill -9`) leaves its PostgreSQL child running and holding the cluster.
+     * Stops such a server through `pg_ctl` in fast mode, which lets PostgreSQL finish crash-safe shutdown; a stale lock file
+     * of a dead process is left to PostgreSQL itself. Returns a diagnostic when the cluster cannot be released.
+     */
+    private fun stopOrphanedServer(): String? {
+        val lockFile = configuration.dataDirectory.resolve("postmaster.pid")
+        if (!Files.exists(lockFile)) return null
+        val pid = Files.readAllLines(lockFile).firstOrNull()?.trim()?.toLongOrNull() ?: return null
+        val orphan = ProcessHandle.of(pid).orElse(null) ?: return null
+        val command = orphan.info().command().orElse("")
+        if (!orphan.isAlive || !command.contains("postgres")) return null
+
+        return try {
+            val process = ProcessBuilder(
+                configuration.pgCtlExecutable.toString(), "stop",
+                "-D", configuration.dataDirectory.toString(),
+                "-m", "fast", "-w", "-t", orphanStopTimeout.seconds.toString(),
+            ).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+            if (!process.waitFor(orphanStopTimeout.toMillis() + 5_000, TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly()
+                "PostgreSQL left running by a previous run (PID $pid) did not stop in time"
+            } else if (process.exitValue() != 0 && orphan.isAlive) {
+                "PostgreSQL left running by a previous run (PID $pid) could not be stopped"
+            } else {
+                null
+            }
+        } catch (exception: IOException) {
+            "Unable to stop PostgreSQL left running by a previous run: ${exception.message}"
+        }
     }
 
     private fun waitUntilReady() {
