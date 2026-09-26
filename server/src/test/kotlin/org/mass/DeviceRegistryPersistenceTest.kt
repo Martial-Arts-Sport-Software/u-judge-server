@@ -67,6 +67,21 @@ class DeviceRegistryPersistenceTest {
     }
 
     @Test
+    fun `a request replaced by a newer proof stays replaced after a restart`() {
+        val dataSource = dataSource("registry-superseded")
+        val first = registry(dataSource)
+        val old = assertIs<PairingSubmission.Pending>(first.submit(PairingRequestCommand("android-5", "Safin", "android", "proof-old")))
+        val new = assertIs<PairingSubmission.Pending>(first.submit(PairingRequestCommand("android-5", "Safin", "android", "proof-new")))
+
+        val restarted = registry(dataSource)
+
+        assertEquals(listOf(new.request), restarted.pending())
+        assertEquals(PairingStatusCode.SUPERSEDED, restarted.status(old.request.requestId)?.code)
+        assertIs<PairingApproval.Accepted>(restarted.approve(new.request.requestId))
+        assertTrue(!restarted.status(new.request.requestId, "proof-new", secureDelivery = true)?.reconnectCredential.isNullOrBlank())
+    }
+
+    @Test
     fun `journal stores credential and delivery proof only as hashes`() {
         val dataSource = dataSource("registry-secrets")
         val registry = registry(dataSource)
