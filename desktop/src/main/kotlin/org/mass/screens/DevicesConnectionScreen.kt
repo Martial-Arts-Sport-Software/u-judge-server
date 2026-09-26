@@ -1,10 +1,9 @@
 package org.mass.screens
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -541,24 +540,23 @@ object DevicesConnectionScreen : Screen {
         emptyState: @Composable () -> Unit,
         content: LazyListScope.() -> Unit,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color).padding(10.dp),
-        ) {
-            Spacer(Modifier.height(20.dp))
-            Text(text = title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(25.dp))
-            // The empty illustration and the rows cross-fade, like the popups of the app.
-            AnimatedContent(
-                targetState = empty,
-                transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
-                modifier = Modifier.fillMaxSize(),
-            ) { isEmpty ->
-                if (isEmpty) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) { emptyState() }
-                } else {
+        // The empty illustration is centered in the whole card, not in the space under the title.
+        Box(modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize().padding(10.dp)) {
+                Spacer(Modifier.height(20.dp))
+                Text(text = title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(25.dp))
+                AnimatedVisibility(visible = !empty, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(15.dp), modifier = Modifier.fillMaxSize(), content = content)
                 }
+            }
+            AnimatedVisibility(
+                visible = empty,
+                enter = fadeIn(tween(300)),
+                exit = fadeOut(tween(300)),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) { emptyState() }
             }
         }
     }
