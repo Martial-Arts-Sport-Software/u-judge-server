@@ -413,7 +413,7 @@ object DevicesConnectionScreen : Screen {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
         ) {
-            Image(painterResource(image), contentDescription = null, modifier = Modifier.size(110.dp))
+            Image(painterResource(image), contentDescription = null, modifier = Modifier.size(160.dp))
             Spacer(Modifier.height(16.dp))
             Text(
                 text = Localization.getString(titleKey),
