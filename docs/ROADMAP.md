@@ -203,7 +203,7 @@ architecture. They are not v1 Pilot acceptance gates.
 | `GET /v1/metadata` | Version, capabilities, identity площадки, pairing policy и server time до pairing | - |
 | `POST /v1/pairing-requests` | Валидация фамилии и platform, pending request, dedup retry по device ID; хранится только SHA-256 hash client delivery proof | Persistent registry (I1) |
 | Operator pairing service | Идемпотентные approve/reject/revoke; reconnect credential только при принятии и inactive после отзыва; проекция device ID, platform и `connected`/`disconnected` без surname и credential; anonymous LAN decision/revoke endpoints отсутствуют | Desktop UI и durable state (I1) |
-| `GET /v1/pairing-status/{requestId}` | Typed pending/accepted/rejected; rejection code только для rejected; credential только по matching proof на secure transport | Local TLS отсутствует, поэтому HTTP runtime credential не раскрывает (I3) |
+| `GET /v1/pairing-status/{requestId}` | Typed pending/accepted/rejected; rejection code только для rejected; credential только по matching proof на secure transport | - |
 | `/v1/realtime` handshake | Versioned handshake только для active credential; unknown, revoked и incompatible-version отклоняются без pending state | - |
 | Typed commands и ACK | Bounded envelope, idempotent ACK по event ID; с `JdbcPeerJournal` append до ACK, identical retry после recreation, cursor-based resync; typed rejections для malformed, oversized, post-revocation, conflicting и journal failure | Default server in-memory (I1); client outbox/replay (I3) |
 | `clock_sync` | Echo client timestamp и UTC server receive/send timestamps; invalid timestamp получает typed rejection без закрытия сессии | Client offset и artificial delay (I3) |

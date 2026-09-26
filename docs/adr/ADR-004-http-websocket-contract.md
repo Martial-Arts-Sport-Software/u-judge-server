@@ -53,9 +53,11 @@ state, device ID and a rejection code only when rejected; it never exposes a sur
 accepts a versioned WebSocket handshake only for an active credential and emits a typed rejection for unknown, revoked and
 incompatible-version requests. A client may include an opaque delivery proof with its pairing request; the server retains only
 a SHA-256 hash and includes the reconnect credential in an accepted status response only when the request carries the matching
-proof over a secure transport. The current HTTP-only runtime intentionally does not pass this boundary, so it remains
-credential-free until the locally managed TLS flow is wired. Credential storage, persistent device state and client heartbeat
-scheduling remain unimplemented.
+proof over a secure transport. The production runtime serves only HTTPS/WSS with the peer certificate of ADR-006, so every
+request on it is secure delivery. Pairing decisions are appended to the peer journal with only credential and proof hashes,
+and the registry is rebuilt on start; a credential lost with the process before delivery is re-issued on the next matching
+status request. Message shapes are pinned by the contract fixtures in `server/src/test/resources/contract/v1`, which the
+client checks in CI.
 
 The authenticated connection accepts a bounded typed command envelope with an event ID, sequence, client timestamp, session
 ID and typed payload. It rejects malformed or oversized payloads and rechecks a credential before every command so
