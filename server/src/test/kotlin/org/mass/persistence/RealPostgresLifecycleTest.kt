@@ -1,9 +1,16 @@
 package org.mass.persistence
 
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.mass.applications.CompetitionApplicationsService
+import org.mass.applications.ImportOutcome
+import org.mass.applications.ImportPreparation
+import org.mass.applications.JdbcCompetitionApplicationsJournal
+import org.mass.applications.SyntheticApplications
 import org.mass.replication.JdbcPeerJournal
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Instant
+import java.time.LocalDate
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -100,6 +107,50 @@ class RealPostgresLifecycleTest {
         } finally {
             restartedRun.stop()
             orphan.destroyForcibly()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `imports 500 participants atomically with a backup and restores them after a PostgreSQL restart`() {
+        val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
+        assumeTrue(
+            !installationDirectory.isNullOrBlank(),
+            "Set -DuJudge.postgres.installationDirectory to a PostgreSQL bundle root to run this acceptance test",
+        )
+        val root = createTempDirectory()
+        val runtime = ManagedPostgresRuntime(
+            PostgresRuntimeConfiguration(
+                installationDirectory = Path.of(installationDirectory),
+                applicationDataDirectory = root.resolve("application-data"),
+                port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
+                platform = PostgresPlatform.current(),
+            ),
+        )
+        fun service(): CompetitionApplicationsService {
+            val dataSource = requireNotNull(runtime.dataSource)
+            val store = JdbcDomainEventStore(dataSource)
+            return CompetitionApplicationsService(
+                journal = JdbcCompetitionApplicationsJournal(store, LocalPeerIdentity.loadOrCreate(dataSource)),
+                backup = { CompetitionApplicationsService.backupPath(root.resolve("backups"), Instant.now()).also(store::exportJournal) },
+            )
+        }
+
+        try {
+            assertIs<PostgresState.Running>(runtime.start())
+            val service = service()
+            val preparation = service.prepare("Синтетика", LocalDate.of(2025, 11, 15), SyntheticApplications.files(participants = 500))
+            val applications = assertIs<ImportPreparation.Valid>(preparation).applications
+            val imported = assertIs<ImportOutcome.Imported>(service.import(applications, replaceConfirmed = false))
+            assertTrue(Files.exists(requireNotNull(imported.backup)))
+
+            assertEquals(PostgresState.Stopped, runtime.stop())
+            assertIs<PostgresState.Running>(runtime.start())
+            val restored = requireNotNull(service().current.value)
+            assertEquals(imported.competition, restored)
+            assertEquals(500, restored.applications.athleteCount)
+        } finally {
+            runtime.stop()
             root.toFile().deleteRecursively()
         }
     }
