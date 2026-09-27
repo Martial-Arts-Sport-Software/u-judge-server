@@ -123,7 +123,6 @@ class PairingApprovalTest {
 
         assertTrue(revocation.created)
         assertEquals("revoked", revocation.request.state)
-        assertEquals(accepted.request.reconnectCredential, revocation.request.reconnectCredential)
         assertEquals(false, pairingRequests.isReconnectCredentialActive(accepted.request.reconnectCredential))
         assertEquals(false, repeatedRevocation.created)
     }

@@ -56,6 +56,57 @@ class JdbcDomainEventStore(private val dataSource: DataSource) {
         }
     }
 
+    /** Appends a peer-scoped event, such as a device registry decision, that belongs to no bracket or session. */
+    @Synchronized
+    fun appendPeerEvent(event: PeerScopedEvent): Long = dataSource.connection.use { connection ->
+        connection.inTransaction {
+            val sequence = nextSequence(connection, event.peerId.value)
+            connection.prepareStatement(
+                "INSERT INTO domain_events (event_id, owner_peer_id, sequence, device_id, source, author, occurred_at, " +
+                    "event_type, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ).use { statement ->
+                statement.setString(1, event.eventId.value)
+                statement.setString(2, event.peerId.value)
+                statement.setLong(3, sequence)
+                statement.setString(4, event.deviceId)
+                statement.setString(5, event.source.value)
+                statement.setString(6, event.author)
+                statement.setString(7, event.occurredAt.toString())
+                statement.setString(8, event.type)
+                statement.setString(9, event.payload)
+                statement.executeUpdate()
+            }
+            sequence
+        }
+    }
+
+    /** Peer-scoped events of [types] in journal order. */
+    fun peerEvents(types: Set<String>): List<PeerScopedEvent> = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT * FROM domain_events WHERE session_id IS NULL ORDER BY owner_peer_id, sequence, event_id",
+        ).use { statement ->
+            statement.executeQuery().use { result ->
+                buildList {
+                    while (result.next()) {
+                        if (result.getString("event_type") !in types) continue
+                        add(
+                            PeerScopedEvent(
+                                eventId = EventId(result.getString("event_id")),
+                                peerId = PeerId(result.getString("owner_peer_id")),
+                                deviceId = result.getString("device_id"),
+                                source = EventSource(result.getString("source")),
+                                author = result.getString("author"),
+                                occurredAt = Instant.parse(result.getString("occurred_at")),
+                                type = result.getString("event_type"),
+                                payload = result.getString("payload"),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     /** Returns the stored event when [eventId] belongs to a session-scoped event of one of [types]. */
     fun find(eventId: EventId, types: Set<String>): EventLookup = dataSource.connection.use { connection ->
         connection.prepareStatement("SELECT * FROM domain_events WHERE event_id = ?").use { statement ->
@@ -130,6 +181,17 @@ class JdbcDomainEventStore(private val dataSource: DataSource) {
             autoCommit = originalAutoCommit
         }
     }
+
+    data class PeerScopedEvent(
+        val eventId: EventId,
+        val peerId: PeerId,
+        val deviceId: String,
+        val source: EventSource,
+        val author: String,
+        val occurredAt: Instant,
+        val type: String,
+        val payload: String,
+    )
 
     sealed interface EventLookup {
         data object Missing : EventLookup

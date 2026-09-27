@@ -78,10 +78,9 @@ fun App() {
                     exit = fadeOut()
                 ) {
                     Column(Modifier.padding(10.dp).fillMaxSize()) {
-                        ServerStatusComponent()
+                        ServerStatusComponent(failuresOnly = true)
                         Box(
                             Modifier
-                                .padding(top = 10.dp)
                                 .fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {

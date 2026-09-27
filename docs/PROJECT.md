@@ -110,15 +110,17 @@ Authoritative source для v1 Pilot — предоставленный «Про
 Раздел описывает состояние `main`. Статусы требований, доказательства и следующий инкремент ведутся только в
 [roadmap](ROADMAP.md#инкременты-поставки). `Server.start()` и desktop запускают bundled PostgreSQL 18.6 в application-data каталоге ОС, применяют миграции единого
 журнала `domain_events`, сохраняют peer ID и generic realtime commands, пишут JSON-логи и показывают сбой server/БД оператору;
-после аварийного завершения оставшийся PostgreSQL останавливается при следующем запуске. Реестр устройств, local TLS и экран
-pairing остаются in-memory/незавершёнными до конца I1, Kerugi handlers подключает I2.
+после аварийного завершения оставшийся PostgreSQL останавливается при следующем запуске. Server
+принимает только HTTPS/WSS на `8443` с self-signed сертификатом peer (ADR-006), выдаёт credential только по matching
+delivery proof, хранит решения pairing в журнале, а desktop показывает код сверки и позволяет подтвердить, отклонить и
+отозвать устройство. Kerugi handlers подключает I2.
 
 ### 7.1. Реализовано в server
 
 - Kotlin/JVM desktop-проект с модулями `desktop` и `server`;
 - Compose Desktop shell и навигация между стартовым экраном и экраном устройств;
 - ввод фамилии и переключение русского/английского языка;
-- встроенный Ktor CIO server на `0.0.0.0:8080`;
+- встроенный Ktor Netty server с HTTPS/WSS на `0.0.0.0:8443`;
 - `GET /` и versioned `GET /v1/metadata` с protocol version, capabilities, identity площадки, pairing policy и server time;
 - read-only `GET /v1/health` с typed liveness status без персональных данных или credentials;
 - transport-agnostic immutable `SessionProjection` для lifecycle `prepared`, `running`, `paused`, `completed`, `cancelled`;
@@ -152,14 +154,7 @@ pairing остаются in-memory/незавершёнными до конца 
    `JdbcSessionLifecycleJournal` покрывает durable lifecycle envelope и rebuild при recreation; authenticated transport
    boundary lifecycle commands уже использует общий journal contract, но desktop datasource, separate operator authorization,
    scoring и real-PostgreSQL acceptance ещё не реализованы;
-- secure credential delivery/storage и persistent реестр подключённых устройств; локальный in-memory operator service
-  идемпотентно принимает, отклоняет или отзывает валидный pairing request, выдаёт reconnect credential только при принятии
-  и помечает его inactive после отзыва без anonymous LAN decision endpoint. Он также проецирует approved device ID, platform
-  и in-memory `connected`/`disconnected` state для будущего desktop operator UI;
-- secure credential delivery/storage, persistent device registry, client heartbeat scheduling и reconnect UX; WebSocket
-  handshake проверяет active reconnect credential и отклоняет unknown/revoked credentials. Authenticated `heartbeat`
-  получает typed `heartbeat_ack`, а malformed request — `heartbeat_rejected` без закрытия сессии; server timeout закрывает
-  idle socket с `heartbeat_timeout`, но client scheduling, persistent device state и physical-device evidence не реализованы.
+- physical-device evidence для WebSocket handshake, heartbeat и `heartbeat_timeout` (I3).
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
 - Нормативные длительности Kerugi, golden round policy и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum
   scoring, append-only corrections, операторские throw/spin/Gamjeom actions, warning при 10 Gamjeom и append-only
@@ -292,6 +287,14 @@ Mobile clients                         Mobile clients
 | `285:347` | Редактирование турнирной сетки     |
 
 Макеты определяют состав информации и основные операции, но не заменяют требования к ошибкам, подтверждениям опасных действий, reconnect, аудиту и доступности.
+
+Решения по макетам (26.09.2026):
+
+- Фрейм табло с флагами стран, счётом `1 : 1` и таймером `5:10` - внешний референс, а не экран U'Judge; watcher строится
+  в общей гамме приложения, как экран арбитра.
+- Для конфигурации устройств актуальна версия `V1`; `V2` не реализуется.
+- Экран арбитра desktop и экран судьи client используют одни и те же цвета синего и красного участника; desktop получает
+  их при реализации экранов боя (I2) с теми же значениями, что `Colors.BLUE`/`Colors.RED` в client.
 
 Элемент `Кнопка самоуничтожения` является placeholder и не входит в требования.
 

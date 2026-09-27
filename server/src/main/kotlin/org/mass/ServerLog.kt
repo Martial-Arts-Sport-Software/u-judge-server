@@ -18,7 +18,13 @@ object ServerLog {
     internal fun runtimeFailed(diagnostic: String) = logger.atError().setMessage("runtime_failed")
         .addKeyValue("diagnostic", diagnostic).log()
 
+    internal fun mdnsFailed(address: String, diagnostic: String) = logger.atWarn().setMessage("mdns_publish_failed")
+        .addKeyValue("address", address).addKeyValue("diagnostic", diagnostic).log()
+
     internal fun runtimeStopped() = logger.atInfo().setMessage("runtime_stopped").log()
+
+    internal fun deviceRegistryChanged(change: String, deviceId: String) = logger.atInfo().setMessage("device_registry_changed")
+        .addKeyValue("change", change).addKeyValue("deviceId", deviceId).log()
 
     internal fun handshakeRejected(code: String) = logger.atWarn().setMessage("realtime_handshake_rejected")
         .addKeyValue("code", code).log()

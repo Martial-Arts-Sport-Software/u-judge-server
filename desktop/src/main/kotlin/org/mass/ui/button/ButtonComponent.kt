@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -67,7 +68,8 @@ fun ButtonComponent(
     iconSrc: DrawableResource? = null,
     colorFilter: ColorFilter? = null,
     iconPadding: Dp = 10.dp,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    textStyle: TextStyle? = null,
 ) {
     when(style) {
         ButtonStyles.Icon -> require(iconSrc != null)
@@ -91,7 +93,7 @@ fun ButtonComponent(
                 shape = RoundedCornerShape(5.dp),
                 content = {
                     Text(
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = textStyle ?: MaterialTheme.typography.bodyLarge,
                         text = text!!,
                         textAlign = TextAlign.Center
                     )

@@ -21,6 +21,10 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -130,7 +134,6 @@ data class RevokedPairingRequest(
     val deviceId: String,
     val surname: String,
     val platform: String,
-    val reconnectCredential: String,
     val state: String = "revoked",
 )
 
@@ -153,6 +156,10 @@ enum class PairingStatusState {
 enum class PairingStatusCode {
     @kotlinx.serialization.SerialName("operator_rejected")
     OPERATOR_REJECTED,
+
+    /** The same device sent a newer request, which replaced this one. */
+    @kotlinx.serialization.SerialName("superseded")
+    SUPERSEDED,
 }
 
 @Serializable
@@ -245,7 +252,8 @@ data class RealtimeCommandRequest(
 data class RealtimeCommandAcknowledgement(val type: String, val eventId: String)
 
 @Serializable
-data class RealtimeCommandRejected(val type: String, val code: String)
+/** [eventId] echoes the rejected command's event ID whenever it can be read, so the client can settle that outbox entry. */
+data class RealtimeCommandRejected(val type: String, val code: String, val eventId: String? = null)
 
 @Serializable
 data class RealtimeSessionLifecycleCommandRequest(
@@ -875,165 +883,272 @@ sealed interface RealtimeResyncOutcome {
     data class Rejected(val code: String) : RealtimeResyncOutcome
 }
 
-/** Retains pending judge devices and local operator approval decisions. */
-class PairingRequests {
-    private val pendingByDeviceId = mutableMapOf<String, PendingPairingRequest>()
-    private val acceptedByRequestId = mutableMapOf<String, AcceptedPairingRequest>()
-    private val rejectedByRequestId = mutableMapOf<String, PairingStatus>()
-    private val revokedByRequestId = mutableMapOf<String, RevokedPairingRequest>()
-    private val connectionsByCredential = mutableMapOf<String, Int>()
-    private val deliveryProofHashesByRequestId = mutableMapOf<String, ByteArray>()
+/**
+ * Pending judge devices and local operator decisions. Every decision is appended to [journal] before it takes effect and
+ * the registry is rebuilt from it on start, so approvals and revocations survive a restart. Reconnect credentials and
+ * delivery proofs are kept as SHA-256 hashes; a plaintext credential exists only in memory until it is delivered.
+ */
+class PairingRequests(private val journal: DeviceRegistryJournal = DeviceRegistryJournal.InMemory) {
+    private val devicesByRequestId = linkedMapOf<String, RegisteredDevice>()
+    private val deliverableCredentials = mutableMapOf<String, String>()
+    private val connectionsByCredentialHash = mutableMapOf<String, Int>()
+    private val mutableChanges = MutableStateFlow(0L)
+
+    /** Increments on every registry or connection change so the operator UI can refresh its projection. */
+    val changes: StateFlow<Long> = mutableChanges.asStateFlow()
+
+    init {
+        journal.events().forEach(::applyEvent)
+    }
 
     fun submit(command: PairingRequestCommand): PairingSubmission = synchronized(this) {
         val deviceId = command.deviceId.trim()
         val surname = command.surname.trim()
         val platform = command.platform.lowercase()
         val deliveryProof = command.deliveryProof
-        if (deviceId.isEmpty() || surname.isEmpty() || platform !in setOf("android", "ios") ||
+        if (deviceId.isEmpty() || deviceId.length > MAX_FIELD_LENGTH || surname.isEmpty() ||
+            surname.length > MAX_FIELD_LENGTH || platform !in setOf("android", "ios") ||
             (deliveryProof != null && (deliveryProof.isBlank() || deliveryProof.length > 512))) {
             return PairingSubmission.Rejected
         }
 
-        val existing = pendingByDeviceId[deviceId]
+        val existing = devicesByRequestId.values.firstOrNull { it.deviceId == deviceId && it.state == DeviceState.PENDING }
         if (existing != null) {
-            val existingHash = deliveryProofHashesByRequestId[existing.requestId]
-            if (deliveryProof != null && (existingHash == null || !MessageDigest.isEqual(existingHash, hash(deliveryProof)))) {
-                return PairingSubmission.Rejected
-            }
-            return PairingSubmission.Pending(existing, created = false)
+            val sameProof = deliveryProof == null || existing.deliveryProofHash == hashHex(deliveryProof)
+            if (sameProof) return PairingSubmission.Pending(existing.pending(), created = false)
+            // The device lost its earlier proof (app restarted before approval): the old request can never receive the
+            // credential, so the newer one replaces it and the operator still approves it by the verification code.
+            record(deviceId, DeviceRegistryEvent.Superseded(existing.requestId))
         }
 
-        val request = PendingPairingRequest(
+        val event = DeviceRegistryEvent.Requested(
             requestId = UUID.randomUUID().toString(),
             deviceId = deviceId,
             surname = surname,
             platform = platform,
+            deliveryProofHash = deliveryProof?.let(::hashHex),
         )
-        pendingByDeviceId[deviceId] = request
-        deliveryProof?.let { deliveryProofHashesByRequestId[request.requestId] = hash(it) }
-        PairingSubmission.Pending(request, created = true)
+        record(deviceId, event)
+        PairingSubmission.Pending(devicesByRequestId.getValue(event.requestId).pending(), created = true)
     }
 
     fun pending(): List<PendingPairingRequest> = synchronized(this) {
-        pendingByDeviceId.values.toList()
+        devicesByRequestId.values.filter { it.state == DeviceState.PENDING }.map { it.pending() }
     }
 
     fun approve(requestId: String): PairingApproval = synchronized(this) {
-        acceptedByRequestId[requestId]?.let {
-            return PairingApproval.Accepted(it, created = false)
+        val device = devicesByRequestId[requestId] ?: return PairingApproval.UnknownRequest
+        when (device.state) {
+            DeviceState.ACCEPTED, DeviceState.REVOKED ->
+                PairingApproval.Accepted(device.accepted(deliverableCredential(device)), created = false)
+            DeviceState.PENDING -> {
+                val credential = newReconnectCredential()
+                record(device.deviceId, DeviceRegistryEvent.Approved(requestId, hashHex(credential)))
+                deliverableCredentials[requestId] = credential
+                PairingApproval.Accepted(device.accepted(credential), created = true)
+            }
+            DeviceState.REJECTED -> PairingApproval.UnknownRequest
         }
-        val pendingEntry = pendingByDeviceId.entries.firstOrNull { it.value.requestId == requestId }
-            ?: return PairingApproval.UnknownRequest
-        pendingByDeviceId.remove(pendingEntry.key)
-        val pending = pendingEntry.value
-        val accepted = AcceptedPairingRequest(
-            requestId = pending.requestId,
-            deviceId = pending.deviceId,
-            surname = pending.surname,
-            platform = pending.platform,
-            reconnectCredential = newReconnectCredential(),
-        )
-        acceptedByRequestId[requestId] = accepted
-        PairingApproval.Accepted(accepted, created = true)
     }
 
     fun reject(requestId: String): PairingRejection = synchronized(this) {
-        rejectedByRequestId[requestId]?.let {
-            return PairingRejection.Rejected(it, created = false)
+        val device = devicesByRequestId[requestId] ?: return PairingRejection.UnknownRequest
+        when (device.state) {
+            DeviceState.REJECTED -> PairingRejection.Rejected(device.rejectedStatus(), created = false)
+            DeviceState.PENDING -> {
+                record(device.deviceId, DeviceRegistryEvent.Rejected(requestId))
+                PairingRejection.Rejected(device.rejectedStatus(), created = true)
+            }
+            else -> PairingRejection.UnknownRequest
         }
-        val pendingEntry = pendingByDeviceId.entries.firstOrNull { it.value.requestId == requestId }
-            ?: return PairingRejection.UnknownRequest
-        pendingByDeviceId.remove(pendingEntry.key)
-        val status = PairingStatus(
-            state = PairingStatusState.REJECTED,
-            deviceId = pendingEntry.value.deviceId,
-            code = PairingStatusCode.OPERATOR_REJECTED,
-        )
-        rejectedByRequestId[requestId] = status
-        PairingRejection.Rejected(status, created = true)
     }
 
     fun revoke(requestId: String): PairingRevocation = synchronized(this) {
-        revokedByRequestId[requestId]?.let {
-            return PairingRevocation.Revoked(it, created = false)
+        val device = devicesByRequestId[requestId] ?: return PairingRevocation.UnknownRequest
+        when (device.state) {
+            DeviceState.REVOKED -> PairingRevocation.Revoked(device.revoked(), created = false)
+            DeviceState.ACCEPTED -> {
+                record(device.deviceId, DeviceRegistryEvent.Revoked(requestId))
+                deliverableCredentials.remove(requestId)
+                device.credentialHash?.let(connectionsByCredentialHash::remove)
+                PairingRevocation.Revoked(device.revoked(), created = true)
+            }
+            else -> PairingRevocation.UnknownRequest
         }
-        val accepted = acceptedByRequestId[requestId] ?: return PairingRevocation.UnknownRequest
-        val revoked = RevokedPairingRequest(
-            requestId = accepted.requestId,
-            deviceId = accepted.deviceId,
-            surname = accepted.surname,
-            platform = accepted.platform,
-            reconnectCredential = accepted.reconnectCredential,
-        )
-        revokedByRequestId[requestId] = revoked
-        connectionsByCredential.remove(accepted.reconnectCredential)
-        PairingRevocation.Revoked(revoked, created = true)
     }
 
     fun isReconnectCredentialActive(reconnectCredential: String): Boolean = synchronized(this) {
-        acceptedByRequestId.values.any { accepted ->
-            accepted.reconnectCredential == reconnectCredential && accepted.requestId !in revokedByRequestId
-        }
+        activeDevice(reconnectCredential) != null
     }
 
     fun deviceIdFor(reconnectCredential: String): String? = synchronized(this) {
-        acceptedByRequestId.values.firstOrNull { it.reconnectCredential == reconnectCredential }?.deviceId
+        val credentialHash = hashHex(reconnectCredential)
+        devicesByRequestId.values.firstOrNull { it.credentialHash == credentialHash }?.deviceId
     }
 
     fun connected(reconnectCredential: String) = synchronized(this) {
-        if (isReconnectCredentialActive(reconnectCredential)) {
-            connectionsByCredential.merge(reconnectCredential, 1, Int::plus)
-        }
+        val device = activeDevice(reconnectCredential) ?: return@synchronized
+        connectionsByCredentialHash.merge(requireNotNull(device.credentialHash), 1, Int::plus)
+        mutableChanges.value++
     }
 
     fun disconnected(reconnectCredential: String) = synchronized(this) {
-        val connections = connectionsByCredential[reconnectCredential] ?: return@synchronized
+        val credentialHash = hashHex(reconnectCredential)
+        val connections = connectionsByCredentialHash[credentialHash] ?: return@synchronized
         if (connections == 1) {
-            connectionsByCredential.remove(reconnectCredential)
+            connectionsByCredentialHash.remove(credentialHash)
         } else {
-            connectionsByCredential[reconnectCredential] = connections - 1
+            connectionsByCredentialHash[credentialHash] = connections - 1
         }
+        mutableChanges.value++
     }
 
     fun operatorDevices(): List<OperatorDeviceConnection> = synchronized(this) {
-        acceptedByRequestId.values
-            .asSequence()
-            .filter { it.requestId !in revokedByRequestId }
-            .map {
-                OperatorDeviceConnection(
-                    deviceId = it.deviceId,
-                    platform = it.platform,
-                    connectionState = if (connectionsByCredential[it.reconnectCredential] != null) {
-                        DeviceConnectionState.CONNECTED
-                    } else {
-                        DeviceConnectionState.DISCONNECTED
-                    },
-                )
-            }
+        devicesByRequestId.values
+            .filter { it.state == DeviceState.ACCEPTED }
+            .map { OperatorDeviceConnection(it.deviceId, it.platform, connectionState(it)) }
             .sortedBy(OperatorDeviceConnection::deviceId)
-            .toList()
+    }
+
+    /** In-process projection for the desktop operator, who needs the surname to recognise the judge. */
+    fun operatorRegistry(): OperatorDeviceRegistry = synchronized(this) {
+        OperatorDeviceRegistry(
+            pending = pending(),
+            devices = devicesByRequestId.values
+                .filter { it.state == DeviceState.ACCEPTED || it.state == DeviceState.REVOKED }
+                .map {
+                    OperatorDevice(
+                        requestId = it.requestId,
+                        deviceId = it.deviceId,
+                        surname = it.surname,
+                        platform = it.platform,
+                        connectionState = if (it.state == DeviceState.REVOKED) null else connectionState(it),
+                        revoked = it.state == DeviceState.REVOKED,
+                    )
+                },
+        )
     }
 
     fun status(requestId: String, deliveryProof: String? = null, secureDelivery: Boolean = false): PairingStatus? = synchronized(this) {
-        pendingByDeviceId.values.firstOrNull { it.requestId == requestId }?.let {
-            return PairingStatus(state = PairingStatusState.PENDING, deviceId = it.deviceId)
+        val device = devicesByRequestId[requestId] ?: return null
+        when (device.state) {
+            DeviceState.PENDING -> PairingStatus(state = PairingStatusState.PENDING, deviceId = device.deviceId)
+            DeviceState.REJECTED -> device.rejectedStatus()
+            DeviceState.ACCEPTED, DeviceState.REVOKED -> {
+                val credential = if (device.state == DeviceState.ACCEPTED && secureDelivery && deliveryProof != null &&
+                    device.deliveryProofHash == hashHex(deliveryProof)) {
+                    deliverableCredential(device)
+                } else {
+                    null
+                }
+                PairingStatus(state = PairingStatusState.ACCEPTED, deviceId = device.deviceId, reconnectCredential = credential)
+            }
         }
-        acceptedByRequestId[requestId]?.let {
-            val credential = if (secureDelivery && requestId !in revokedByRequestId && deliveryProof != null &&
-                deliveryProofHashesByRequestId[requestId]?.let { expected -> MessageDigest.isEqual(expected, hash(deliveryProof)) } == true) {
-                it.reconnectCredential
-            } else null
-            return PairingStatus(state = PairingStatusState.ACCEPTED, deviceId = it.deviceId, reconnectCredential = credential)
+    }
+
+    /**
+     * The plaintext credential of this process, or a newly issued one when it was lost with a previous process; issuing
+     * invalidates the credential the device could not have received.
+     */
+    private fun deliverableCredential(device: RegisteredDevice): String {
+        deliverableCredentials[device.requestId]?.let { return it }
+        val credential = newReconnectCredential()
+        record(device.deviceId, DeviceRegistryEvent.CredentialIssued(device.requestId, hashHex(credential)))
+        deliverableCredentials[device.requestId] = credential
+        return credential
+    }
+
+    private fun activeDevice(reconnectCredential: String): RegisteredDevice? {
+        val credentialHash = hashHex(reconnectCredential)
+        return devicesByRequestId.values.firstOrNull { it.state == DeviceState.ACCEPTED && it.credentialHash == credentialHash }
+    }
+
+    private fun connectionState(device: RegisteredDevice) =
+        if (device.credentialHash in connectionsByCredentialHash) DeviceConnectionState.CONNECTED else DeviceConnectionState.DISCONNECTED
+
+    private fun record(deviceId: String, event: DeviceRegistryEvent) {
+        journal.append(deviceId, event)
+        applyEvent(event)
+        ServerLog.deviceRegistryChanged(event::class.simpleName.orEmpty(), deviceId)
+    }
+
+    private fun applyEvent(event: DeviceRegistryEvent) {
+        when (event) {
+            is DeviceRegistryEvent.Requested -> devicesByRequestId[event.requestId] = RegisteredDevice(
+                requestId = event.requestId,
+                deviceId = event.deviceId,
+                surname = event.surname,
+                platform = event.platform,
+                deliveryProofHash = event.deliveryProofHash,
+            )
+            is DeviceRegistryEvent.Approved -> devicesByRequestId[event.requestId]?.let {
+                it.state = DeviceState.ACCEPTED
+                it.credentialHash = event.credentialHash
+            }
+            is DeviceRegistryEvent.CredentialIssued -> devicesByRequestId[event.requestId]?.credentialHash = event.credentialHash
+            is DeviceRegistryEvent.Rejected -> devicesByRequestId[event.requestId]?.state = DeviceState.REJECTED
+            is DeviceRegistryEvent.Superseded -> devicesByRequestId[event.requestId]?.let {
+                it.state = DeviceState.REJECTED
+                it.rejectionCode = PairingStatusCode.SUPERSEDED
+            }
+            is DeviceRegistryEvent.Revoked -> devicesByRequestId[event.requestId]?.state = DeviceState.REVOKED
         }
-        rejectedByRequestId[requestId]
+        mutableChanges.value++
     }
 
     private fun newReconnectCredential(): String = ByteArray(32).also(SecureRandom()::nextBytes).let {
         Base64.getUrlEncoder().withoutPadding().encodeToString(it)
     }
 
-    private fun hash(value: String): ByteArray = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+    private fun hashHex(value: String): String =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    private enum class DeviceState { PENDING, ACCEPTED, REJECTED, REVOKED }
+
+    private class RegisteredDevice(
+        val requestId: String,
+        val deviceId: String,
+        val surname: String,
+        val platform: String,
+        val deliveryProofHash: String?,
+    ) {
+        var state = DeviceState.PENDING
+        var credentialHash: String? = null
+        var rejectionCode = PairingStatusCode.OPERATOR_REJECTED
+
+        fun pending() = PendingPairingRequest(requestId, deviceId, surname, platform)
+
+        fun accepted(credential: String) = AcceptedPairingRequest(requestId, deviceId, surname, platform, credential)
+
+        fun revoked() = RevokedPairingRequest(requestId, deviceId, surname, platform)
+
+        fun rejectedStatus() = PairingStatus(
+            state = PairingStatusState.REJECTED,
+            deviceId = deviceId,
+            code = rejectionCode,
+        )
+    }
+
+    private companion object {
+        const val MAX_FIELD_LENGTH = 255
+    }
 }
+
+/** Desktop operator view of the device registry. */
+data class OperatorDeviceRegistry(
+    val pending: List<PendingPairingRequest>,
+    val devices: List<OperatorDevice>,
+)
+
+data class OperatorDevice(
+    val requestId: String,
+    val deviceId: String,
+    val surname: String,
+    val platform: String,
+    /** Null for a revoked device. */
+    val connectionState: DeviceConnectionState?,
+    val revoked: Boolean,
+)
 
 sealed interface PairingSubmission {
     data class Pending(val request: PendingPairingRequest, val created: Boolean) : PairingSubmission
@@ -1110,9 +1225,6 @@ fun Application.module(
                 }
             }
         }
-        get("/v1/pairing-requests") {
-            call.respond(pairingRequests.pending())
-        }
         get("/v1/pairing-status/{requestId}") {
             val requestId = requireNotNull(call.parameters["requestId"])
             val status = pairingRequests.status(
@@ -1160,6 +1272,11 @@ fun Application.module(
                 }
             }
             var timeoutJob = scheduleHeartbeatTimeout()
+            // Revocation ends the session at once instead of waiting for the device's next message (`DEV-006`).
+            val revocationJob = launch {
+                pairingRequests.changes.first { !pairingRequests.isReconnectCredentialActive(reconnectCredential) }
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "credential_revoked"))
+            }
             try {
                 while (true) {
                     val frame = incoming.receiveCatching().getOrNull() ?: break
@@ -1168,11 +1285,17 @@ fun Application.module(
                         is Frame.Close -> break
                         else -> continue
                     }
+                    val messageEventId = if (commandText.length > 4_096) null else runCatching {
+                        ((Json.parseToJsonElement(commandText) as? JsonObject)?.get("eventId") as? JsonPrimitive)
+                            ?.takeIf(JsonPrimitive::isString)
+                            ?.content
+                    }.getOrNull()
                     if (!pairingRequests.isReconnectCredentialActive(reconnectCredential)) {
+                        ServerLog.commandRejected(deviceId, "invalid_reconnect_credential")
                         send(
                             Frame.Text(
                                 Json.encodeToString(
-                                    RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential"),
+                                    RealtimeCommandRejected("command_rejected", "invalid_reconnect_credential", messageEventId),
                                 ),
                             ),
                         )
@@ -1445,12 +1568,17 @@ fun Application.module(
                         }
                         is RealtimeCommandOutcome.Rejected -> {
                             ServerLog.commandRejected(deviceId, outcome.code)
-                            send(Frame.Text(Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code))))
+                            send(
+                                Frame.Text(
+                                    Json.encodeToString(RealtimeCommandRejected("command_rejected", outcome.code, messageEventId)),
+                                ),
+                            )
                         }
                     }
                 }
             } finally {
                 timeoutJob.cancel()
+                revocationJob.cancel()
                 heartbeatTracker.disconnected(reconnectCredential)
                 pairingRequests.disconnected(reconnectCredential)
                 ServerLog.deviceDisconnected(deviceId)
@@ -1466,7 +1594,10 @@ fun Application.module(
 fun main() {
     ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
     when (val state = Server.start()) {
-        is ServerRuntimeState.Running -> println("U'Judge server peer ${state.peerId.value} listens on port ${state.httpPort}")
+        is ServerRuntimeState.Running -> println(
+            "U'Judge server peer ${state.peerId.value} listens on https://0.0.0.0:${state.port}, " +
+                "verification code ${state.verificationCode}",
+        )
         else -> System.err.println("U'Judge server did not start: $state")
     }
     Runtime.getRuntime().addShutdownHook(Thread(Server::stop))
