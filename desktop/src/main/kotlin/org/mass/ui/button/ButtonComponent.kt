@@ -119,7 +119,7 @@ fun ButtonComponent(
                 content = {
                     Text(
                         text!!,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = textStyle ?: MaterialTheme.typography.bodyLarge,
                         color = if (enabled) Colors.PRIMARY.color
                         else Color.Black.copy(0.3f)
                     )

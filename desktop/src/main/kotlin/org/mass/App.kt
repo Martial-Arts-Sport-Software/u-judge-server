@@ -31,6 +31,7 @@ import org.mass.State.currentRoute
 import org.mass.State.density
 import org.mass.State.navController
 import org.mass.enums.Routes
+import org.mass.screens.BracketsSetupScreen
 import org.mass.screens.DevicesConnectionScreen
 import org.mass.screens.EntryScreen
 import org.mass.ui.TypographyManager.getTypography
@@ -94,6 +95,9 @@ fun App() {
                                 }
                                 animatedComposable(Routes.DEVICES_CONNECTION) {
                                     DevicesConnectionScreen.Load()
+                                }
+                                animatedComposable(Routes.BRACKETS_SETUP) {
+                                    BracketsSetupScreen.Load()
                                 }
                             }
                         }

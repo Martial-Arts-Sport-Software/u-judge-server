@@ -74,7 +74,9 @@ import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
+import org.mass.enums.Routes
 import org.mass.ui.button.ButtonComponent
+import org.mass.ui.button.clickWithTransition
 import org.mass.ui.screen_header.ScreenHeaderComponent
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.check_icon
@@ -430,10 +432,7 @@ object DevicesConnectionScreen : Screen {
         }
     }
 
-    /**
-     * Figma V1 bottom block: confirming the device configuration leads to the next operator step, the bracket import,
-     * which arrives with I4; until then the action is shown disabled with that explanation instead of doing nothing.
-     */
+    /** Figma V1 bottom block: confirming the device configuration leads to the next operator step, the application import. */
     @Composable
     private fun ConfirmBlock() {
         Column(
@@ -446,8 +445,7 @@ object DevicesConnectionScreen : Screen {
         ) {
             ButtonComponent(
                 text = Localization.getString("devices_confirm"),
-                onclick = {},
-                enabled = false,
+                onclick = { clickWithTransition(Routes.BRACKETS_SETUP) },
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall,
             )
