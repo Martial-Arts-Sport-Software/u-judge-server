@@ -295,8 +295,8 @@ object BracketsSetupScreen : Screen {
                             modifier = Modifier.weight(0.55f),
                             empty = errorList == null && selected == null,
                             emptyState = { EmptyState(Res.drawable.empty_preview, "brackets_preview_empty", "brackets_preview_empty_hint") },
-                            // List, bracket and full screen in one line; the bracket views open once the draw made one (I4b).
-                            trailing = if (errorList == null) {
+                            // List/bracket and full screen on their own line; the bracket views open once the draw made one (I4b).
+                            toolbar = if (errorList == null) {
                                 { PreviewNavigation(bracketAvailable = false) }
                             } else {
                                 null
@@ -440,8 +440,13 @@ object BracketsSetupScreen : Screen {
                     modifier = Modifier.clip(ROW_SHAPE).background(Colors.BROWN.color).padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             },
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 SegmentedControl(
                     segments = listOf(
                         Segment(Localization.getString("brackets_view_list"), Res.drawable.list_icon),
@@ -530,7 +535,7 @@ object BracketsSetupScreen : Screen {
         ActionBlock {
             ButtonComponent(
                 text = Localization.getString("brackets_choose_files"),
-                style = ButtonStyles.Outlined,
+                style = ButtonStyles.Secondary,
                 onclick = onChooseFiles,
                 enabled = formReady && !busy,
                 modifier = Modifier.fillMaxWidth(),
@@ -772,8 +777,8 @@ object BracketsSetupScreen : Screen {
     }
 
     /**
-     * A titled light card; when [empty], [emptyState] is centered in the whole card instead of the content. [trailing]
-     * puts controls in the title line, with the title on the left.
+     * A titled light card; when [empty], [emptyState] is centered in the whole card instead of the content. [toolbar] is a
+     * line of controls under the title.
      */
     @Composable
     private fun ListCard(
@@ -782,30 +787,26 @@ object BracketsSetupScreen : Screen {
         modifier: Modifier,
         empty: Boolean,
         emptyState: @Composable () -> Unit,
-        trailing: (@Composable () -> Unit)? = null,
+        toolbar: (@Composable () -> Unit)? = null,
         content: @Composable () -> Unit,
     ) {
         Box(modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize().padding(10.dp)) {
                 Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        horizontalAlignment = if (trailing == null) Alignment.CenterHorizontally else Alignment.Start,
-                        modifier = Modifier.weight(1f).padding(start = if (trailing == null) 0.dp else 6.dp),
-                    ) {
-                        Text(title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        if (subtitle != null && !empty) {
-                            Text(
-                                subtitle,
-                                color = Colors.BROWN.color.copy(alpha = 0.65f),
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = if (trailing == null) TextAlign.Center else TextAlign.Start,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    trailing?.invoke()
+                Text(title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                if (subtitle != null && !empty) {
+                    Text(
+                        subtitle,
+                        color = Colors.BROWN.color.copy(alpha = 0.65f),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                toolbar?.let {
+                    Spacer(Modifier.height(10.dp))
+                    it()
                 }
                 Spacer(Modifier.height(14.dp))
                 AnimatedVisibility(visible = !empty, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
@@ -902,7 +903,7 @@ object BracketsSetupScreen : Screen {
         }
     }
 
-    /** Unselected categories are primary; the selected one is light with a primary outline and text. */
+    /** Unselected categories are primary; the selected one has the secondary button style. */
     @Composable
     private fun CategoryRow(category: ApplicationCategory, selected: Boolean, onClick: () -> Unit) {
         val content = if (selected) Colors.PRIMARY.color else Color.White
@@ -913,7 +914,6 @@ object BracketsSetupScreen : Screen {
                 .fillMaxWidth()
                 .clip(ROW_SHAPE)
                 .background(if (selected) SELECTED_ROW_COLOR else Colors.PRIMARY.color)
-                .border(2.dp, if (selected) Colors.PRIMARY.color else Color.Transparent, ROW_SHAPE)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .clickable(role = Role.Button, onClickLabel = hint, onClick = onClick)
                 .semantics(mergeDescendants = true) {
@@ -1055,7 +1055,8 @@ object BracketsSetupScreen : Screen {
     private val LIST_SHAPE = RoundedCornerShape(15.dp)
     private val CARD_SHAPE = RoundedCornerShape(16.dp)
     private val ROW_SHAPE = RoundedCornerShape(8.dp)
-    private val SELECTED_ROW_COLOR = Color.White.copy(alpha = 0.7f)
+    // The secondary button's fill: a selected category or import reads like `ButtonStyles.Secondary`, text in primary.
+    private val SELECTED_ROW_COLOR = Color.White.copy(alpha = 0.48f)
     private val FAILURE_COLOR = Color(0xFFB3261E)
     private val CARD_COLOR = Color(0xFF27262D)
     private val CARD_BORDER = Color(0xFF34333B)

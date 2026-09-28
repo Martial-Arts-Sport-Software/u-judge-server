@@ -12,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,7 +37,6 @@ import org.mass.enums.Routes
  * @property Primary - primary button with text, first accent
  * @property Secondary - secondary button with text, second accent
  * @property Plain - button with transparent background with text, third accent
- * @property Outlined - transparent button with primary outline and text, for a supporting action next to a primary one
  * @property Icon - button with icon without text
  * @property Solid - button without anything but solid background
  */
@@ -46,7 +44,6 @@ enum class ButtonStyles {
     Primary,
     Secondary,
     Plain,
-    Outlined,
     Icon,
     Solid
 }
@@ -78,34 +75,10 @@ fun ButtonComponent(
         ButtonStyles.Icon -> require(iconSrc != null)
         ButtonStyles.Primary,
         ButtonStyles.Secondary,
-        ButtonStyles.Plain,
-        ButtonStyles.Outlined -> require(text != null)
+        ButtonStyles.Plain -> require(text != null)
         else -> {}
     }
     when(style) {
-        ButtonStyles.Outlined -> {
-            val content = if (enabled) Colors.PRIMARY.color else Colors.PRIMARY.color.copy(alpha = 0.4f)
-            OutlinedButton(
-                modifier = modifier
-                    .fillMaxWidth(0.8f)
-                    .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default),
-                onClick = {
-                    if (!State.isAnimating) onclick()
-                },
-                border = BorderStroke(2.dp, content),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Transparent),
-                shape = RoundedCornerShape(5.dp),
-                enabled = enabled,
-                content = {
-                    Text(
-                        style = textStyle ?: MaterialTheme.typography.bodyLarge,
-                        text = text!!,
-                        color = content,
-                        textAlign = TextAlign.Center
-                    )
-                },
-            )
-        }
         ButtonStyles.Primary -> {
             Button(
                 modifier = modifier
