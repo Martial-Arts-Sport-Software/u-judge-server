@@ -146,8 +146,8 @@ class RealPostgresLifecycleTest {
 
             assertEquals(PostgresState.Stopped, runtime.stop())
             assertIs<PostgresState.Running>(runtime.start())
-            val restored = requireNotNull(service().current.value)
-            assertEquals(imported.competition, restored)
+            val restored = requireNotNull(service().history.value.current)
+            assertEquals(imported.record, restored)
             assertEquals(500, restored.applications.athleteCount)
         } finally {
             runtime.stop()

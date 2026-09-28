@@ -17,7 +17,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Scenario of I4a: import, duplicate re-import, confirmed replacement, restart and rejection (ADR-005). */
+/** Scenario of I4a: import, duplicate re-import, confirmed replacement, restore, reset, restart and rejection (ADR-005). */
 class CompetitionApplicationsServiceTest {
     private val peerId = PeerId("00000000-0000-4000-8000-000000000001")
     private val date = LocalDate.of(2025, 11, 15)
@@ -27,39 +27,53 @@ class CompetitionApplicationsServiceTest {
     fun `operator imports, re-imports safely and finds the competition after a restart`() {
         val store = JdbcDomainEventStore(dataSource("applications-scenario"))
         val service = service(store)
-        assertNull(service.current.value)
+        assertNull(service.history.value.current)
 
         // A broken selection is only a report: nothing is written, no backup is taken.
         val invalid = service.prepare("Первенство", date, listOf(file("broken.xlsx", AthleteRow(coaches = "Петров П.П."))))
         assertEquals("L (ФИО тренера)", assertIs<ImportPreparation.Invalid>(invalid).errors.single().column)
-        assertNull(service.current.value)
+        assertEquals(emptyList(), service.history.value.imports)
         assertEquals(emptyList(), Files.list(backups).use { it.toList() })
 
         // Happy path: backup first, then one journal event.
         val first = valid(service, file("a.xlsx", AthleteRow()))
         val imported = assertIs<ImportOutcome.Imported>(service.import(first, replaceConfirmed = false))
-        assertEquals(1, imported.competition.importCount)
-        assertEquals(first, service.current.value?.applications)
+        assertEquals(first, service.history.value.current?.applications)
         assertEquals(emptyList(), imported.backup!!.readLines())
 
         // The same files again change nothing; other files need confirmation and can be cancelled safely.
         assertEquals(ImportOutcome.AlreadyImported, service.import(first, replaceConfirmed = false))
         val second = valid(service, file("a.xlsx", AthleteRow()), file("b.xlsx", AthleteRow(fullName = "Петров Пётр")))
         val confirmation = assertIs<ImportOutcome.ReplaceNeedsConfirmation>(service.import(second, replaceConfirmed = false))
-        assertEquals(imported.competition, confirmation.current)
-        assertEquals(first, service.current.value?.applications)
+        assertEquals(imported.record, confirmation.current)
+        assertEquals(1, service.history.value.imports.size)
 
         // Confirmed replacement keeps the competition ID and the history; its backup holds the first import.
         val replaced = assertIs<ImportOutcome.Imported>(service.import(second, replaceConfirmed = true))
-        assertEquals(imported.competition.competitionId, replaced.competition.competitionId)
-        assertEquals(2, replaced.competition.importCount)
+        assertEquals(imported.record.competitionId, replaced.record.competitionId)
+        assertEquals(listOf(imported.record, replaced.record), service.history.value.imports)
         val backupRows = replaced.backup!!.readLines().map { Json.parseToJsonElement(it).jsonObject }
         assertEquals(listOf("competition_applications_imported"), backupRows.map { it.getValue("event_type").jsonPrimitive.content })
-        assertEquals(imported.competition.eventId, backupRows.single().getValue("event_id").jsonPrimitive.content)
+        assertEquals(imported.record.eventId, backupRows.single().getValue("event_id").jsonPrimitive.content)
 
-        // Restart: a new service over the same journal restores the latest import.
+        // Restoring the first import is a new history entry that records its origin.
+        val restored = assertIs<ImportOutcome.Imported>(service.restore(imported.record.eventId, replaceConfirmed = true))
+        assertEquals(first, restored.record.applications)
+        assertEquals(imported.record.eventId, restored.record.restoredFromEventId)
+        assertEquals(3, service.history.value.imports.size)
+
+        // Restart: a new service over the same journal restores the history and the current import.
         val restarted = service(JdbcDomainEventStore(dataSource("applications-scenario")))
-        assertEquals(replaced.competition, restarted.current.value)
+        assertEquals(service.history.value, restarted.history.value)
+
+        // Reset: nothing is current, the history stays, and the next import starts a new competition.
+        assertIs<ClearOutcome.Cleared>(restarted.clear())
+        assertNull(restarted.history.value.current)
+        assertEquals(3, restarted.history.value.imports.size)
+        assertEquals(ClearOutcome.NothingToClear, restarted.clear())
+        val afterReset = assertIs<ImportOutcome.Imported>(restarted.import(second, replaceConfirmed = false))
+        assertTrue(afterReset.record.competitionId != imported.record.competitionId)
+        assertEquals(restarted.history.value, service(JdbcDomainEventStore(dataSource("applications-scenario"))).history.value)
     }
 
     @Test
@@ -69,9 +83,9 @@ class CompetitionApplicationsServiceTest {
 
         val outcome = service.import(valid(service, file("a.xlsx", AthleteRow())), replaceConfirmed = false)
 
-        assertEquals(ImportOutcome.Failed("Резервная копия не создана, импорт отменён: disk full"), outcome)
-        assertEquals(emptyList(), journal.imports())
-        assertNull(service.current.value)
+        assertEquals(ImportOutcome.Failed("Резервная копия не создана, загрузка отменена: disk full"), outcome)
+        assertEquals(emptyList(), journal.events())
+        assertNull(service.history.value.current)
     }
 
     @Test

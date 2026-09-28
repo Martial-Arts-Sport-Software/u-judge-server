@@ -17,38 +17,80 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
-/** The journal payload of an import; [replacesEventId] links a re-import to the import it replaces (`IMP-007`). */
-@Serializable
-data class ApplicationsImported(
-    val competitionId: String,
-    val replacesEventId: String?,
-    val applications: CompetitionApplications,
-)
+/** Journal payloads of the applications history (ADR-005); the journal only grows, a reset is an event too. */
+sealed interface ApplicationsEvent {
+    val competitionId: String
 
-data class StoredApplicationsImport(val eventId: String, val occurredAt: Instant, val payload: ApplicationsImported)
+    /**
+     * An import. [replacesEventId] links a re-import to the import it replaces (`IMP-007`); [restoredFromEventId] marks an
+     * earlier import the operator made current again.
+     */
+    @Serializable
+    data class Imported(
+        override val competitionId: String,
+        val replacesEventId: String?,
+        val applications: CompetitionApplications,
+        val restoredFromEventId: String? = null,
+    ) : ApplicationsEvent
 
-/** The imported competition shown to the operator: the latest import and how many imports the history keeps. */
-data class ImportedCompetition(
-    val competitionId: String,
+    /** The operator reset all imports: no competition is current until the next import. */
+    @Serializable
+    data class Cleared(override val competitionId: String, val clearedEventId: String) : ApplicationsEvent
+}
+
+data class StoredApplicationsEvent(val eventId: String, val occurredAt: Instant, val event: ApplicationsEvent)
+
+/** One press of «Загрузить» (or a restore) that changed the competition. */
+data class ImportRecord(
     val eventId: String,
     val importedAt: Instant,
+    val competitionId: String,
     val applications: CompetitionApplications,
-    val importCount: Int,
+    val restoredFromEventId: String?,
 )
 
-interface CompetitionApplicationsJournal {
-    fun append(eventId: String, occurredAt: Instant, payload: ApplicationsImported)
+/** The imports in journal order, newest last, and the one that is current (null after a reset or before any import). */
+data class ApplicationsHistory(val imports: List<ImportRecord>, val currentEventId: String?) {
+    val current: ImportRecord?
+        get() = imports.firstOrNull { it.eventId == currentEventId }
 
-    fun imports(): List<StoredApplicationsImport>
+    companion object {
+        fun of(events: List<StoredApplicationsEvent>): ApplicationsHistory {
+            val imports = mutableListOf<ImportRecord>()
+            var currentEventId: String? = null
+            events.forEach { stored ->
+                when (val event = stored.event) {
+                    is ApplicationsEvent.Imported -> {
+                        imports += ImportRecord(
+                            stored.eventId,
+                            stored.occurredAt,
+                            event.competitionId,
+                            event.applications,
+                            event.restoredFromEventId,
+                        )
+                        currentEventId = stored.eventId
+                    }
+                    is ApplicationsEvent.Cleared -> currentEventId = null
+                }
+            }
+            return ApplicationsHistory(imports, currentEventId)
+        }
+    }
+}
+
+interface CompetitionApplicationsJournal {
+    fun append(eventId: String, occurredAt: Instant, event: ApplicationsEvent)
+
+    fun events(): List<StoredApplicationsEvent>
 
     class InMemory : CompetitionApplicationsJournal {
-        private val stored = mutableListOf<StoredApplicationsImport>()
+        private val stored = mutableListOf<StoredApplicationsEvent>()
 
-        override fun append(eventId: String, occurredAt: Instant, payload: ApplicationsImported) {
-            stored += StoredApplicationsImport(eventId, occurredAt, payload)
+        override fun append(eventId: String, occurredAt: Instant, event: ApplicationsEvent) {
+            stored += StoredApplicationsEvent(eventId, occurredAt, event)
         }
 
-        override fun imports(): List<StoredApplicationsImport> = stored.toList()
+        override fun events(): List<StoredApplicationsEvent> = stored.toList()
     }
 }
 
@@ -56,7 +98,15 @@ class JdbcCompetitionApplicationsJournal(
     private val store: JdbcDomainEventStore,
     private val peerId: PeerId,
 ) : CompetitionApplicationsJournal {
-    override fun append(eventId: String, occurredAt: Instant, payload: ApplicationsImported) {
+    override fun append(eventId: String, occurredAt: Instant, event: ApplicationsEvent) {
+        val (type, payload) = when (event) {
+            is ApplicationsEvent.Imported -> when {
+                event.restoredFromEventId != null -> RESTORED
+                event.replacesEventId != null -> REPLACED
+                else -> IMPORTED
+            } to json.encodeToString(event)
+            is ApplicationsEvent.Cleared -> CLEARED to json.encodeToString(event)
+        }
         store.appendPeerEvent(
             JdbcDomainEventStore.PeerScopedEvent(
                 eventId = EventId(eventId),
@@ -65,57 +115,103 @@ class JdbcCompetitionApplicationsJournal(
                 source = EventSource("operator"),
                 author = "operator",
                 occurredAt = occurredAt,
-                type = if (payload.replacesEventId == null) IMPORTED else REPLACED,
-                payload = json.encodeToString(payload),
-                competitionId = CompetitionId(payload.competitionId),
+                type = type,
+                payload = payload,
+                competitionId = CompetitionId(event.competitionId),
             ),
         )
     }
 
-    override fun imports(): List<StoredApplicationsImport> = store.peerEvents(setOf(IMPORTED, REPLACED)).map { stored ->
-        StoredApplicationsImport(stored.eventId.value, stored.occurredAt, json.decodeFromString(stored.payload))
-    }
+    override fun events(): List<StoredApplicationsEvent> =
+        store.peerEvents(setOf(IMPORTED, REPLACED, RESTORED, CLEARED)).map { stored ->
+            val event: ApplicationsEvent = if (stored.type == CLEARED) {
+                json.decodeFromString<ApplicationsEvent.Cleared>(stored.payload)
+            } else {
+                json.decodeFromString<ApplicationsEvent.Imported>(stored.payload)
+            }
+            StoredApplicationsEvent(stored.eventId.value, stored.occurredAt, event)
+        }
 
     private companion object {
         const val IMPORTED = "competition_applications_imported"
         const val REPLACED = "competition_applications_replaced"
+        const val RESTORED = "competition_applications_restored"
+        const val CLEARED = "competition_applications_cleared"
         val json = Json { explicitNulls = false }
     }
 }
 
 sealed interface ImportOutcome {
-    data class Imported(val competition: ImportedCompetition, val backup: Path?) : ImportOutcome
+    data class Imported(val record: ImportRecord, val backup: Path?) : ImportOutcome
 
-    /** The same files with the same content are already the current import; nothing was written (`IMP-007`). */
+    /** The same applications are already current; nothing was written, so the history has no duplicates (`IMP-007`). */
     data object AlreadyImported : ImportOutcome
 
-    /** A competition is already imported; the operator must confirm the replacement or cancel it safely (`IMP-007`). */
-    data class ReplaceNeedsConfirmation(val current: ImportedCompetition) : ImportOutcome
+    /** A competition is already current; the operator must confirm the replacement or cancel it safely (`IMP-007`). */
+    data class ReplaceNeedsConfirmation(val current: ImportRecord) : ImportOutcome
 
-    /** The backup or the journal write failed; the previous competition stays current (`IMP-006`, `IMP-008`). */
+    /** The backup or the journal write failed; the previous state stays current (`IMP-006`, `IMP-008`). */
     data class Failed(val diagnostic: String) : ImportOutcome
+}
+
+sealed interface ClearOutcome {
+    data class Cleared(val backup: Path?) : ClearOutcome
+
+    data object NothingToClear : ClearOutcome
+
+    data class Failed(val diagnostic: String) : ClearOutcome
 }
 
 /**
  * Operator import of competition applications (ADR-005): validates the selected files, backs up the journal and appends the
- * whole competition as one event. The current competition is always rebuilt from the latest import in the journal.
+ * whole competition as one event. The history keeps every import; the operator can make an earlier one current again or
+ * reset them all, each as a new journal event after a backup.
  */
 class CompetitionApplicationsService(
     private val journal: CompetitionApplicationsJournal,
-    /** Writes the journal backup before an import and returns its path; null when no backup is kept (tests). */
+    /** Writes the journal backup before a change and returns its path; null when no backup is kept (tests). */
     private val backup: (() -> Path)?,
     private val applicationImport: ApplicationImport = ApplicationImport(),
     private val now: () -> Instant = Instant::now,
 ) {
-    private val mutableCurrent = MutableStateFlow(project(journal.imports()))
-    val current: StateFlow<ImportedCompetition?> = mutableCurrent.asStateFlow()
+    private val mutableHistory = MutableStateFlow(ApplicationsHistory.of(journal.events()))
+    val history: StateFlow<ApplicationsHistory> = mutableHistory.asStateFlow()
 
     fun prepare(competitionName: String, competitionDate: LocalDate, files: List<ApplicationFileInput>): ImportPreparation =
         applicationImport.prepare(competitionName, competitionDate, files)
 
     @Synchronized
-    fun import(applications: CompetitionApplications, replaceConfirmed: Boolean): ImportOutcome {
-        val current = mutableCurrent.value
+    fun import(applications: CompetitionApplications, replaceConfirmed: Boolean): ImportOutcome =
+        append(applications, replaceConfirmed, restoredFromEventId = null)
+
+    /** Makes the import [eventId] of the history current again, as a new import that records where it came from. */
+    @Synchronized
+    fun restore(eventId: String, replaceConfirmed: Boolean): ImportOutcome {
+        val record = mutableHistory.value.imports.firstOrNull { it.eventId == eventId }
+            ?: return ImportOutcome.Failed("Загрузка не найдена в истории")
+        return append(record.applications, replaceConfirmed, restoredFromEventId = eventId)
+    }
+
+    /** Resets all imports: nothing is current afterwards, the history and the backup keep every import. */
+    @Synchronized
+    fun clear(): ClearOutcome {
+        val current = mutableHistory.value.current ?: return ClearOutcome.NothingToClear
+        val backupPath = try {
+            backup?.invoke()
+        } catch (exception: Exception) {
+            return ClearOutcome.Failed("Резервная копия не создана, сброс отменён: ${exception.message}")
+        }
+        return try {
+            journal.append(UUID.randomUUID().toString(), now(), ApplicationsEvent.Cleared(current.competitionId, current.eventId))
+            mutableHistory.value = ApplicationsHistory.of(journal.events())
+            ClearOutcome.Cleared(backupPath)
+        } catch (exception: Exception) {
+            ClearOutcome.Failed("Сброс не сохранён: ${exception.message}")
+        }
+    }
+
+    private fun append(applications: CompetitionApplications, replaceConfirmed: Boolean, restoredFromEventId: String?): ImportOutcome {
+        val current = mutableHistory.value.current
         if (current != null) {
             if (current.applications == applications) return ImportOutcome.AlreadyImported
             if (!replaceConfirmed) return ImportOutcome.ReplaceNeedsConfirmation(current)
@@ -123,37 +219,29 @@ class CompetitionApplicationsService(
         val backupPath = try {
             backup?.invoke()
         } catch (exception: Exception) {
-            return ImportOutcome.Failed("Резервная копия не создана, импорт отменён: ${exception.message}")
+            return ImportOutcome.Failed("Резервная копия не создана, загрузка отменена: ${exception.message}")
         }
-        val payload = ApplicationsImported(
+        val eventId = UUID.randomUUID().toString()
+        val event = ApplicationsEvent.Imported(
             competitionId = current?.competitionId ?: CompetitionId.new().value,
             replacesEventId = current?.eventId,
             applications = applications,
+            restoredFromEventId = restoredFromEventId,
         )
         try {
-            journal.append(UUID.randomUUID().toString(), now(), payload)
+            journal.append(eventId, now(), event)
         } catch (exception: Exception) {
-            return ImportOutcome.Failed("Импорт не сохранён: ${exception.message}")
+            return ImportOutcome.Failed("Загрузка не сохранена: ${exception.message}")
         }
-        val imported = checkNotNull(project(journal.imports()))
-        mutableCurrent.value = imported
-        return ImportOutcome.Imported(imported, backupPath)
-    }
-
-    private fun project(imports: List<StoredApplicationsImport>): ImportedCompetition? = imports.lastOrNull()?.let { latest ->
-        ImportedCompetition(
-            competitionId = latest.payload.competitionId,
-            eventId = latest.eventId,
-            importedAt = latest.occurredAt,
-            applications = latest.payload.applications,
-            importCount = imports.size,
-        )
+        val history = ApplicationsHistory.of(journal.events())
+        mutableHistory.value = history
+        return ImportOutcome.Imported(checkNotNull(history.current), backupPath)
     }
 
     companion object {
         private val backupTimestamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneOffset.UTC)
 
-        /** The backup file of an import started at [instant]: `<backups>/20260927-101500-123-before-import.jsonl`. */
+        /** The backup file of a change started at [instant]: `<backups>/20260927-101500-123-before-import.jsonl`. */
         fun backupPath(directory: Path, instant: Instant): Path =
             directory.resolve("${backupTimestamp.format(instant)}-before-import.jsonl")
     }

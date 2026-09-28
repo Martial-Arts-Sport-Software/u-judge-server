@@ -40,9 +40,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -76,6 +74,7 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.mass.enums.Routes
 import org.mass.ui.button.ButtonComponent
+import org.mass.ui.dialog.ConfirmDialogComponent
 import org.mass.ui.button.clickWithTransition
 import org.mass.ui.screen_header.ScreenHeaderComponent
 import u_judge_server.desktop.generated.resources.Res
@@ -157,25 +156,18 @@ object DevicesConnectionScreen : Screen {
         }
 
         revokeCandidate?.let { device ->
-            AlertDialog(
-                onDismissRequest = { revokeCandidate = null },
-                title = { Text(Localization.getString("devices_revoke_title")) },
-                text = {
-                    Text(
-                        Localization.getString("devices_revoke_text")
-                            .replaceFirst("%s", device.surname)
-                            .replaceFirst("%s", platformName(device.platform)),
-                    )
+            ConfirmDialogComponent(
+                title = Localization.getString("devices_revoke_title"),
+                text = Localization.getString("devices_revoke_text")
+                    .replaceFirst("%s", device.surname)
+                    .replaceFirst("%s", platformName(device.platform)),
+                confirmText = Localization.getString("devices_revoke"),
+                cancelText = Localization.getString("devices_cancel"),
+                onConfirm = {
+                    revokeCandidate = null
+                    decide { revoke(device.requestId) }
                 },
-                confirmButton = {
-                    TextButton(onClick = {
-                        revokeCandidate = null
-                        decide { revoke(device.requestId) }
-                    }) { Text(Localization.getString("devices_revoke")) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { revokeCandidate = null }) { Text(Localization.getString("devices_cancel")) }
-                },
+                onCancel = { revokeCandidate = null },
             )
         }
     }
