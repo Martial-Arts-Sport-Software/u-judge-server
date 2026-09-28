@@ -31,6 +31,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,10 +75,23 @@ import org.mass.applications.CompetitionApplications
 import org.mass.applications.ImportOutcome
 import org.mass.applications.ImportPreparation
 import org.mass.applications.ImportRecord
+import org.mass.draw.CategoryDraw
+import org.mass.draw.CategoryDrawState
+import org.mass.draw.CategoryStatus
+import org.mass.draw.CompetitionDrawService
+import org.mass.draw.DrawBoard
+import org.mass.draw.DrawFormat
+import org.mass.draw.DrawMethod
+import org.mass.draw.DrawOutcome
+import org.mass.draw.DrawRejection
+import org.mass.draw.DrawSystem
+import org.mass.draw.SeparationCriterion
+import org.mass.draw.drawKey
 import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
+import org.mass.ui.bracket.BracketComponent
 import org.mass.ui.dialog.ConfirmDialogComponent
 import org.mass.ui.input.TextInputComponent
 import org.mass.ui.screen_header.ScreenHeaderComponent
@@ -98,9 +113,10 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 /**
- * «Настройка турнирных сеток» (I4a, ADR-005). The upload tab takes the competition name and date and several application
- * files; «Загрузить» checks them against «Требования к заполнению заявок» and imports them in one step. The history tab
- * lists every import, lets the operator view or restore one, reset them all, and holds the draw of I4b.
+ * «Настройка турнирных сеток» (I4a, I4b; ADR-005, ADR-007, ADR-008). The upload tab takes the competition name and date and
+ * several application files; «Загрузить» checks them against «Требования к заполнению заявок» and imports them in one step.
+ * The history tab lists every import, lets the operator view or restore one, reset them all, and holds the draw of the
+ * current import: previews, «Перемешать», the system per category, «Подтвердить», and swaps in the preview list.
  */
 object BracketsSetupScreen : Screen {
     private enum class Tab(val key: String) { UPLOAD("brackets_tab_upload"), HISTORY("brackets_tab_history") }
@@ -110,13 +126,31 @@ object BracketsSetupScreen : Screen {
         data class Replace(val applications: CompetitionApplications, val current: ImportRecord) : Confirmation
         data class Restore(val record: ImportRecord, val number: Int) : Confirmation
         data object Reset : Confirmation
+
+        /** «Подтвердить» replaces the confirmed draw of [categories] categories that were shuffled again. */
+        data class ReplaceDraws(val categories: Int) : Confirmation
     }
+
+    /**
+     * Unsaved swaps of one category: two clicks swap two entries locally; «Сохранить» sends them all, «Назад без сохранения»
+     * drops them. [swapped] is the last pair, highlighted as in HapkiPRO.
+     */
+    private data class Editing(
+        val categoryId: String,
+        val draw: CategoryDraw,
+        val swaps: List<Pair<String, String>> = emptyList(),
+        val picked: String? = null,
+        val swapped: Pair<String, String>? = null,
+    )
 
     @Composable
     override fun Load() {
         val runtimeState by Server.runtime.state.collectAsState()
         val service = remember(runtimeState) { Server.runtime.competitionApplications }
         val history by (service?.history ?: remember { MutableStateFlow(ApplicationsHistory(emptyList(), null)) }).collectAsState()
+        val draws = remember(runtimeState) { Server.runtime.competitionDraws }
+        val revision by (draws?.revision ?: remember { MutableStateFlow(0L) }).collectAsState()
+        val board = remember(history, revision, draws) { draws?.board() ?: DrawBoard(null, DrawMethod(), emptyList()) }
         val scope = rememberCoroutineScope()
 
         var tab by remember { mutableStateOf(Tab.UPLOAD) }
@@ -129,6 +163,8 @@ object BracketsSetupScreen : Screen {
         var busy by remember { mutableStateOf(false) }
         var toast by remember { mutableStateOf<Toast?>(null) }
         var confirmation by remember { mutableStateOf<Confirmation?>(null) }
+        var bracketView by remember { mutableStateOf(false) }
+        var editing by remember { mutableStateOf<Editing?>(null) }
 
         val formReady = nameError(competitionName) == null && parseDate(dateText) != null
 
@@ -185,6 +221,26 @@ object BracketsSetupScreen : Screen {
             }
         }
 
+        /** Runs a draw command off the UI thread and reports a refusal or a failed write as an error toast. */
+        fun drawCommand(success: String? = null, onDone: () -> Unit = {}, action: CompetitionDrawService.() -> DrawOutcome) {
+            val drawService = draws ?: return
+            run {
+                when (val outcome = withContext(Dispatchers.IO) { drawService.action() }) {
+                    DrawOutcome.Done -> {
+                        onDone()
+                        success?.let { toast = Toast(it) }
+                    }
+                    is DrawOutcome.Rejected -> toast = Toast(rejection(outcome.reason), error = true)
+                    is DrawOutcome.Failed -> toast = Toast(outcome.diagnostic, error = true)
+                }
+            }
+        }
+
+        fun confirmDraws() {
+            val count = board.previews
+            drawCommand(Localization.getString("brackets_draw_confirmed").replace("%d", count.toString())) { confirm() }
+        }
+
         fun confirm(action: Confirmation) {
             val importService = service ?: return
             confirmation = null
@@ -203,6 +259,7 @@ object BracketsSetupScreen : Screen {
                         ClearOutcome.NothingToClear -> Unit
                         is ClearOutcome.Failed -> toast = Toast(outcome.diagnostic, error = true)
                     }
+                    is Confirmation.ReplaceDraws -> Unit
                 }
             }
         }
@@ -210,6 +267,13 @@ object BracketsSetupScreen : Screen {
         val viewed = history.imports.firstOrNull { it.eventId == viewedEventId } ?: history.current
         val shown = viewed?.applications
         val selected = shown?.categories?.firstOrNull { it.id == selectedCategoryId } ?: shown?.categories?.firstOrNull()
+        // The draw belongs to the current import; an import opened from the history shows only its athletes.
+        val drawing = viewed != null && viewed.eventId == history.currentEventId
+        val drawStates = if (drawing) board.categories.associateBy { it.category.id } else emptyMap()
+        val selectedState = selected?.let { drawStates[it.id] }
+        val editingHere = editing?.takeIf { it.categoryId == selected?.id && selectedState?.shown != null }
+        val shownDraw = editingHere?.draw ?: selectedState?.shown
+        val bracketAvailable = shownDraw?.format == DrawFormat.ELIMINATION || shownDraw?.format == DrawFormat.ROUND_ROBIN
 
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             ScreenHeaderComponent(modifier = Modifier.fillMaxHeight(0.08f).fillMaxWidth())
@@ -257,6 +321,24 @@ object BracketsSetupScreen : Screen {
                                 onRestore = { record -> confirmation = Confirmation.Restore(record, history.imports.indexOf(record) + 1) },
                                 onReset = { confirmation = Confirmation.Reset },
                                 enabled = !busy && service != null,
+                                drawBlock = {
+                                    DrawBlock(
+                                        board = board.takeIf { drawing },
+                                        selected = selectedState,
+                                        enabled = !busy && draws != null && editingHere == null,
+                                        onMethod = { method -> drawCommand { setMethod(method) } },
+                                        onSystem = { system -> selectedState?.let { state -> drawCommand { setSystem(state.category.id, system) } } },
+                                        onDrawAll = { drawCommand { drawAll() } },
+                                        onShuffle = { selectedState?.let { state -> drawCommand { shuffle(state.category.id) } } },
+                                        onConfirm = {
+                                            val replacing = board.categories.count { state ->
+                                                state.preview != null && state.confirmed?.draw?.entryKeys?.toSet() ==
+                                                    state.category.entries.map { it.drawKey }.toSet()
+                                            }
+                                            if (replacing > 0) confirmation = Confirmation.ReplaceDraws(replacing) else confirmDraws()
+                                        },
+                                    )
+                                },
                             )
                         }
                     }
@@ -279,7 +361,15 @@ object BracketsSetupScreen : Screen {
                             ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { state ->
                                 LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                                     itemsIndexed(shown?.categories.orEmpty(), key = { _, category -> category.id }) { _, category ->
-                                        CategoryRow(category, selected = category.id == selected?.id, onClick = { selectedCategoryId = category.id })
+                                        CategoryRow(
+                                            category,
+                                            state = drawStates[category.id],
+                                            selected = category.id == selected?.id,
+                                            onClick = {
+                                                if (category.id != selected?.id) editing = null
+                                                selectedCategoryId = category.id
+                                            },
+                                        )
                                     }
                                 }
                             }
@@ -296,14 +386,74 @@ object BracketsSetupScreen : Screen {
                             modifier = Modifier.weight(0.55f),
                             empty = errorList == null && selected == null,
                             emptyState = { EmptyState(Res.drawable.empty_preview, "brackets_preview_empty", "brackets_preview_empty_hint") },
-                            // List/bracket and full screen on their own line; the bracket views open once the draw made one (I4b).
+                            // List/bracket and full screen on their own line; the bracket view opens once the draw made one.
                             toolbar = if (errorList == null) {
-                                { PreviewNavigation(bracketAvailable = false) }
+                                {
+                                    PreviewNavigation(
+                                        bracketAvailable = bracketAvailable,
+                                        bracketSelected = bracketView && bracketAvailable,
+                                        onSelect = { bracket ->
+                                            bracketView = bracket
+                                            if (bracket) editing = null
+                                        },
+                                    )
+                                    if (selectedState?.shown != null && shownDraw != null && !(bracketView && bracketAvailable)) {
+                                        Spacer(Modifier.height(8.dp))
+                                        EditBar(
+                                            editing = editingHere,
+                                            locked = selectedState.status == CategoryStatus.STARTED,
+                                            editable = shownDraw.entryKeys.size > 1,
+                                            enabled = !busy,
+                                            onEdit = { editing = Editing(selectedState.category.id, shownDraw) },
+                                            onSave = {
+                                                val pending = editingHere ?: return@EditBar
+                                                if (pending.swaps.isEmpty()) {
+                                                    editing = null
+                                                } else {
+                                                    drawCommand(Localization.getString("brackets_edit_saved"), onDone = { editing = null }) {
+                                                        swap(pending.categoryId, pending.swaps)
+                                                    }
+                                                }
+                                            },
+                                            onBack = { editing = null },
+                                        )
+                                    }
+                                }
                             } else {
                                 null
                             },
                         ) {
-                            if (errorList != null) ErrorList(errorList) else selected?.let { CategoryPreview(it) }
+                            when {
+                                errorList != null -> ErrorList(errorList)
+                                selected == null -> Unit
+                                shownDraw == null -> CategoryPreview(selected)
+                                bracketView && bracketAvailable -> BracketComponent(
+                                    draw = shownDraw,
+                                    entries = selected.entries,
+                                    clashes = selectedState?.clashes.orEmpty().flatMap { listOf(it.first, it.second) }.toSet(),
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                                else -> DrawList(
+                                    category = selected,
+                                    draw = shownDraw,
+                                    state = selectedState,
+                                    editing = editingHere,
+                                    onPick = { key ->
+                                        val pending = editingHere ?: return@DrawList
+                                        val picked = pending.picked
+                                        editing = when {
+                                            picked == null -> pending.copy(picked = key, swapped = null)
+                                            picked == key -> pending.copy(picked = null)
+                                            else -> pending.copy(
+                                                draw = pending.draw.swap(picked, key),
+                                                swaps = pending.swaps + (picked to key),
+                                                picked = null,
+                                                swapped = picked to key,
+                                            )
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -341,6 +491,17 @@ object BracketsSetupScreen : Screen {
                 confirmText = Localization.getString("brackets_reset"),
                 cancelText = Localization.getString("devices_cancel"),
                 onConfirm = { confirm(Confirmation.Reset) },
+                onCancel = { confirmation = null },
+            )
+            is Confirmation.ReplaceDraws -> ConfirmDialogComponent(
+                title = Localization.getString("brackets_replace_draws_title"),
+                text = Localization.getString("brackets_replace_draws_text").replace("%d", pending.categories.toString()),
+                confirmText = Localization.getString("brackets_replace_draws"),
+                cancelText = Localization.getString("devices_cancel"),
+                onConfirm = {
+                    confirmation = null
+                    confirmDraws()
+                },
                 onCancel = { confirmation = null },
             )
             null -> Unit
@@ -425,13 +586,13 @@ object BracketsSetupScreen : Screen {
     }
 
     /**
-     * The preview line of the mockup: list or bracket view and the full screen view. The bracket views need a bracket, which
-     * the draw of I4b produces, so until then they are disabled and say why.
+     * The preview line of the mockup: list or bracket view and the full screen view. The bracket view needs a drawn
+     * elimination or round robin; the full screen view comes with the bout numbers, so until then it is disabled and says why.
      */
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun PreviewNavigation(bracketAvailable: Boolean) {
-        val hint = Localization.getString("brackets_bracket_after_draw")
+    private fun PreviewNavigation(bracketAvailable: Boolean, bracketSelected: Boolean, onSelect: (Boolean) -> Unit) {
+        val hint = Localization.getString(if (bracketAvailable) "brackets_fullscreen_next" else "brackets_bracket_after_draw")
         TooltipArea(
             tooltip = {
                 Text(
@@ -453,17 +614,17 @@ object BracketsSetupScreen : Screen {
                         Segment(Localization.getString("brackets_view_list"), Res.drawable.list_icon),
                         Segment(Localization.getString("brackets_view_bracket"), Res.drawable.bracket_icon, enabled = bracketAvailable),
                     ),
-                    selectedIndex = 0,
-                    onSelect = {},
+                    selectedIndex = if (bracketSelected) 1 else 0,
+                    onSelect = { onSelect(it == 1) },
                     dark = false,
                     fill = false,
                 )
-                val content = if (bracketAvailable) Colors.PRIMARY.color else Colors.PRIMARY.color.copy(alpha = 0.4f)
+                val content = Colors.PRIMARY.color.copy(alpha = 0.4f)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(ROW_SHAPE)
-                        .background(Color.White.copy(alpha = if (bracketAvailable) 0.9f else 0.5f))
+                        .background(Color.White.copy(alpha = 0.5f))
                         .border(1.dp, content, ROW_SHAPE)
                         .padding(horizontal = 12.dp, vertical = 9.dp)
                         .semantics { contentDescription = Localization.getString("brackets_fullscreen") },
@@ -471,6 +632,57 @@ object BracketsSetupScreen : Screen {
                     Image(painterResource(Res.drawable.fullscreen_icon), contentDescription = null, colorFilter = ColorFilter.tint(content), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(Localization.getString("brackets_fullscreen"), color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        }
+    }
+
+    /** «Редактировать», or while editing the hint with «Сохранить» and «Назад без сохранения»; locked once started. */
+    @Composable
+    private fun EditBar(
+        editing: Editing?,
+        locked: Boolean,
+        editable: Boolean,
+        enabled: Boolean,
+        onEdit: () -> Unit,
+        onSave: () -> Unit,
+        onBack: () -> Unit,
+    ) {
+        when {
+            locked -> Text(
+                Localization.getString("brackets_edit_locked"),
+                color = Colors.BROWN.color.copy(alpha = 0.65f),
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+            )
+            editing == null -> ButtonComponent(
+                text = Localization.getString("brackets_edit"),
+                style = ButtonStyles.Secondary,
+                onclick = onEdit,
+                enabled = enabled && editable,
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+            else -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    Localization.getString("brackets_edit_hint"),
+                    color = Colors.BROWN.color.copy(alpha = 0.65f),
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ButtonComponent(
+                        text = Localization.getString("brackets_edit_save"),
+                        onclick = onSave,
+                        enabled = enabled,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    ButtonComponent(
+                        text = Localization.getString("brackets_edit_back"),
+                        style = ButtonStyles.Secondary,
+                        onclick = onBack,
+                        enabled = enabled,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
@@ -563,6 +775,7 @@ object BracketsSetupScreen : Screen {
         onRestore: (ImportRecord) -> Unit,
         onReset: () -> Unit,
         enabled: Boolean,
+        drawBlock: @Composable () -> Unit,
     ) {
         Column(
             modifier = Modifier
@@ -610,7 +823,7 @@ object BracketsSetupScreen : Screen {
                 )
             }
         }
-        DrawBlock()
+        drawBlock()
     }
 
     @Composable
@@ -696,11 +909,23 @@ object BracketsSetupScreen : Screen {
     }
 
     /**
-     * The draw card of the mockup: system, method and «Перемешать». The draw by FHR 2024 §1.2 and §1.4 (ADR-007) arrives
-     * with I4b, so the controls are shown but disabled.
+     * The draw card of the mockup (ADR-008 §2-4): the method of the competition with the separation criterion and the belt,
+     * the system of the selected category, «Провести жеребьёвку», «Перемешать» and «Подтвердить». [board] is null while an
+     * import from the history is open: the draw belongs to the current one.
      */
     @Composable
-    private fun DrawBlock() {
+    private fun DrawBlock(
+        board: DrawBoard?,
+        selected: CategoryDrawState?,
+        enabled: Boolean,
+        onMethod: (DrawMethod) -> Unit,
+        onSystem: (DrawSystem) -> Unit,
+        onDrawAll: () -> Unit,
+        onShuffle: () -> Unit,
+        onConfirm: () -> Unit,
+    ) {
+        val active = enabled && board != null && board.categories.isNotEmpty()
+        val method = board?.method ?: DrawMethod()
         ActionBlock {
             Text(
                 Localization.getString("brackets_draw"),
@@ -708,33 +933,95 @@ object BracketsSetupScreen : Screen {
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
             )
-            DrawChoice(Localization.getString("brackets_draw_system"), listOf("brackets_draw_single_elimination", "brackets_draw_round_robin"))
-            DrawChoice(Localization.getString("brackets_draw_method"), listOf("brackets_draw_random", "brackets_draw_separation"))
+            DrawChoice(
+                title = Localization.getString("brackets_draw_method"),
+                optionKeys = listOf("brackets_draw_random", "brackets_draw_separation"),
+                selectedIndex = if (method.criterion == null) 0 else 1,
+                enabled = active,
+                onSelect = { index -> onMethod(if (index == 0) DrawMethod() else DrawMethod(SeparationCriterion.COACH)) },
+            )
+            method.criterion?.let { criterion ->
+                DrawChoice(
+                    title = Localization.getString("brackets_draw_criterion"),
+                    optionKeys = listOf("brackets_draw_region", "brackets_draw_city", "brackets_draw_organisation", "brackets_draw_coach"),
+                    selectedIndex = criterion.ordinal,
+                    enabled = active,
+                    onSelect = { index -> onMethod(method.copy(criterion = SeparationCriterion.entries[index])) },
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(ROW_SHAPE)
+                        .then(if (active) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Checkbox) { onMethod(method.copy(withBelt = !method.withBelt)) } else Modifier),
+                ) {
+                    Checkbox(
+                        checked = method.withBelt,
+                        onCheckedChange = null,
+                        enabled = active,
+                        colors = CheckboxDefaults.colors(checkedColor = Colors.PRIMARY.color, uncheckedColor = Colors.PRIMARY.color),
+                    )
+                    Text(Localization.getString("brackets_draw_belt"), color = Colors.BROWN.color, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            DrawChoice(
+                title = Localization.getString("brackets_draw_system_of"),
+                optionKeys = listOf("brackets_draw_single_elimination", "brackets_draw_round_robin"),
+                selectedIndex = (selected?.system ?: DrawSystem.SINGLE_ELIMINATION).ordinal,
+                enabled = active && selected != null && selected.systemSelectable && selected.status != CategoryStatus.STARTED,
+                onSelect = { index -> onSystem(DrawSystem.entries[index]) },
+            )
+            val drawable = board?.categories.orEmpty().any { it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.NEEDS_REDRAW }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                ButtonComponent(
+                    text = Localization.getString("brackets_draw_all"),
+                    onclick = onDrawAll,
+                    enabled = active && drawable,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                )
+                ButtonComponent(
+                    text = Localization.getString("brackets_draw_shuffle"),
+                    style = ButtonStyles.Secondary,
+                    onclick = onShuffle,
+                    enabled = active && selected != null && selected.status != CategoryStatus.STARTED && selected.status != CategoryStatus.NO_BOUTS,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                )
+            }
             ButtonComponent(
-                text = Localization.getString("brackets_draw_shuffle"),
-                onclick = {},
-                enabled = false,
+                text = Localization.getString("brackets_draw_confirm").replace("%d", (board?.previews ?: 0).toString()),
+                onclick = onConfirm,
+                enabled = active && (board?.previews ?: 0) > 0,
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall,
             )
-            Text(
-                Localization.getString("brackets_draw_next"),
-                color = Colors.PRIMARY.color,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
+            board?.let {
+                val confirmed = it.categories.count { state ->
+                    state.status == CategoryStatus.CONFIRMED || state.status == CategoryStatus.STARTED || state.status == CategoryStatus.NO_BOUTS
+                }
+                Text(
+                    Localization.getString("brackets_draw_summary")
+                        .replaceFirst("%d", confirmed.toString())
+                        .replaceFirst("%d", it.categories.size.toString())
+                        .replaceFirst("%d", it.previews.toString()),
+                    color = Colors.PRIMARY.color,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 
-    /** A titled choice of the draw as tabs; disabled until the draw arrives with I4b. */
+    /** A titled choice of the draw as tabs. */
     @Composable
-    private fun DrawChoice(title: String, optionKeys: List<String>) {
+    private fun DrawChoice(title: String, optionKeys: List<String>, selectedIndex: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, color = Colors.BROWN.color.copy(alpha = 0.72f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
             SegmentedControl(
-                segments = optionKeys.map { Segment(Localization.getString(it), enabled = false) },
-                selectedIndex = 0,
-                onSelect = {},
+                segments = optionKeys.map { Segment(Localization.getString(it), enabled = enabled) },
+                selectedIndex = selectedIndex,
+                onSelect = { if (it != selectedIndex) onSelect(it) },
                 dark = false,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -905,9 +1192,12 @@ object BracketsSetupScreen : Screen {
         }
     }
 
-    /** Unselected categories are primary; the selected one has the secondary button style. */
+    /**
+     * Unselected categories are primary; the selected one has the secondary button style. Under the title: the draw status
+     * (ADR-008 §11) and the clashes separation could not avoid.
+     */
     @Composable
-    private fun CategoryRow(category: ApplicationCategory, selected: Boolean, onClick: () -> Unit) {
+    private fun CategoryRow(category: ApplicationCategory, state: CategoryDrawState?, selected: Boolean, onClick: () -> Unit) {
         val content = if (selected) Colors.PRIMARY.color else Color.White
         val hint = Localization.getString("brackets_open_category")
         Row(
@@ -924,7 +1214,22 @@ object BracketsSetupScreen : Screen {
                 }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            Text(category.title, color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(category.title, color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                state?.let {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        StatusBadge(it.status, inverted = selected)
+                        if (it.clashes.isNotEmpty()) {
+                            Text(
+                                Localization.getString("brackets_clashes").replace("%d", it.clashes.size.toString()),
+                                color = if (selected) FAILURE_COLOR else Colors.SECONDARY.color,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.width(8.dp))
             Image(
                 painterResource(Res.drawable.bracket_icon),
@@ -932,6 +1237,101 @@ object BracketsSetupScreen : Screen {
                 colorFilter = ColorFilter.tint(content),
                 modifier = Modifier.size(20.dp),
             )
+        }
+    }
+
+    /** The draw status as a badge; «требует новой жеребьёвки» stands out in the error colour. */
+    @Composable
+    private fun StatusBadge(status: CategoryStatus, inverted: Boolean) {
+        if (status == CategoryStatus.NEEDS_REDRAW) {
+            Text(
+                statusLabel(status),
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(FAILURE_COLOR).padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        } else {
+            Badge(statusLabel(status), inverted = inverted)
+        }
+    }
+
+    /**
+     * Entries in draw order: elimination by first-round pairs (a bye says the entry starts in round 2), round robin and
+     * performance order numbered. While [editing], a click picks an entry and a second click swaps the two; the picked entry
+     * and the last swapped pair are highlighted.
+     */
+    @Composable
+    private fun DrawList(
+        category: ApplicationCategory,
+        draw: CategoryDraw,
+        state: CategoryDrawState?,
+        editing: Editing?,
+        onPick: (String) -> Unit,
+    ) {
+        val byKey = category.entries.associateBy { it.drawKey }
+        val clashing = state?.clashes.orEmpty().flatMap { listOf(it.first, it.second) }.toSet()
+        val clashHint = Localization.getString(if (draw.format == DrawFormat.PERFORMANCE_ORDER) "brackets_clash_order" else "brackets_clash_bout")
+        val highlighted = setOfNotNull(editing?.picked, editing?.swapped?.first, editing?.swapped?.second)
+
+        @Composable
+        fun EntryRow(number: String, key: String, note: String? = null) {
+            val entry = byKey[key] ?: return
+            val light = key in highlighted
+            val textColor = if (light) Colors.PRIMARY.color else Color.White
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(ROW_SHAPE)
+                    .background(if (light) Color.White else Colors.PRIMARY.color)
+                    .then(
+                        if (editing != null) {
+                            Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button) { onPick(key) }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .semantics { selected = light }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                entry.athletes.forEachIndexed { memberIndex, athlete ->
+                    AthleteLines(if (memberIndex == 0) number else "", athlete, textColor)
+                }
+                note?.let { Text(it, color = if (light) Colors.PRIMARY.color else MUTED_LAVENDER, style = MaterialTheme.typography.labelSmall) }
+                if (key in clashing) {
+                    Text(clashHint, color = if (light) FAILURE_COLOR else Colors.SECONDARY.color, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { listState ->
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+                when (draw.format) {
+                    DrawFormat.ELIMINATION -> itemsIndexed(draw.positions.chunked(2)) { pairIndex, pair ->
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                Localization.getString("brackets_pair").replace("%d", (pairIndex + 1).toString()),
+                                color = Colors.PRIMARY.color,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            val bye = pair.count { it != null } == 1
+                            pair.forEachIndexed { side, key ->
+                                if (key != null) {
+                                    EntryRow("${pairIndex * 2 + side + 1}.", key, Localization.getString("brackets_bye").takeIf { bye })
+                                }
+                            }
+                        }
+                    }
+                    DrawFormat.NO_BOUTS -> itemsIndexed(draw.entryKeys) { _, key ->
+                        EntryRow("1.", key, Localization.getString("brackets_no_bouts_place"))
+                    }
+                    DrawFormat.ROUND_ROBIN, DrawFormat.PERFORMANCE_ORDER -> itemsIndexed(draw.entryKeys) { index, key ->
+                        EntryRow("${index + 1}.", key)
+                    }
+                }
+            }
         }
     }
 
@@ -946,7 +1346,7 @@ object BracketsSetupScreen : Screen {
                         modifier = Modifier.fillMaxWidth().clip(ROW_SHAPE).background(Colors.PRIMARY.color).padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         entry.athletes.forEachIndexed { memberIndex, athlete ->
-                            AthleteLines(if (memberIndex == 0) "${index + 1}." else "", athlete)
+                            AthleteLines(if (memberIndex == 0) "${index + 1}." else "", athlete, Color.White)
                         }
                         Text(
                             entry.sources.first().let { "${it.fileName} · ${it.sheet} · ${Localization.getString("brackets_row")} ${it.row}" },
@@ -960,11 +1360,11 @@ object BracketsSetupScreen : Screen {
     }
 
     @Composable
-    private fun AthleteLines(number: String, athlete: Athlete) {
+    private fun AthleteLines(number: String, athlete: Athlete, color: Color) {
         Row {
-            Text(number, color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
+            Text(number, color = color, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
             Column {
-                Text(athlete.fullName, color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                Text(athlete.fullName, color = color, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                 Text(
                     listOf(
                         DATE_FORMAT.format(athlete.birthDate),
@@ -975,7 +1375,7 @@ object BracketsSetupScreen : Screen {
                         athlete.school,
                         athlete.coaches.distinct().joinToString(", "),
                     ).joinToString(" · "),
-                    color = Colors.SECONDARY.color,
+                    color = if (color == Color.White) Colors.SECONDARY.color else color.copy(alpha = 0.75f),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
@@ -1019,6 +1419,28 @@ object BracketsSetupScreen : Screen {
             }
         }
     }
+
+    private fun statusLabel(status: CategoryStatus) = Localization.getString(
+        when (status) {
+            CategoryStatus.NOT_DRAWN -> "brackets_status_not_drawn"
+            CategoryStatus.PREVIEW -> "brackets_status_preview"
+            CategoryStatus.CONFIRMED -> "brackets_status_confirmed"
+            CategoryStatus.NEEDS_REDRAW -> "brackets_status_needs_redraw"
+            CategoryStatus.NO_BOUTS -> "brackets_status_no_bouts"
+            CategoryStatus.STARTED -> "brackets_status_started"
+        },
+    )
+
+    private fun rejection(reason: DrawRejection) = Localization.getString(
+        when (reason) {
+            DrawRejection.NO_COMPETITION -> "brackets_draw_rejected_no_competition"
+            DrawRejection.UNKNOWN_CATEGORY -> "brackets_draw_rejected_unknown_category"
+            DrawRejection.STARTED -> "brackets_edit_locked"
+            DrawRejection.NOTHING_TO_CONFIRM -> "brackets_draw_rejected_nothing_to_confirm"
+            DrawRejection.NOT_CONFIRMED -> "brackets_draw_rejected_not_confirmed"
+            DrawRejection.UNKNOWN_ENTRY -> "brackets_draw_rejected_unknown_entry"
+        },
+    )
 
     private fun recordLabel(history: ApplicationsHistory, record: ImportRecord): String {
         val number = history.imports.indexOf(record) + 1
