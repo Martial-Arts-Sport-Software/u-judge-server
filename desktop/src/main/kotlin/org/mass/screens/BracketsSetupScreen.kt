@@ -215,14 +215,15 @@ object BracketsSetupScreen : Screen {
             ScreenHeaderComponent(modifier = Modifier.fillMaxHeight(0.08f).fillMaxWidth())
             Box(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxSize().padding(vertical = 10.dp, horizontal = 15.dp)) {
+                    // Both panels use the devices screen's 20 dp padding and gaps.
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier
                             .weight(0.3f)
                             .fillMaxHeight()
                             .clip(PANEL_SHAPE)
                             .background(Colors.GRAY.color)
-                            .padding(16.dp),
+                            .padding(20.dp),
                     ) {
                         TabSwitch(tab, onSelect = { tab = it })
                         when (tab) {
@@ -630,7 +631,8 @@ object BracketsSetupScreen : Screen {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(ROW_SHAPE)
-                .background(if (viewed) SELECTED_ROW_COLOR else Colors.PRIMARY.color)
+                // On the dark card the translucent secondary fill reads grey, so the opened import is plain white.
+                .background(if (viewed) Color.White else Colors.PRIMARY.color)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .clickable(role = Role.Button, onClick = onView)
                 .semantics { selected = viewed }
@@ -1055,7 +1057,7 @@ object BracketsSetupScreen : Screen {
     private val LIST_SHAPE = RoundedCornerShape(15.dp)
     private val CARD_SHAPE = RoundedCornerShape(16.dp)
     private val ROW_SHAPE = RoundedCornerShape(8.dp)
-    // The secondary button's fill: a selected category or import reads like `ButtonStyles.Secondary`, text in primary.
+    // The secondary button's fill: a selected category reads like `ButtonStyles.Secondary`, text in primary.
     private val SELECTED_ROW_COLOR = Color.White.copy(alpha = 0.48f)
     private val FAILURE_COLOR = Color(0xFFB3261E)
     private val CARD_COLOR = Color(0xFF27262D)
