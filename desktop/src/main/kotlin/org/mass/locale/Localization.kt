@@ -77,7 +77,11 @@ object Localization {
             "brackets_choose_files" to "Choose files",
             "brackets_remove_file" to "Remove file",
             "brackets_import" to "Upload",
-            "brackets_fill_form" to "Enter the competition name and date to choose files",
+            "brackets_uploading" to "Uploading…",
+            "brackets_view_list" to "List",
+            "brackets_view_bracket" to "Bracket",
+            "brackets_fullscreen" to "Full screen",
+            "brackets_bracket_after_draw" to "The bracket and the full screen view open after the draw",
             "brackets_check_failed" to "Errors found: %d. Nothing was uploaded; fix the files and upload again",
             "brackets_imported" to "Uploaded: %s athletes, %s categories, %s files",
             "brackets_backup" to "Backup before the change: %s",
@@ -90,7 +94,7 @@ object Localization {
             "brackets_restore_text" to "«%s» (%s athletes) becomes current again. The history keeps every upload, a backup is made first.",
             "brackets_restore" to "Make current",
             "brackets_reset_title" to "Reset all uploads?",
-            "brackets_reset_text" to "No competition will be current until the next upload. The history and the backup keep every upload.",
+            "brackets_reset_text" to "The upload history is cleared and no competition is current until the next upload. The backup made before the reset keeps every upload.",
             "brackets_reset" to "Reset all uploads",
             "brackets_reset_done" to "All uploads are reset",
             "brackets_history" to "Upload history",
@@ -119,6 +123,7 @@ object Localization {
             "brackets_errors" to "Errors: %d",
             "brackets_errors_hint" to "Scroll the list: every error blocks the upload",
             "brackets_row" to "row",
+
 
 
             "discipline_title" to "Choose discipline",
@@ -268,7 +273,11 @@ object Localization {
             "brackets_choose_files" to "Выбрать файлы",
             "brackets_remove_file" to "Убрать файл",
             "brackets_import" to "Загрузить",
-            "brackets_fill_form" to "Укажите название и дату соревнования, чтобы выбрать файлы",
+            "brackets_uploading" to "Загрузка…",
+            "brackets_view_list" to "Список",
+            "brackets_view_bracket" to "Сетка",
+            "brackets_fullscreen" to "Во весь экран",
+            "brackets_bracket_after_draw" to "Сетка и полноэкранный просмотр откроются после жеребьёвки",
             "brackets_check_failed" to "Найдено ошибок: %d. Ничего не загружено; исправьте файлы и загрузите снова",
             "brackets_imported" to "Загружено: спортсменов %s, категорий %s, файлов %s",
             "brackets_backup" to "Резервная копия перед изменением: %s",
@@ -281,7 +290,7 @@ object Localization {
             "brackets_restore_text" to "«%s» (спортсменов: %s) снова станет текущей. История сохраняет все загрузки, перед изменением делается резервная копия.",
             "brackets_restore" to "Сделать текущей",
             "brackets_reset_title" to "Сбросить все загрузки?",
-            "brackets_reset_text" to "До следующей загрузки текущего соревнования не будет. История и резервная копия сохранят все загрузки.",
+            "brackets_reset_text" to "История загрузок очистится, и до следующей загрузки текущего соревнования не будет. Резервная копия перед сбросом сохранит все загрузки.",
             "brackets_reset" to "Сбросить все загрузки",
             "brackets_reset_done" to "Все загрузки сброшены",
             "brackets_history" to "История загрузок",
@@ -310,6 +319,7 @@ object Localization {
             "brackets_errors" to "Ошибки: %d",
             "brackets_errors_hint" to "Прокрутите список: любая ошибка блокирует загрузку",
             "brackets_row" to "строка",
+
 
 
             "discipline_title" to "Выберите дисциплину",

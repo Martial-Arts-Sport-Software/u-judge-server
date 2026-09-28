@@ -5,7 +5,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollbarStyle
+import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -85,6 +87,8 @@ import u_judge_server.desktop.generated.resources.bracket_icon
 import u_judge_server.desktop.generated.resources.cross_icon
 import u_judge_server.desktop.generated.resources.empty_categories
 import u_judge_server.desktop.generated.resources.empty_preview
+import u_judge_server.desktop.generated.resources.fullscreen_icon
+import u_judge_server.desktop.generated.resources.list_icon
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
@@ -228,7 +232,8 @@ object BracketsSetupScreen : Screen {
                                 dateText = dateText,
                                 onDateChange = { dateText = it },
                                 files = files,
-                                formReady = formReady && !busy && service != null,
+                                formReady = formReady && service != null,
+                                busy = busy,
                                 onChooseFiles = {
                                     chooseFiles()?.let { chosen ->
                                         files = (files + chosen).distinctBy { it.absolutePath }
@@ -270,7 +275,7 @@ object BracketsSetupScreen : Screen {
                             empty = shown == null || shown.categories.isEmpty(),
                             emptyState = { EmptyState(Res.drawable.empty_categories, "brackets_categories_empty", "brackets_categories_empty_hint") },
                         ) {
-                            ScrollableList(rememberLazyListState()) { state ->
+                            ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { state ->
                                 LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                                     itemsIndexed(shown?.categories.orEmpty(), key = { _, category -> category.id }) { _, category ->
                                         CategoryRow(category, selected = category.id == selected?.id, onClick = { selectedCategoryId = category.id })
@@ -290,6 +295,12 @@ object BracketsSetupScreen : Screen {
                             modifier = Modifier.weight(0.55f),
                             empty = errorList == null && selected == null,
                             emptyState = { EmptyState(Res.drawable.empty_preview, "brackets_preview_empty", "brackets_preview_empty_hint") },
+                            // List, bracket and full screen in one line; the bracket views open once the draw made one (I4b).
+                            trailing = if (errorList == null) {
+                                { PreviewNavigation(bracketAvailable = false) }
+                            } else {
+                                null
+                            },
                         ) {
                             if (errorList != null) ErrorList(errorList) else selected?.let { CategoryPreview(it) }
                         }
@@ -337,27 +348,124 @@ object BracketsSetupScreen : Screen {
 
     @Composable
     private fun TabSwitch(selected: Tab, onSelect: (Tab) -> Unit) {
+        SegmentedControl(
+            segments = Tab.entries.map { Segment(Localization.getString(it.key)) },
+            selectedIndex = selected.ordinal,
+            onSelect = { onSelect(Tab.entries[it]) },
+            dark = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
+    private data class Segment(val label: String, val icon: DrawableResource? = null, val enabled: Boolean = true)
+
+    /**
+     * Tabs of the mockup: the selected segment is primary; [dark] is for the gray panel, otherwise the light cards.
+     * A disabled segment is faded and does not react.
+     */
+    @Composable
+    private fun SegmentedControl(
+        segments: List<Segment>,
+        selectedIndex: Int,
+        onSelect: (Int) -> Unit,
+        dark: Boolean,
+        modifier: Modifier = Modifier,
+        fill: Boolean = true,
+    ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth().clip(ROW_SHAPE).background(CARD_COLOR).padding(4.dp),
+            modifier = modifier.clip(ROW_SHAPE).background(if (dark) CARD_COLOR else Color.White.copy(alpha = 0.6f)).padding(4.dp),
         ) {
-            Tab.entries.forEach { tab ->
-                val active = tab == selected
-                Text(
-                    Localization.getString(tab.key),
-                    color = if (active) Color.White else LAVENDER_TEXT,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
+            segments.forEachIndexed { index, segment ->
+                val active = index == selectedIndex
+                val content = when {
+                    active -> Color.White
+                    !segment.enabled -> (if (dark) LAVENDER_TEXT else Colors.BROWN.color).copy(alpha = 0.4f)
+                    dark -> LAVENDER_TEXT
+                    else -> Colors.BROWN.color.copy(alpha = 0.65f)
+                }
+                val background = when {
+                    active && segment.enabled -> Colors.PRIMARY.color
+                    active -> Colors.PRIMARY.color.copy(alpha = 0.45f)
+                    else -> Color.Transparent
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
-                        .weight(1f)
+                        .then(if (fill) Modifier.weight(1f) else Modifier)
                         .clip(ROW_SHAPE)
-                        .background(if (active) Colors.PRIMARY.color else Color.Transparent)
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(role = Role.Tab) { onSelect(tab) }
+                        .background(background)
+                        .then(
+                            if (segment.enabled) {
+                                Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Tab) { onSelect(index) }
+                            } else {
+                                Modifier
+                            },
+                        )
                         .semantics { this.selected = active }
-                        .padding(vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                ) {
+                    segment.icon?.let {
+                        Image(painterResource(it), contentDescription = null, colorFilter = ColorFilter.tint(content), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(
+                        segment.label,
+                        color = content,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * The preview line of the mockup: list or bracket view and the full screen view. The bracket views need a bracket, which
+     * the draw of I4b produces, so until then they are disabled and say why.
+     */
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun PreviewNavigation(bracketAvailable: Boolean) {
+        val hint = Localization.getString("brackets_bracket_after_draw")
+        TooltipArea(
+            tooltip = {
+                Text(
+                    hint,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clip(ROW_SHAPE).background(Colors.BROWN.color).padding(horizontal = 10.dp, vertical = 6.dp),
                 )
+            },
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SegmentedControl(
+                    segments = listOf(
+                        Segment(Localization.getString("brackets_view_list"), Res.drawable.list_icon),
+                        Segment(Localization.getString("brackets_view_bracket"), Res.drawable.bracket_icon, enabled = bracketAvailable),
+                    ),
+                    selectedIndex = 0,
+                    onSelect = {},
+                    dark = false,
+                    fill = false,
+                )
+                val content = if (bracketAvailable) Colors.PRIMARY.color else Colors.PRIMARY.color.copy(alpha = 0.4f)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(ROW_SHAPE)
+                        .background(Color.White.copy(alpha = if (bracketAvailable) 0.9f else 0.5f))
+                        .border(1.dp, content, ROW_SHAPE)
+                        .padding(horizontal = 12.dp, vertical = 9.dp)
+                        .semantics { contentDescription = Localization.getString("brackets_fullscreen") },
+                ) {
+                    Image(painterResource(Res.drawable.fullscreen_icon), contentDescription = null, colorFilter = ColorFilter.tint(content), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(Localization.getString("brackets_fullscreen"), color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
             }
         }
     }
@@ -371,6 +479,7 @@ object BracketsSetupScreen : Screen {
         onDateChange: (String) -> Unit,
         files: List<File>,
         formReady: Boolean,
+        busy: Boolean,
         onChooseFiles: () -> Unit,
         onRemoveFile: (File) -> Unit,
         onLoad: () -> Unit,
@@ -412,7 +521,7 @@ object BracketsSetupScreen : Screen {
             if (files.isEmpty()) {
                 Text(Localization.getString("brackets_files_empty"), color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
             }
-            ScrollableList(rememberLazyListState(), Modifier.weight(1f)) { state ->
+            ScrollableList(rememberLazyListState(), CARD_COLOR, Modifier.weight(1f)) { state ->
                 LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxSize()) {
                     itemsIndexed(files, key = { _, file -> file.absolutePath }) { _, file -> FileRow(file, onRemove = { onRemoveFile(file) }) }
                 }
@@ -421,26 +530,21 @@ object BracketsSetupScreen : Screen {
         ActionBlock {
             ButtonComponent(
                 text = Localization.getString("brackets_choose_files"),
+                style = ButtonStyles.Outlined,
                 onclick = onChooseFiles,
-                enabled = formReady,
+                enabled = formReady && !busy,
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall,
             )
+            // While the files are checked and written the button turns secondary instead of the grey disabled look.
             ButtonComponent(
-                text = Localization.getString("brackets_import"),
-                onclick = onLoad,
-                enabled = formReady && files.isNotEmpty(),
+                text = Localization.getString(if (busy) "brackets_uploading" else "brackets_import"),
+                style = if (busy) ButtonStyles.Secondary else ButtonStyles.Primary,
+                onclick = { if (!busy) onLoad() },
+                enabled = busy || (formReady && files.isNotEmpty()),
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall,
             )
-            if (!formReady) {
-                Text(
-                    Localization.getString("brackets_fill_form"),
-                    color = Colors.PRIMARY.color,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                )
-            }
         }
     }
 
@@ -473,7 +577,7 @@ object BracketsSetupScreen : Screen {
             if (history.imports.isEmpty()) {
                 Text(Localization.getString("brackets_history_empty"), color = MUTED_TEXT, style = MaterialTheme.typography.bodySmall)
             }
-            ScrollableList(rememberLazyListState(), Modifier.weight(1f)) { state ->
+            ScrollableList(rememberLazyListState(), CARD_COLOR, Modifier.weight(1f)) { state ->
                 LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxSize()) {
                     val newestFirst = history.imports.withIndex().reversed()
                     itemsIndexed(newestFirst, key = { _, indexed -> indexed.value.eventId }) { _, indexed ->
@@ -493,7 +597,6 @@ object BracketsSetupScreen : Screen {
                 Spacer(Modifier.height(8.dp))
                 ButtonComponent(
                     text = Localization.getString("brackets_reset"),
-                    style = ButtonStyles.Secondary,
                     onclick = onReset,
                     enabled = enabled,
                     modifier = Modifier.fillMaxWidth(),
@@ -598,8 +701,8 @@ object BracketsSetupScreen : Screen {
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
             )
-            RadioGroup(Localization.getString("brackets_draw_system"), listOf("brackets_draw_single_elimination", "brackets_draw_round_robin"))
-            RadioGroup(Localization.getString("brackets_draw_method"), listOf("brackets_draw_random", "brackets_draw_separation"))
+            DrawChoice(Localization.getString("brackets_draw_system"), listOf("brackets_draw_single_elimination", "brackets_draw_round_robin"))
+            DrawChoice(Localization.getString("brackets_draw_method"), listOf("brackets_draw_random", "brackets_draw_separation"))
             ButtonComponent(
                 text = Localization.getString("brackets_draw_shuffle"),
                 onclick = {},
@@ -616,27 +719,18 @@ object BracketsSetupScreen : Screen {
         }
     }
 
+    /** A titled choice of the draw as tabs; disabled until the draw arrives with I4b. */
     @Composable
-    private fun RadioGroup(title: String, optionKeys: List<String>) {
-        Column(Modifier.fillMaxWidth()) {
+    private fun DrawChoice(title: String, optionKeys: List<String>) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, color = Colors.BROWN.color.copy(alpha = 0.72f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
-                optionKeys.forEachIndexed { index, key ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clip(RoundedCornerShape(50))
-                                .border(2.dp, Colors.PRIMARY.color.copy(alpha = 0.45f), RoundedCornerShape(50)),
-                        ) {
-                            if (index == 0) Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Colors.PRIMARY.color.copy(alpha = 0.45f)))
-                        }
-                        Spacer(Modifier.width(5.dp))
-                        Text(Localization.getString(key), color = Colors.BROWN.color.copy(alpha = 0.55f), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
+            SegmentedControl(
+                segments = optionKeys.map { Segment(Localization.getString(it), enabled = false) },
+                selectedIndex = 0,
+                onSelect = {},
+                dark = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 
@@ -644,9 +738,9 @@ object BracketsSetupScreen : Screen {
     @Composable
     private fun ActionBlock(content: @Composable ColumnScope.() -> Unit) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().clip(CARD_SHAPE).background(Colors.SECONDARY.color).padding(12.dp),
+            modifier = Modifier.fillMaxWidth().clip(CARD_SHAPE).background(Colors.SECONDARY.color).padding(10.dp),
             content = content,
         )
     }
@@ -677,7 +771,10 @@ object BracketsSetupScreen : Screen {
         }
     }
 
-    /** A titled light card; when [empty], [emptyState] is centered in the whole card instead of the content. */
+    /**
+     * A titled light card; when [empty], [emptyState] is centered in the whole card instead of the content. [trailing]
+     * puts controls in the title line, with the title on the left.
+     */
     @Composable
     private fun ListCard(
         title: String,
@@ -685,21 +782,30 @@ object BracketsSetupScreen : Screen {
         modifier: Modifier,
         empty: Boolean,
         emptyState: @Composable () -> Unit,
+        trailing: (@Composable () -> Unit)? = null,
         content: @Composable () -> Unit,
     ) {
         Box(modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize().padding(10.dp)) {
                 Spacer(Modifier.height(14.dp))
-                Text(title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                if (subtitle != null && !empty) {
-                    Text(
-                        subtitle,
-                        color = Colors.BROWN.color.copy(alpha = 0.65f),
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        horizontalAlignment = if (trailing == null) Alignment.CenterHorizontally else Alignment.Start,
+                        modifier = Modifier.weight(1f).padding(start = if (trailing == null) 0.dp else 6.dp),
+                    ) {
+                        Text(title, color = Colors.PRIMARY.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        if (subtitle != null && !empty) {
+                            Text(
+                                subtitle,
+                                color = Colors.BROWN.color.copy(alpha = 0.65f),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = if (trailing == null) TextAlign.Center else TextAlign.Start,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    trailing?.invoke()
                 }
                 Spacer(Modifier.height(14.dp))
                 AnimatedVisibility(visible = !empty, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
@@ -740,9 +846,17 @@ object BracketsSetupScreen : Screen {
         }
     }
 
-    /** A list with a visible scrollbar and a fade at the edge that still has content, so it is obvious that it scrolls. */
+    /**
+     * A list with a visible scrollbar and a fade in [background] at each edge that still has content, so it is obvious that
+     * it scrolls.
+     */
     @Composable
-    private fun ScrollableList(state: LazyListState, modifier: Modifier = Modifier, content: @Composable (LazyListState) -> Unit) {
+    private fun ScrollableList(
+        state: LazyListState,
+        background: Color,
+        modifier: Modifier = Modifier,
+        content: @Composable (LazyListState) -> Unit,
+    ) {
         Box(modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxSize().padding(end = 12.dp)) { content(state) }
             VerticalScrollbar(
@@ -757,14 +871,32 @@ object BracketsSetupScreen : Screen {
                 ),
                 modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
             )
-            if (state.canScrollForward) {
+            AnimatedVisibility(
+                visible = state.canScrollBackward,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
                 Box(
                     Modifier
-                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .padding(end = 12.dp)
-                        .height(36.dp)
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, FADE_COLOR))),
+                        .height(32.dp)
+                        .background(Brush.verticalGradient(listOf(background, Color.Transparent))),
+                )
+            }
+            AnimatedVisibility(
+                visible = state.canScrollForward,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(end = 12.dp)
+                        .height(32.dp)
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, background))),
                 )
             }
         }
@@ -804,7 +936,7 @@ object BracketsSetupScreen : Screen {
     /** Entries of one category in file order; pairs and teams list their members under one number. */
     @Composable
     private fun CategoryPreview(category: ApplicationCategory) {
-        ScrollableList(rememberLazyListState()) { state ->
+        ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { state ->
             LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(category.entries, key = { _, entry -> entry.id }) { index, entry ->
                     Column(
@@ -851,7 +983,7 @@ object BracketsSetupScreen : Screen {
     /** The validation report (`IMP-005`): where the error is, the value found and what the requirements expect. */
     @Composable
     private fun ErrorList(errors: List<ApplicationError>) {
-        ScrollableList(rememberLazyListState()) { state ->
+        ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { state ->
             LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(errors) { index, error ->
                     val place = listOfNotNull(
@@ -930,5 +1062,4 @@ object BracketsSetupScreen : Screen {
     private val LAVENDER_TEXT = Color(0xFFC9B6F2)
     private val MUTED_LAVENDER = Color(0xFFD9C7FF)
     private val MUTED_TEXT = Color(0xFF9E9AA7)
-    private val FADE_COLOR = Color(0xFFEFD4FF)
 }

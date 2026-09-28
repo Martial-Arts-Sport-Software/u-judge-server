@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,30 +68,35 @@ fun ToastComponent(toast: Toast?, onDismiss: () -> Unit, modifier: Modifier = Mo
         modifier = modifier,
     ) {
         val current = shown ?: return@AnimatedVisibility
+        val accent = if (current.error) ERROR_COLOR else Colors.PRIMARY.color
+        val shape = RoundedCornerShape(14.dp)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .padding(top = 8.dp)
-                .widthIn(max = 720.dp)
-                .shadow(12.dp, RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (current.error) ERROR_COLOR else Colors.PRIMARY.color)
-                .padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
+                .padding(top = 10.dp)
+                .widthIn(max = 760.dp)
+                .shadow(12.dp, shape)
+                .clip(shape)
+                // A dark base under a faded accent keeps the white text and cross readable over any screen.
+                .background(BASE_COLOR)
+                .background(accent.copy(alpha = 0.35f))
+                .border(2.dp, accent, shape)
+                .padding(start = 24.dp, end = 18.dp, top = 18.dp, bottom = 18.dp)
                 .semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Text(
                 current.text,
                 color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(18.dp))
             Image(
                 painterResource(Res.drawable.cross_icon),
                 contentDescription = null,
                 modifier = Modifier
-                    .size(14.dp)
+                    .size(20.dp)
                     .pointerHoverIcon(PointerIcon.Hand)
                     .clickable(role = Role.Button, onClick = onDismiss),
             )
@@ -99,3 +105,4 @@ fun ToastComponent(toast: Toast?, onDismiss: () -> Unit, modifier: Modifier = Mo
 }
 
 private val ERROR_COLOR = Color(0xFFB3261E)
+private val BASE_COLOR = Color(0xF21F1E24)
