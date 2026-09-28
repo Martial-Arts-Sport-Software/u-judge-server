@@ -56,9 +56,10 @@ The accompanying «Требования к заполнению заявок» (
    starts is `competition_applications_replaced`, confirmed by the operator and referencing the previous event. An import
    equal to the current one writes nothing, so the history has no duplicates (`IMP-007`). The operator can make an earlier
    import current again (`competition_applications_restored`, a new event that names its origin) or reset all imports
-   (`competition_applications_cleared`: nothing is current until the next import, which starts a new competition ID). Each
-   of these changes is confirmed and preceded by a backup. The projection is the history of imports and the current one;
-   the journal only grows (`AUD-001`). «Загрузить» checks and imports in one step: a failed check writes nothing.
+   (`competition_applications_cleared`: nothing is current and the shown history starts over; the next import starts a
+   new competition ID). Each of these changes is confirmed and preceded by a backup, which keeps the imports a reset
+   hides. The projection is the history of imports since the last reset and the current one; the journal only grows
+   (`AUD-001`). «Загрузить» checks and imports in one step: a failed check writes nothing.
 6. **Backup before import (`IMP-008`, `BAK-001`).** Before writing, the desktop exports the whole `domain_events` journal
    to `<application data>/backups/<UTC timestamp>-before-import.jsonl` and keeps it until the operator deletes it. Because
    all state is event-sourced, the journal export is a complete logical backup. Encryption with the key storage of

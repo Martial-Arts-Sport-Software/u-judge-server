@@ -66,13 +66,14 @@ class CompetitionApplicationsServiceTest {
         val restarted = service(JdbcDomainEventStore(dataSource("applications-scenario")))
         assertEquals(service.history.value, restarted.history.value)
 
-        // Reset: nothing is current, the history stays, and the next import starts a new competition.
-        assertIs<ClearOutcome.Cleared>(restarted.clear())
-        assertNull(restarted.history.value.current)
-        assertEquals(3, restarted.history.value.imports.size)
+        // Reset: nothing is current, the history starts over (the backup keeps it), and the next import is a new competition.
+        val reset = assertIs<ClearOutcome.Cleared>(restarted.clear())
+        assertEquals(ApplicationsHistory(emptyList(), null), restarted.history.value)
+        assertEquals(3, reset.backup!!.readLines().size)
         assertEquals(ClearOutcome.NothingToClear, restarted.clear())
         val afterReset = assertIs<ImportOutcome.Imported>(restarted.import(second, replaceConfirmed = false))
         assertTrue(afterReset.record.competitionId != imported.record.competitionId)
+        assertEquals(listOf(afterReset.record), restarted.history.value.imports)
         assertEquals(restarted.history.value, service(JdbcDomainEventStore(dataSource("applications-scenario"))).history.value)
     }
 

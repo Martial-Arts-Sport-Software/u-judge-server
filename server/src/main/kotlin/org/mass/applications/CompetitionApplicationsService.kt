@@ -49,7 +49,10 @@ data class ImportRecord(
     val restoredFromEventId: String?,
 )
 
-/** The imports in journal order, newest last, and the one that is current (null after a reset or before any import). */
+/**
+ * The imports since the last reset in journal order, newest last, and the one that is current (null after a reset or
+ * before any import).
+ */
 data class ApplicationsHistory(val imports: List<ImportRecord>, val currentEventId: String?) {
     val current: ImportRecord?
         get() = imports.firstOrNull { it.eventId == currentEventId }
@@ -70,7 +73,11 @@ data class ApplicationsHistory(val imports: List<ImportRecord>, val currentEvent
                         )
                         currentEventId = stored.eventId
                     }
-                    is ApplicationsEvent.Cleared -> currentEventId = null
+                    // A reset starts a clean history; earlier imports stay in the journal and in the backup.
+                    is ApplicationsEvent.Cleared -> {
+                        imports.clear()
+                        currentEventId = null
+                    }
                 }
             }
             return ApplicationsHistory(imports, currentEventId)
@@ -192,7 +199,7 @@ class CompetitionApplicationsService(
         return append(record.applications, replaceConfirmed, restoredFromEventId = eventId)
     }
 
-    /** Resets all imports: nothing is current afterwards, the history and the backup keep every import. */
+    /** Resets all imports: nothing is current and the history starts over; the journal and the backup keep every import. */
     @Synchronized
     fun clear(): ClearOutcome {
         val current = mutableHistory.value.current ?: return ClearOutcome.NothingToClear
