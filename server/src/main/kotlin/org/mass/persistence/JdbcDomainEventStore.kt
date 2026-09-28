@@ -65,27 +65,32 @@ class JdbcDomainEventStore(private val dataSource: DataSource) {
      * Appends a peer-scoped event that belongs to no bracket or session, such as a device registry decision or an import of
      * competition applications.
      */
+    fun appendPeerEvent(event: PeerScopedEvent): Long = appendPeerEvents(listOf(event)).single()
+
+    /** Appends [events] in one transaction: either all of them get the next sequences or none is written. */
     @Synchronized
-    fun appendPeerEvent(event: PeerScopedEvent): Long = dataSource.connection.use { connection ->
+    fun appendPeerEvents(events: List<PeerScopedEvent>): List<Long> = dataSource.connection.use { connection ->
         connection.inTransaction {
-            val sequence = nextSequence(connection, event.peerId.value)
-            connection.prepareStatement(
-                "INSERT INTO domain_events (event_id, owner_peer_id, sequence, competition_id, device_id, source, author, " +
-                    "occurred_at, event_type, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ).use { statement ->
-                statement.setString(1, event.eventId.value)
-                statement.setString(2, event.peerId.value)
-                statement.setLong(3, sequence)
-                statement.setString(4, event.competitionId?.value)
-                statement.setString(5, event.deviceId)
-                statement.setString(6, event.source.value)
-                statement.setString(7, event.author)
-                statement.setString(8, event.occurredAt.toString())
-                statement.setString(9, event.type)
-                statement.setString(10, event.payload)
-                statement.executeUpdate()
+            events.map { event ->
+                val sequence = nextSequence(connection, event.peerId.value)
+                connection.prepareStatement(
+                    "INSERT INTO domain_events (event_id, owner_peer_id, sequence, competition_id, device_id, source, author, " +
+                        "occurred_at, event_type, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ).use { statement ->
+                    statement.setString(1, event.eventId.value)
+                    statement.setString(2, event.peerId.value)
+                    statement.setLong(3, sequence)
+                    statement.setString(4, event.competitionId?.value)
+                    statement.setString(5, event.deviceId)
+                    statement.setString(6, event.source.value)
+                    statement.setString(7, event.author)
+                    statement.setString(8, event.occurredAt.toString())
+                    statement.setString(9, event.type)
+                    statement.setString(10, event.payload)
+                    statement.executeUpdate()
+                }
+                sequence
             }
-            sequence
         }
     }
 

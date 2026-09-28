@@ -1,13 +1,8 @@
 package org.mass.draw
 
-import org.mass.applications.AgeClass
-import org.mass.applications.AgeSection
-import org.mass.applications.ApplicationCategory
 import org.mass.applications.ApplicationDiscipline
-import org.mass.applications.Athlete
 import org.mass.applications.CategoryEntry
-import org.mass.applications.CategorySex
-import java.time.LocalDate
+import org.mass.draw.DrawFixtures.category
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -192,38 +187,4 @@ class DrawTest {
     }
 
     private fun slotsOf(draw: CategoryDraw, entries: List<CategoryEntry>) = entries.map { draw.positions.indexOf(it.drawKey) }
-
-    private fun category(
-        coaches: List<String>,
-        belts: List<String> = coaches.map { "5 гып" },
-        discipline: ApplicationDiscipline = ApplicationDiscipline.KERUGI,
-    ) = ApplicationCategory(
-        id = "category",
-        discipline = discipline,
-        weapon = null,
-        section = AgeSection("2014-2013 г.р. Младшие юноши", AgeClass.YOUNGER, CategorySex.MALE, 2013, 2014),
-        weight = "до 33 кг",
-        entries = coaches.mapIndexed { index, coach ->
-            CategoryEntry(
-                id = "file:sheet:$index",
-                athletes = listOf(
-                    Athlete(
-                        fullName = "Спортсмен $index",
-                        birthDate = LocalDate.of(2013, 1, 1).plusDays(index.toLong()),
-                        weight = "до 33 кг",
-                        sportQualification = "б/р",
-                        technicalQualification = belts[index],
-                        city = "Город",
-                        region = "Регион",
-                        federalDistrict = "СФО",
-                        society = "",
-                        school = "Клуб",
-                        coaches = listOf(coach),
-                        doctorVisa = null,
-                    ),
-                ),
-                sources = emptyList(),
-            )
-        },
-    )
 }
