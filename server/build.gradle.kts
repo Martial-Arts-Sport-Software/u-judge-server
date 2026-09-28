@@ -19,6 +19,8 @@ dependencies {
     // Logging: the API here, logback with the JSON file configuration at runtime
     implementation(libs.slf4j.api)
     runtimeOnly(libs.logback.classic)
+    // Apache POI logs through the Log4j API; route it to SLF4J instead of the Log4j "no implementation" warning
+    runtimeOnly(libs.log4j.to.slf4j)
     testImplementation(libs.logback.classic)
 
     // Postgres & ORM
@@ -35,6 +37,9 @@ dependencies {
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.server.websockets)
     implementation(libs.ktor.serialization.kotlinx.json)
+
+    // Competition applications (ADR-005)
+    implementation(libs.poi.ooxml)
 
     // Connection Pool
     implementation(libs.hikari)

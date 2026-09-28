@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp" android:viewportWidth="120" android:viewportHeight="120">
+    <!-- A bracket without names: select a category to see its athletes. -->
+    <path android:strokeColor="#BC9DF6" android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M40,26 h20 v20 h-20 M40,66 h20 v20 h-20 M60,36 h16 v40 h-16 M76,56 h18" />
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4"
+        android:pathData="M14,18 h26 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-26 a4,4 0 0 1 -4,-4 v-8 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4"
+        android:pathData="M14,38 h26 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-26 a4,4 0 0 1 -4,-4 v-8 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4"
+        android:pathData="M14,58 h26 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-26 a4,4 0 0 1 -4,-4 v-8 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4"
+        android:pathData="M14,78 h26 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-26 a4,4 0 0 1 -4,-4 v-8 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#7C45E2"
+        android:pathData="M100,50 a6,6 0 1 1 0,12 a6,6 0 1 1 0,-12 z" />
+</vector>

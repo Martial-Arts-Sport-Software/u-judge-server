@@ -18,6 +18,9 @@ h2 = "2.4.240"
 logback = "1.6.3"
 slf4j = "2.0.18"
 kotlin-logging = "8.0.4"
+log4j = "2.26.1"
+
+poi = "5.5.1"
 
 uuid = "0.8.4"
 dnsSdKt = "1.1.0"
@@ -70,6 +73,10 @@ h2 = { module = "com.h2database:h2", version.ref = "h2" }
 # Logging
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+log4j-to-slf4j = { module = "org.apache.logging.log4j:log4j-to-slf4j", version.ref = "log4j" }
+
+# Applications (XLSX)
+poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "poi" }
 
 
 [plugins]

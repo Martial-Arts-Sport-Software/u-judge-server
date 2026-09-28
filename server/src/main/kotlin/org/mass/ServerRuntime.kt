@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.mass.applications.CompetitionApplicationsService
+import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.domain.PeerId
 import org.mass.persistence.JdbcDomainEventStore
 import org.mass.persistence.LocalPeerIdentity
@@ -32,6 +34,7 @@ import java.net.NetworkInterface
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
 
 /** Where the bundled PostgreSQL lives and where this peer keeps its cluster, logs and other local state. */
 data class ServerRuntimeConfiguration(
@@ -106,6 +109,11 @@ class ServerRuntime(
     var pairingRequests: PairingRequests = PairingRequests()
         private set
 
+    /** Import of competition applications (ADR-005); null while the server and its journal are not running. */
+    @Volatile
+    var competitionApplications: CompetitionApplicationsService? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -132,6 +140,7 @@ class ServerRuntime(
         httpServer = null
         postgres?.stop()
         postgres = null
+        competitionApplications = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -173,11 +182,23 @@ class ServerRuntime(
         }
         val metadata = ServerMetadata.local(peerId = peerId.value)
         val realtimeCommands = RealtimeCommands(journal = JdbcPeerJournal(peerId.value, dataSource))
+        val store = JdbcDomainEventStore(dataSource)
         val pairing = try {
-            PairingRequests(JdbcDeviceRegistryJournal(JdbcDomainEventStore(dataSource), peerId))
+            PairingRequests(JdbcDeviceRegistryJournal(store, peerId))
         } catch (exception: Exception) {
             return failStartup("Device registry could not be restored: ${exception.message}")
         }.also { pairingRequests = it }
+        competitionApplications = try {
+            val backups = configuration.applicationDataDirectory.resolve("backups")
+            CompetitionApplicationsService(
+                journal = JdbcCompetitionApplicationsJournal(store, peerId),
+                backup = {
+                    CompetitionApplicationsService.backupPath(backups, Instant.now()).also(store::exportJournal)
+                },
+            )
+        } catch (exception: Exception) {
+            return failStartup("Competition applications could not be restored: ${exception.message}")
+        }
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
@@ -270,6 +291,7 @@ class ServerRuntime(
         httpServer = null
         postgres?.stop()
         postgres = null
+        competitionApplications = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }

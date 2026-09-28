@@ -25,7 +25,7 @@ Pilot не считается production-ready до отдельного hardeni
 | Сеть        | Изолированная Wi-Fi сеть через выделенный роутер площадки |
 | Хранилище   | Управляемый приложением PostgreSQL на каждом peer |
 | Репликация  | Не входит в v1 Pilot; целевая post-v1 P2P-модель  |
-| Дисциплины  | 8 дисциплин из PDF 1 + Tanbon как продуктовая дисциплина |
+| Дисциплины  | 8 дисциплин из правил ФХР 2024 (PDF 1) + Tanbon как продуктовая дисциплина |
 
 Объём крайне напряжённый для одного разработчика. План реализуем только как pilot с жёсткими техническими гейтами.
 Нельзя компенсировать отставание исключением тестов сохранности данных, scoring или reconnect.
@@ -102,7 +102,8 @@ baseline; при расхождении действует этот план.
 | Статус | ID | Недели | Gate | Сценарий, который можно показать | Requirement IDs | Cross-repo |
 |--------|----|--------|------|----------------------------------|-----------------|------------|
 | [x] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; судья на emulator проходит pairing по local TLS, оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены, client переподключается без повторного pairing | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Да: client pairing и reconnect против desktop server |
-| [ ] | I4 | 5-6 | G4 | Оператор импортирует `df-template-v1` (500 участников), видит validation report и preview, правит сетку до старта и выбирает текущий поединок; повторный и ошибочный импорт не портят данные | `IMP-001`-`IMP-008`, `BRK-001`, `BRK-002`, `BRK-005`, `SES-003`, `CMP-005`, `CMP-006`, `CMP-008`, `SYS-003`, `BAK-001`; ADR-005 | Нет |
+| [x] | I4a | 5-6 | G4 (импорт) | Оператор выбирает сразу несколько файлов заявок `df-template-v1` (500 участников), видит отчёт об ошибках с файлом, листом, строкой, колонкой, значением и причиной или preview категорий и участников; «Загрузить» проверяет и загружает за один шаг, загрузка атомарна, перед ней делается backup журнала; повторная загрузка до старта заменяет прежнюю с подтверждением, одинаковая ничего не меняет; история загрузок позволяет посмотреть и восстановить любую загрузку или сбросить все; после перезапуска соревнование и история восстановлены | `IMP-001`-`IMP-003`, `IMP-005`-`IMP-008`, `BAK-001`, `SYS-003`, `AUD-001`; ADR-005 | Нет |
+| [ ] | I4b | 6 | G4 | Оператор проводит жеребьёвку по ФХР 2024: система (выбывание, круговая) и метод (случайная, с разведением по одному критерию), «Перемешать», preview и правка до старта, подтверждение; порядок выступлений в технических дисциплинах; выбор текущего и следующего поединка | `IMP-004`, `BRK-001`, `BRK-002`, `BRK-005`, `SES-003`, `CMP-005`, `CMP-006`, `CMP-008`; ADR-007 | Нет |
 | [ ] | I2a | 6-7 | G2, server-часть G3 | Kerugi: бой по баллам. Оператор стартует поединок импортированной сетки; состав судей фиксируется из подключённых устройств (2 или 3), кворум и окно; судьи на emulator ставят `HEAD`/`BODY` через `kerugi_score_command`, оператор вводит броски, вращение и Gamjeom, делает коррекцию и сброс с причиной и подтверждением, фиксирует результат по финальному счёту; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-009`, `KER-015`, `SES-001`, `SES-002`, `SES-004`-`SES-006`, `UI-002`, `UI-008`, `NET-001`, `NET-003`, `AUD-002`, `DEV-008` | Да: client session snapshot, `kerugi_score_command`, outbox после app kill |
 | [ ] | I2b | 7-8 | server-часть G3 | Kerugi: время боя и ход сетки. Таймер по FHR 2024 для возрастной категории, два раунда, перерыв, golden round и победа по нему; экран оператора и экран зрителей на втором мониторе (то же без операторских кнопок); победитель продвигается по сетке, судьи переходят к следующему поединку без перезапуска | `KER-010`-`KER-013`, `UI-001`, `UI-003`-`UI-005`, `SES-007`, `BRK-003`, `BRK-004` | Да: client последовательные сессии |
 | [ ] | I3 | 8-9 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
@@ -136,14 +137,35 @@ macOS 27 (arm64) с `./gradlew :desktop:run` и Android emulator `sdk_gphone16k_
 | `SYS-009` | Implemented | Единая per-peer sequence и four-timestamp `clock_sync` против настоящего server |
 | `AUD-001` | Implemented | Журнал только дописывается; отзыв, отклонение и замена запроса - отдельные события |
 
+#### Доказательства I4a
+
+Server [#130](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/130). Сценарий пройден 27-28.09.2026 на
+macOS 27 (arm64) с `./gradlew :desktop:run`: отчёт об ошибках, загрузка 500 синтетических участников, повторная загрузка
+без изменений, замена с подтверждением и отменой, история с восстановлением и сбросом, перезапуск. Реальной заполненной
+заявки нет: доступны только пустые шаблоны федерации.
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `IMP-001` | Partial | Пустые шаблоны федерации (`df.xlsx` и 4 возрастных) читаются без ошибок, заполненный шаблон 12-14 даёт спортсменов, пару и команду (`ApplicationTemplateV1ReaderTest`); реальная обезличенная заявка не проверена |
+| `IMP-002` | Implemented | Участники со всеми полями заявки и источником (файл SHA-256, лист, строка, №) (`ApplicationTemplateV1ReaderTest`, preview на desktop) |
+| `IMP-003` | Implemented | Категории: дисциплина, оружие, возрастная секция, пол, вес; файлы разных тренеров сливаются (`ApplicationImportTest`) |
+| `IMP-005` | Implemented | Все правила «Требований к заполнению заявок» - блокирующие ошибки с файлом, листом, строкой, колонкой, значением и причиной (`ApplicationTemplateV1ReaderTest`, `ApplicationImportTest`, desktop) |
+| `IMP-006` | Implemented | Загрузка - одно событие журнала; ошибка проверки, backup или записи ничего не меняет (`CompetitionApplicationsServiceTest`) |
+| `IMP-007` | Implemented | Одинаковая загрузка ничего не пишет, другая требует подтверждения и отменяется без изменений (`CompetitionApplicationsServiceTest`, desktop) |
+| `IMP-008` | Implemented | Перед загрузкой, восстановлением и сбросом журнал выгружается в `backups/*.jsonl`; прежняя загрузка восстанавливается из истории. Восстановление из файла backup - I6 |
+| `BAK-001` | Implemented | Backup перед каждой загрузкой; ошибка backup отменяет загрузку (`CompetitionApplicationsServiceTest`) |
+| `SYS-003` | Partial | Импорт 500 участников: проверка меньше 10 с (`ApplicationImportTest`), запись и восстановление после перезапуска PostgreSQL 18.6 (`RealPostgresLifecycleTest`); навигация, расчёт и экспорт - следующие инкременты |
+| `AUD-001` | Implemented | Загрузки, замены, восстановления и сбросы только дописываются в `domain_events` (с I1) |
+
 Технические задачи, обязательные внутри инкрементов:
 
 - I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
   `RealPostgresLifecycleTest` в CI на PostgreSQL из образа runner; ручной прогон macOS/Windows фиксируется в PR, а
   недоступная платформа остаётся открытым пунктом G1; local TLS для credential delivery вместе с client, иначе pairing
   не завершается end-to-end.
-- I4: идёт сразу после I1 (решение 26.09.2026): поединки I2a/I2b берутся из импортированной сетки, а не из ручной
-  настройки; проведение поединков и продвижение победителя перенесены в I2b.
+- I4: идёт сразу после I1 (решение 26.09.2026): поединки I2a/I2b берутся из сетки соревнования, а не из ручной
+  настройки; проведение поединков и продвижение победителя перенесены в I2b. 27.09.2026 разделён на I4a (импорт заявок,
+  ADR-005) и I4b (жеребьёвка, ADR-007): входные файлы - заявки без сеток, сетки строятся по правилам ФХР 2024.
 - I2a: Kerugi bout aggregate поверх единого журнала и один realtime command dispatcher вместо отдельных `Realtime*Commands`
   (перенесено из I1 26.09.2026: до I2a Kerugi-команды недостижимы из production, а их контракт меняется вместе с session
   snapshot); session snapshot/assignment для client (`DEV-008`) и resync после reconnect; симулятор судей для acceptance
@@ -273,7 +295,7 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 | `DomainCommand` → `DomainEvent` | Полный typed audit context, source, author, UTC timestamp, type и raw payload; event только с назначенными ID и timestamp; rejection blank fields | - |
 | `SequencedDomainEvent`, `DomainEventOrder`, `PeerEventSequence` | Positive per-owner sequence, deterministic order, rejection owner/sequence conflicts | Sequence уникальна только внутри каждой таблицы `V2`-`V5` (I1) |
 | `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I2a) |
-| `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection | Persistence сетки (I4); P2P claims post-v1 |
+| `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection | Persistence сетки (I4b); P2P claims post-v1 |
 | `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2a) |
 | `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | - |
 
@@ -346,14 +368,15 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Зависимость
 
-Реальный входной файл получен и разобран как `df-template-v1`: `/Users/maksim/Downloads/df.xlsx`. Схема больше не является
-внешним blocker. Нужно реализовать adapter, подтвердить атомарный импорт и воспроизведение `PDF 1` после импорта и `PDF 2`
-после обработки сеток.
+Входные файлы - заявки тренеров по шаблонам федерации (`df-template-v1`, ADR-005): участники без сеток. Нужно
+реализовать adapter, атомарный импорт, жеребьёвку по правилам ФХР 2024 (ADR-007), стартовые протоколы после жеребьёвки и
+протоколы результатов после обработки сеток.
 
 ### Функциональность
 
-- Версионированный XLSX adapter.
-- Validation report с координатами ошибки.
+- Версионированный XLSX adapter заявок и загрузка нескольких файлов сразу.
+- Validation report с координатами ошибки; любая ошибка блокирует загрузку.
+- Жеребьёвка: выбывание после одного поражения и круговая система, случайная и с разведением по одному критерию.
 - Atomic import и backup before import.
 - Создание сущностей соревнования в БД и выходных PDF-артефактов по текущему desktop workflow.
 - Preview и исправление сетки до первого события.
@@ -365,8 +388,8 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Исключение
 
-Генерация случайной жеребьёвки, посев и распределение по регионам/организациям не реализуются в pilot, даже если
-элементы присутствуют в старом Figma.
+Посев по рейтингу, двойное выбывание и олимпийская система не реализуются в pilot (решение 27.09.2026; олимпийская
+система ждёт уточнения).
 
 ### Gate G4
 
@@ -510,7 +533,7 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Windows signing и macOS notarization.
 - Публичные release artifacts, checksums и changelog.
 - Автообновление и управляемая миграция версии protocol/schema.
-- Генерация жеребьёвки и нормативные методы посева.
+- Посев по рейтингу, двойное выбывание и олимпийская система.
 - Передача сетки между площадками только после проектирования conflict protocol.
 - Решение о раздельных Weapon-дисциплинах.
 - Полная accessibility-проверка.

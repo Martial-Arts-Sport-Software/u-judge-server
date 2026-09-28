@@ -40,9 +40,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -74,7 +72,11 @@ import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
+import org.mass.enums.Routes
 import org.mass.ui.button.ButtonComponent
+import org.mass.ui.button.ButtonStyles
+import org.mass.ui.dialog.ConfirmDialogComponent
+import org.mass.ui.button.clickWithTransition
 import org.mass.ui.screen_header.ScreenHeaderComponent
 import u_judge_server.desktop.generated.resources.Res
 import u_judge_server.desktop.generated.resources.check_icon
@@ -94,6 +96,8 @@ object DevicesConnectionScreen : Screen {
         val scope = rememberCoroutineScope()
         var error by remember { mutableStateOf<String?>(null) }
         var revokeCandidate by remember { mutableStateOf<OperatorDevice?>(null) }
+        var resetAllRequested by remember { mutableStateOf(false) }
+        val pairedCount = registry.devices.count { !it.revoked }
 
         fun decide(action: PairingRequests.() -> Unit) {
             scope.launch {
@@ -150,37 +154,56 @@ object DevicesConnectionScreen : Screen {
                     }
                 }
                 Spacer(Modifier.width(25.dp))
-                ServerPanel(runtimeState, error, Modifier.weight(0.35f))
+                ServerPanel(
+                    runtimeState,
+                    error,
+                    Modifier.weight(0.35f),
+                    canResetDevices = pairedCount > 0,
+                    onResetDevices = { resetAllRequested = true },
+                )
             }
         }
 
         revokeCandidate?.let { device ->
-            AlertDialog(
-                onDismissRequest = { revokeCandidate = null },
-                title = { Text(Localization.getString("devices_revoke_title")) },
-                text = {
-                    Text(
-                        Localization.getString("devices_revoke_text")
-                            .replaceFirst("%s", device.surname)
-                            .replaceFirst("%s", platformName(device.platform)),
-                    )
+            ConfirmDialogComponent(
+                title = Localization.getString("devices_revoke_title"),
+                text = Localization.getString("devices_revoke_text")
+                    .replaceFirst("%s", device.surname)
+                    .replaceFirst("%s", platformName(device.platform)),
+                confirmText = Localization.getString("devices_revoke"),
+                cancelText = Localization.getString("devices_cancel"),
+                onConfirm = {
+                    revokeCandidate = null
+                    decide { revoke(device.requestId) }
                 },
-                confirmButton = {
-                    TextButton(onClick = {
-                        revokeCandidate = null
-                        decide { revoke(device.requestId) }
-                    }) { Text(Localization.getString("devices_revoke")) }
+                onCancel = { revokeCandidate = null },
+            )
+        }
+
+        if (resetAllRequested) {
+            ConfirmDialogComponent(
+                title = Localization.getString("devices_reset_title"),
+                text = Localization.getString("devices_reset_text").replace("%d", pairedCount.toString()),
+                confirmText = Localization.getString("devices_reset"),
+                cancelText = Localization.getString("devices_cancel"),
+                onConfirm = {
+                    resetAllRequested = false
+                    decide { revokeAll() }
                 },
-                dismissButton = {
-                    TextButton(onClick = { revokeCandidate = null }) { Text(Localization.getString("devices_cancel")) }
-                },
+                onCancel = { resetAllRequested = false },
             )
         }
     }
 
     /** "Конфигурация устройств": this computer, where judges connect, the code they must see and component health. */
     @Composable
-    private fun ServerPanel(state: ServerRuntimeState, error: String?, modifier: Modifier) {
+    private fun ServerPanel(
+        state: ServerRuntimeState,
+        error: String?,
+        modifier: Modifier,
+        canResetDevices: Boolean,
+        onResetDevices: () -> Unit,
+    ) {
         val running = state as? ServerRuntimeState.Running
         val host = remember { hostDescription() }
         Column(
@@ -211,7 +234,7 @@ object DevicesConnectionScreen : Screen {
             StatusItems(state)
             error?.let { InfoPill(it, background = FAILURE_COLOR) }
             Spacer(Modifier.weight(1f))
-            ConfirmBlock()
+            ConfirmBlock(canResetDevices, onResetDevices)
         }
     }
 
@@ -431,32 +454,33 @@ object DevicesConnectionScreen : Screen {
     }
 
     /**
-     * Figma V1 bottom block: confirming the device configuration leads to the next operator step, the bracket import,
-     * which arrives with I4; until then the action is shown disabled with that explanation instead of doing nothing.
+     * Figma V1 bottom block: confirming the device configuration opens the application import; the reset revokes every
+     * paired device after a confirmation, so all judges pair again.
      */
     @Composable
-    private fun ConfirmBlock() {
+    private fun ConfirmBlock(canResetDevices: Boolean, onResetDevices: () -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(CARD_SHAPE)
                 .background(Colors.SECONDARY.color)
-                .padding(12.dp),
+                .padding(10.dp),
         ) {
             ButtonComponent(
                 text = Localization.getString("devices_confirm"),
-                onclick = {},
-                enabled = false,
+                onclick = { clickWithTransition(Routes.BRACKETS_SETUP) },
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                Localization.getString("devices_confirm_next"),
-                color = Colors.PRIMARY.color,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
+            ButtonComponent(
+                text = Localization.getString("devices_reset"),
+                style = ButtonStyles.Secondary,
+                onclick = onResetDevices,
+                enabled = canResetDevices,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall,
             )
         }
     }

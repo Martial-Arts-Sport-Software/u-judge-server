@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp" android:viewportWidth="120" android:viewportHeight="120">
+    <!-- An application sheet with empty category rows: nothing is loaded yet. -->
+    <path android:fillColor="#F7EEFF" android:strokeColor="#7C45E2" android:strokeWidth="4" android:strokeLineJoin="round"
+        android:pathData="M30,10 h42 l18,18 v74 a8,8 0 0 1 -8,8 h-52 a8,8 0 0 1 -8,-8 v-84 a8,8 0 0 1 8,-8 z" />
+    <path android:strokeColor="#7C45E2" android:strokeWidth="4" android:strokeLineJoin="round" android:pathData="M72,10 v18 h18" />
+    <path android:strokeColor="#BC9DF6" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M36,48 h8 M52,48 h24 M36,64 h8 M52,64 h24 M36,80 h8 M52,80 h16" />
+</vector>

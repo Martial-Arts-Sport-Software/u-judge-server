@@ -115,11 +115,13 @@ fun ButtonComponent(
                     containerColor = Color.White.copy(0.48f),
                     disabledContainerColor = Color.White.copy(0.35f)
                 ),
+                // The fill is translucent, so the default hover and press elevation would show its shadow through it.
+                elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp, 0.dp, 0.dp, 0.dp),
                 shape = RoundedCornerShape(5.dp),
                 content = {
                     Text(
                         text!!,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = textStyle ?: MaterialTheme.typography.bodyLarge,
                         color = if (enabled) Colors.PRIMARY.color
                         else Color.Black.copy(0.3f)
                     )

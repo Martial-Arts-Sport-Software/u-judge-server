@@ -7,7 +7,7 @@ Desktop-приложение площадки и локальный server U'Jud
 ## Возможности pilot
 
 - управление площадкой, устройствами, текущим поединком и таймером;
-- импорт готовых турнирных сеток из XLSX;
+- импорт заявок участников из XLSX и жеребьёвка по правилам ФХР 2024;
 - Kerugi, Tanbon и четыре технические дисциплины;
 - арбитр и полноэкранное watcher-табло;
 - append-only аудит, история, XLSX/CSV export и backup;
@@ -17,7 +17,7 @@ Desktop-приложение площадки и локальный server U'Jud
 
 ## Текущее состояние
 
-Реализованы Compose Desktop shell, базовая навигация, Ktor Netty server с HTTPS/WSS на `0.0.0.0:8443`, mDNS-публикация `_u-judge._tcp` и CI на `push`/`pull_request`. CI валидирует Gradle Wrapper и whitespace в diff, затем собирает проект на JDK 21 через `./gradlew build`. Первый P2P spike подтвердил in-memory event journal с идемпотентной доставкой, диагностикой sequence gaps и сходимостью трёх peers после partition; решение описано в [ADR-001](docs/adr/ADR-001-event-envelope.md). Начат client protocol: `GET /v1/metadata` публикует версию, capabilities и identity площадки до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, сохраняет pending request в памяти и дедуплицирует retry по device ID. Локальный operator application service одобряет request и выдаёт reconnect credential либо идемпотентно отзывает принятое устройство, делая credential inactive; anonymous LAN approval/revoke endpoint не создаётся. Authenticated WebSocket принимает typed commands, возвращает ACK и поддерживает `clock_sync`; `heartbeat` получает typed `heartbeat_ack`, а malformed heartbeat — `heartbeat_rejected` без закрытия сессии. Anonymous `POST /score` удалён. Secure credential delivery/storage, durable device state, heartbeat scheduling/timeouts, reconnect/resync и client implementation ещё не реализованы. Начата transport-agnostic domain boundary: валидированный `DomainCommand` с полным typed audit context преобразуется в `DomainEvent` после назначения event ID и UTC timestamp. Турнирная модель, production P2P transport и импорт также не реализованы.
+Реализованы Compose Desktop shell, базовая навигация, Ktor Netty server с HTTPS/WSS на `0.0.0.0:8443`, mDNS-публикация `_u-judge._tcp` и CI на `push`/`pull_request`. CI валидирует Gradle Wrapper и whitespace в diff, затем собирает проект на JDK 21 через `./gradlew build`. Первый P2P spike подтвердил in-memory event journal с идемпотентной доставкой, диагностикой sequence gaps и сходимостью трёх peers после partition; решение описано в [ADR-001](docs/adr/ADR-001-event-envelope.md). Начат client protocol: `GET /v1/metadata` публикует версию, capabilities и identity площадки до pairing; `POST /v1/pairing-requests` валидирует фамилию и platform, сохраняет pending request в памяти и дедуплицирует retry по device ID. Локальный operator application service одобряет request и выдаёт reconnect credential либо идемпотентно отзывает принятое устройство, делая credential inactive; anonymous LAN approval/revoke endpoint не создаётся. Authenticated WebSocket принимает typed commands, возвращает ACK и поддерживает `clock_sync`; `heartbeat` получает typed `heartbeat_ack`, а malformed heartbeat — `heartbeat_rejected` без закрытия сессии. Anonymous `POST /score` удалён. Secure credential delivery/storage, durable device state, heartbeat scheduling/timeouts, reconnect/resync и client implementation ещё не реализованы. Начата transport-agnostic domain boundary: валидированный `DomainCommand` с полным typed audit context преобразуется в `DomainEvent` после назначения event ID и UTC timestamp. Турнирная модель и production P2P transport также не реализованы; импорт заявок (`df-template-v1`) реализован в I4a.
 
 Read-only `GET /v1/health` возвращает typed liveness status `healthy` и не раскрывает данные pairing или credentials. Structured logging, persistence readiness и desktop diagnostics ещё не реализованы.
 
@@ -92,7 +92,7 @@ delivery proof, хранит решения pairing в журнале, а deskto
 
 ## Ограничения pilot
 
-- готовые сетки импортируются, генерация жеребьёвки не входит в scope;
+- заявки импортируются по шаблону `df-template-v1`, сетки строит жеребьёвка по правилам ФХР 2024 (случайная и с разведением);
 - Windows signing и macOS notarization отложены до этапа после pilot;
 - P2P protocol и упаковка PostgreSQL должны пройти обязательные ADR/spikes;
-- baseline схемы импорта зафиксирован как `df-template-v1`; adapter и его тесты входят в этап 4.
+- посев по рейтингу, двойное выбывание и олимпийская система не входят в scope.
