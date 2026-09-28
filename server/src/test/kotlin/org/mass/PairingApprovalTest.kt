@@ -128,6 +128,27 @@ class PairingApprovalTest {
     }
 
     @Test
+    fun `revoking all devices revokes every accepted device and leaves pending requests`() {
+        val pairingRequests = PairingRequests()
+        val accepted = listOf("android-5" to "Petrov", "ios-5" to "Ivanova").map { (deviceId, surname) ->
+            val pending = assertIs<PairingSubmission.Pending>(
+                pairingRequests.submit(PairingRequestCommand(deviceId, surname, deviceId.substringBefore('-'))),
+            )
+            assertIs<PairingApproval.Accepted>(pairingRequests.approve(pending.request.requestId)).request
+        }
+        val waiting = assertIs<PairingSubmission.Pending>(
+            pairingRequests.submit(PairingRequestCommand("android-6", "Orlov", "android")),
+        )
+
+        assertEquals(2, pairingRequests.revokeAll())
+        assertEquals(0, pairingRequests.revokeAll())
+
+        accepted.forEach { assertEquals(false, pairingRequests.isReconnectCredentialActive(it.reconnectCredential)) }
+        assertTrue(pairingRequests.operatorRegistry().devices.all(OperatorDevice::revoked))
+        assertEquals(listOf(waiting.request), pairingRequests.pending())
+    }
+
+    @Test
     fun `unknown operator revocation does not alter accepted credentials`() {
         val pairingRequests = PairingRequests()
         val pending = assertIs<PairingSubmission.Pending>(

@@ -977,6 +977,17 @@ class PairingRequests(private val journal: DeviceRegistryJournal = DeviceRegistr
         }
     }
 
+    /**
+     * Revokes every accepted device (the operator's «reset all devices»): each one is its own revocation event, exactly as
+     * if revoked one by one, so its socket closes and its new events are rejected. Returns how many were revoked.
+     */
+    fun revokeAll(): Int = synchronized(this) {
+        devicesByRequestId.values
+            .filter { it.state == DeviceState.ACCEPTED }
+            .map { it.requestId }
+            .count { requestId -> (revoke(requestId) as? PairingRevocation.Revoked)?.created == true }
+    }
+
     fun isReconnectCredentialActive(reconnectCredential: String): Boolean = synchronized(this) {
         activeDevice(reconnectCredential) != null
     }
