@@ -87,6 +87,33 @@ class DrawTest {
     }
 
     @Test
+    fun `several groups leave room for each other`() {
+        // Coaches 3 + 3 + 2 in a bracket of 8: all three groups fit without a first-bout clash, the pair meets in the final.
+        val category = category(coaches = List(8) { "Тренер ${it % 3}" })
+        repeat(50) { seed ->
+            val draw = Draw.draw(category, DrawSystem.SINGLE_ELIMINATION, byCoach, seed.toLong())
+            assertEquals(emptyList(), Draw.clashes(category, draw, byCoach), "seed $seed: $draw")
+            val (first, second) = slotsOf(draw, category.entries.filterIndexed { index, _ -> index % 3 == 2 })
+            assertEquals(3, Draw.meetingRound(first, second), "seed $seed: $draw")
+        }
+    }
+
+    @Test
+    fun `when every coach has two entries each pair meets only in the final`() {
+        (2..16).map { it * 2 }.forEach { count ->
+            val category = category(coaches = List(count) { "Тренер ${it / 2}" })
+            repeat(10) { seed ->
+                val draw = Draw.draw(category, DrawSystem.SINGLE_ELIMINATION, byCoach, seed.toLong())
+                val final = Integer.numberOfTrailingZeros(draw.positions.size)
+                category.entries.chunked(2).forEach { pair ->
+                    val (first, second) = slotsOf(draw, pair)
+                    assertEquals(final, Draw.meetingRound(first, second), "$count entries, seed $seed: $draw")
+                }
+            }
+        }
+    }
+
+    @Test
     fun `an unavoidable clash is marked`() {
         val category = category(coaches = List(4) { "Общий тренер" })
         val draw = Draw.draw(category, DrawSystem.SINGLE_ELIMINATION, byCoach, 3)

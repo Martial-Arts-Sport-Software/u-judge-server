@@ -135,7 +135,8 @@ object Draw {
     /**
      * Single elimination: the bracket is the next power of two; entries take the slots of seeds 1..n in the standard seed
      * order, so byes (the slots of the missing seeds) never meet each other and spread evenly over halves and quarters.
-     * Separation places the largest groups first, each entry where it meets its own group as late as possible.
+     * Separation places the largest groups first, each entry where it meets its own group as late as possible and, among
+     * equally good slots, as far as possible from entries of other groups, so the later groups still find free sections.
      */
     private fun elimination(keys: List<String>, groups: Map<String, String>, random: Random): List<String?> {
         val size = Integer.highestOneBit(maxOf(2, keys.size) * 2 - 1)
@@ -146,14 +147,18 @@ object Draw {
         val grouped = groups.entries.groupBy({ it.value }, { it.key }).values
             .shuffled(random)
             .sortedByDescending { it.size }
+        val placedGrouped = mutableListOf<Int>()
         grouped.forEach { members ->
             val placed = mutableListOf<Int>()
             members.shuffled(random).forEach { key ->
-                val score = { slot: Int -> placed.minOfOrNull { meetingRound(slot, it) } ?: Int.MAX_VALUE }
-                val best = free.maxOf(score)
-                val slot = free.filter { score(it) == best }.random(random)
+                fun latest(slot: Int, others: List<Int>) = others.minOfOrNull { meetingRound(slot, it) } ?: Int.MAX_VALUE
+                val own = free.maxOf { latest(it, placed) }
+                val candidates = free.filter { latest(it, placed) == own }
+                val spread = candidates.maxOf { latest(it, placedGrouped) }
+                val slot = candidates.filter { latest(it, placedGrouped) == spread }.random(random)
                 slots[slot] = key
                 placed += slot
+                placedGrouped += slot
                 free -= slot
             }
         }
@@ -162,7 +167,55 @@ object Draw {
             slots[slot] = key
             free -= slot
         }
+        if (groups.isNotEmpty()) improve(slots, groups)
         return slots.toList()
+    }
+
+    /**
+     * Greedy placement can leave a later group without free sections, so pairs of entries swap while that lowers the
+     * separation penalty. Deterministic for the placement it starts from, so the seed still replays the draw.
+     */
+    private fun improve(slots: Array<String?>, groups: Map<String, String>) {
+        val occupied = slots.indices.filter { slots[it] != null }
+        var cost = separationPenalty(slots, groups)
+        var improved = true
+        while (improved && cost > 0) {
+            improved = false
+            for (first in occupied.indices) {
+                for (second in first + 1 until occupied.size) {
+                    val a = occupied[first]
+                    val b = occupied[second]
+                    if (groups[slots[a]] == groups[slots[b]]) continue
+                    slots[a] = slots[b].also { slots[b] = slots[a] }
+                    val swapped = separationPenalty(slots, groups)
+                    if (swapped < cost) {
+                        cost = swapped
+                        improved = true
+                    } else {
+                        slots[a] = slots[b].also { slots[b] = slots[a] }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * For every pair of one group: how much earlier than possible for the group's size they can meet. A group of two can be
+     * kept apart until the final, three or four until the semifinals, and so on; each round earlier weighs eight times more.
+     */
+    internal fun separationPenalty(slots: Array<String?>, groups: Map<String, String>): Long {
+        val rounds = Integer.numberOfTrailingZeros(slots.size)
+        return slots.indices.filter { slots[it] in groups }.groupBy { groups.getValue(slots[it]!!) }.values.sumOf { members ->
+            if (members.size < 2) return@sumOf 0L
+            val sections = Integer.highestOneBit(members.size * 2 - 1)
+            val ideal = maxOf(1, rounds - Integer.numberOfTrailingZeros(sections) + 1)
+            var penalty = 0L
+            for (i in members.indices) for (j in i + 1 until members.size) {
+                val earlier = ideal - meetingRound(members[i], members[j])
+                if (earlier > 0) penalty += 1L shl (3 * earlier)
+            }
+            penalty
+        }
     }
 
     /** Slot → seed number of a standard bracket of [size]: `1, 8, 4, 5, 2, 7, 3, 6` for 8. */
