@@ -1,8 +1,13 @@
 package org.mass.ui.bracket
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,18 +24,33 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import org.jetbrains.compose.resources.painterResource
 import org.mass.applications.CategoryEntry
 import org.mass.draw.BoutSide
 import org.mass.draw.Bouts
@@ -39,6 +59,9 @@ import org.mass.draw.DrawFormat
 import org.mass.draw.drawKey
 import org.mass.enums.Colors
 import org.mass.locale.Localization
+import u_judge_server.desktop.generated.resources.Res
+import u_judge_server.desktop.generated.resources.user_icon
+import kotlin.math.roundToInt
 
 /** Sizes of one bracket drawing: the preview panel is compact, the full-screen view is large (owner's mockups). */
 data class BracketScale(val boxWidth: Dp, val boxHeight: Dp, val slotHeight: Dp, val columnGap: Dp, val fullNames: Boolean) {
@@ -49,23 +72,34 @@ data class BracketScale(val boxWidth: Dp, val boxHeight: Dp, val slotHeight: Dp,
 }
 
 /**
+ * Editing of an elimination bracket: a click picks an entry as in the list, dragging an entry onto another one swaps them.
+ * [highlighted] entries are drawn in the primary colour.
+ */
+data class BracketEditing(
+    val highlighted: Set<String>,
+    val onPick: (String) -> Unit,
+    val onSwap: (String, String) -> Unit,
+)
+
+/**
  * The drawn bracket of a category (ADR-008 §7): an elimination bracket with rounds left to right, byes placed straight in
- * the second round as in the organiser's protocols and a final «Победитель» box, or the rounds of a round robin. Entries in
- * [clashes] are outlined: separation could not keep them apart.
+ * the second round as in the organiser's protocols and a final «Победитель» box, or the rounds of a round robin. The upper
+ * side of every pair is blue and the lower one red, also while the entry is not known yet. With [editing] the entries of
+ * an elimination bracket can be dragged onto each other.
  */
 @Composable
 fun BracketComponent(
     draw: CategoryDraw,
     entries: List<CategoryEntry>,
-    clashes: Set<String>,
     modifier: Modifier = Modifier,
     scale: BracketScale = BracketScale.Compact,
+    editing: BracketEditing? = null,
 ) {
     val byKey = entries.associateBy { it.drawKey }
     val label = { key: String -> byKey[key]?.let { entryLabel(it, scale.fullNames) } ?: key }
     Box(modifier.verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(16.dp)) {
         when (draw.format) {
-            DrawFormat.ELIMINATION -> Elimination(draw, label, clashes, scale)
+            DrawFormat.ELIMINATION -> Elimination(draw, label, scale, editing)
             DrawFormat.ROUND_ROBIN -> RoundRobin(draw, label, scale)
             DrawFormat.PERFORMANCE_ORDER, DrawFormat.NO_BOUTS -> Unit
         }
@@ -88,7 +122,7 @@ fun entryLabel(entry: CategoryEntry, full: Boolean): String = entry.athletes.joi
  * entry passed with a bye).
  */
 @Composable
-private fun Elimination(draw: CategoryDraw, label: (String) -> String, clashes: Set<String>, scale: BracketScale) {
+private fun Elimination(draw: CategoryDraw, label: (String) -> String, scale: BracketScale, editing: BracketEditing?) {
     val size = draw.positions.size
     val rounds = Bouts.rounds(draw)
     val occupied = mutableListOf(draw.positions.map { it != null })
@@ -111,6 +145,31 @@ private fun Elimination(draw: CategoryDraw, label: (String) -> String, clashes: 
 
     val width = column * rounds + scale.boxWidth
     val height = scale.slotHeight * size
+
+    // Every shown box: round 1 shows only the pairs that fight; an entry with a bye starts in the round-2 column.
+    val slots = (0 until rounds).flatMap { level ->
+        (0 until (size shr level)).mapNotNull { index ->
+            val shown = if (level == 0) bout(1, index / 2) else occupied[level][index]
+            if (shown) Slot(known[level][index], upper = index % 2 == 0, x = column * level, y = centre(level, index)) else null
+        }
+    }
+    var dragged by remember { mutableStateOf<Slot?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current
+    // The entry under the centre of the dragged box: dropping there swaps the two.
+    val target = dragged?.let { from ->
+        with(density) {
+            val centreX = (from.x + scale.boxWidth / 2).toPx() + dragOffset.x
+            val centreY = from.y.toPx() + dragOffset.y
+            slots.firstOrNull { slot ->
+                slot.key != null && slot.key != from.key &&
+                    centreX in slot.x.toPx()..(slot.x + scale.boxWidth).toPx() &&
+                    centreY in (slot.y - scale.boxHeight / 2).toPx()..(slot.y + scale.boxHeight / 2).toPx()
+            }
+        }
+    }
+    val currentTarget by rememberUpdatedState(target)
+    val currentEditing by rememberUpdatedState(editing)
     Box(Modifier.size(width, height)) {
         Canvas(Modifier.size(width, height)) {
             val stroke = 2.dp.toPx()
@@ -129,44 +188,95 @@ private fun Elimination(draw: CategoryDraw, label: (String) -> String, clashes: 
                 }
             }
         }
-        (0 until rounds).forEach { level ->
-            (0 until (size shr level)).forEach { index ->
-                // Round 1 shows only the pairs that fight; an entry with a bye starts in the round-2 column.
-                val shown = if (level == 0) bout(1, index / 2) else occupied[level][index]
-                if (!shown) return@forEach
-                val key = known[level][index]
-                EntryBox(
-                    text = key?.let(label).orEmpty(),
-                    upper = index % 2 == 0,
-                    clash = key != null && key in clashes,
-                    scale = scale,
-                    x = column * level,
-                    y = centre(level, index),
-                )
+        slots.forEach { slot ->
+            val key = slot.key
+            val moving = dragged == slot
+            val interaction = if (editing != null && key != null) {
+                Modifier
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .clickable(role = Role.Button) { editing.onPick(key) }
+                    .pointerInput(slot) {
+                        detectDragGestures(
+                            onDragStart = {
+                                dragged = slot
+                                dragOffset = Offset.Zero
+                            },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragOffset += amount
+                            },
+                            onDragEnd = {
+                                currentTarget?.key?.let { other -> currentEditing?.onSwap(key, other) }
+                                dragged = null
+                            },
+                            onDragCancel = { dragged = null },
+                        )
+                    }
+            } else {
+                Modifier
             }
+            // The place the entry is dragged from stays marked in its side colour.
+            if (moving) DragOrigin(slot, scale)
+            EntryBox(
+                text = key?.let(label).orEmpty(),
+                upper = slot.upper,
+                highlighted = key != null && (key in editing?.highlighted.orEmpty() || moving || target == slot),
+                scale = scale,
+                x = slot.x,
+                y = slot.y,
+                modifier = if (moving) {
+                    Modifier.zIndex(1f).offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }.alpha(0.9f).then(interaction)
+                } else {
+                    interaction
+                },
+            )
         }
         WinnerBox(scale, x = column * rounds, y = centre(rounds, 0))
     }
 }
 
+/** The empty place of a dragged entry: the side colour as the border, faded inside, a person in the middle. */
 @Composable
-private fun EntryBox(text: String, upper: Boolean, clash: Boolean, scale: BracketScale, x: Dp, y: Dp) {
-    val background = if (upper) Colors.PRIMARY.color else LIGHT_ENTRY_COLOR
-    val content = if (upper) Color.White else Colors.BROWN.color
+private fun DragOrigin(slot: Slot, scale: BracketScale) {
+    val colour = sideColor(slot.upper)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .offset(slot.x, slot.y - scale.boxHeight / 2)
+            .size(scale.boxWidth, scale.boxHeight)
+            .clip(BOX_SHAPE)
+            .background(colour.copy(alpha = 0.2f))
+            .border(2.dp, colour, BOX_SHAPE),
+    ) {
+        Image(
+            painterResource(Res.drawable.user_icon),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(colour),
+            modifier = Modifier.size(scale.boxHeight * 0.6f),
+        )
+    }
+}
+
+/** One shown box of an elimination bracket; [key] is null until the entry is known from the results. */
+private data class Slot(val key: String?, val upper: Boolean, val x: Dp, val y: Dp)
+
+@Composable
+private fun EntryBox(text: String, upper: Boolean, highlighted: Boolean, scale: BracketScale, x: Dp, y: Dp, modifier: Modifier) {
+    val background by animateColorAsState(if (highlighted) Colors.PRIMARY.color else sideColor(upper), tween(300))
     Box(
         contentAlignment = Alignment.CenterStart,
         modifier = Modifier
             .offset(x, y - scale.boxHeight / 2)
+            .then(modifier)
             .size(scale.boxWidth, scale.boxHeight)
             .clip(BOX_SHAPE)
             .background(background)
-            .then(if (clash) Modifier.border(2.dp, CLASH_COLOR, BOX_SHAPE) else Modifier)
             .semantics { contentDescription = text }
             .padding(horizontal = 12.dp),
     ) {
         Text(
             text,
-            color = content,
+            color = Color.White,
             style = if (scale.fullNames) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -219,12 +329,12 @@ private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: Bra
                             modifier = Modifier
                                 .width(scale.boxWidth)
                                 .clip(BOX_SHAPE)
-                                .background(if (side == 0) Colors.PRIMARY.color else LIGHT_ENTRY_COLOR)
+                                .background(sideColor(upper = side == 0))
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         ) {
                             Text(
                                 label(key),
-                                color = if (side == 0) Color.White else Colors.BROWN.color,
+                                color = Color.White,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -244,8 +354,7 @@ private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: Bra
     }
 }
 
+private fun sideColor(upper: Boolean) = if (upper) Colors.BLUE.color else Colors.RED.color
+
 private val BOX_SHAPE = RoundedCornerShape(8.dp)
-// The mockups' lower slot: a light tint of the primary colour with dark text.
-private val LIGHT_ENTRY_COLOR = Color(0xFFB79CF2)
 private val WINNER_COLOR = Color(0xFF3DD65C)
-private val CLASH_COLOR = Color(0xFFB3261E)
