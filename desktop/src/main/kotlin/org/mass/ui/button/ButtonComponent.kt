@@ -17,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -31,6 +32,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.mass.State
 import org.mass.enums.Colors
 import org.mass.enums.Routes
+import org.mass.ui.tooltip.TooltipComponent
 
 /**
  * buttons variants
@@ -58,6 +60,8 @@ enum class ButtonStyles {
  * @param colorFilter [ColorFilter] instance, applied to button's icon ([ButtonStyles.Icon] only)
  * @param iconPadding inner padding for icon inside button ([ButtonStyles.Icon] only)
  * @param enabled button's accessibility
+ * @param tooltip text shown under the button while the pointer rests on it, e.g. why a disabled button is unavailable;
+ * no tooltip without it
  */
 @Composable
 fun ButtonComponent(
@@ -70,6 +74,28 @@ fun ButtonComponent(
     iconPadding: Dp = 10.dp,
     enabled: Boolean = true,
     textStyle: TextStyle? = null,
+    tooltip: String? = null,
+) {
+    if (tooltip == null) {
+        StyledButton(text, style, modifier, onclick, iconSrc, colorFilter, iconPadding, enabled, textStyle)
+    } else {
+        TooltipComponent(tooltip, modifier) {
+            StyledButton(text, style, Modifier, onclick, iconSrc, colorFilter, iconPadding, enabled, textStyle)
+        }
+    }
+}
+
+@Composable
+private fun StyledButton(
+    text: String?,
+    style: ButtonStyles,
+    modifier: Modifier,
+    onclick: () -> Unit,
+    iconSrc: DrawableResource?,
+    colorFilter: ColorFilter?,
+    iconPadding: Dp,
+    enabled: Boolean,
+    textStyle: TextStyle?,
 ) {
     when(style) {
         ButtonStyles.Icon -> require(iconSrc != null)
@@ -164,7 +190,8 @@ fun ButtonComponent(
             ) {
                 Image(
                     modifier = Modifier
-                        .aspectRatio(1f),
+                        .aspectRatio(1f)
+                        .alpha(if (enabled) 1f else 0.6f),
                     painter = painterResource(iconSrc!!),
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
