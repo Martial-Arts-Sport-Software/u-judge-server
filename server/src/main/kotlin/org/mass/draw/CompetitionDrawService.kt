@@ -69,6 +69,14 @@ data class DrawBoard(val competitionId: String?, val method: DrawMethod, val cat
     val previews: Int
         get() = categories.count { it.preview != null }
 
+    /** Every category is drawn: «Провести жеребьёвку» becomes «Провести жеребьёвку заново». */
+    val drawn: Boolean
+        get() = categories.none { it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.NEEDS_REDRAW }
+
+    /** The categories whose system the operator can still choose: «Применить ко всем» changes them. */
+    val systemSelectable: List<CategoryDrawState>
+        get() = categories.filter { it.systemSelectable && it.status != CategoryStatus.STARTED }
+
     fun category(categoryId: String): CategoryDrawState? = categories.firstOrNull { it.category.id == categoryId }
 }
 
@@ -159,12 +167,19 @@ class CompetitionDrawService(
         DrawOutcome.Done
     }
 
-    /** «Провести жеребьёвку»: previews for every category that has no confirmed draw of its current entries. */
+    /**
+     * «Провести жеребьёвку»: previews for every category that has no confirmed draw of its current entries. Once every
+     * category is drawn, «Провести жеребьёвку заново» gives every category that has not started a new seed; confirmed draws
+     * stay until the new previews are confirmed.
+     */
     @Synchronized
     fun drawAll(): DrawOutcome = withBoard { board ->
-        board.categories
-            .filter { it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.NEEDS_REDRAW }
-            .forEach { previews[it.category.id] = preview(it.category, it.system, board.method, seeds()) }
+        val targets = if (board.drawn) {
+            board.categories.filter { it.status == CategoryStatus.CONFIRMED || it.status == CategoryStatus.PREVIEW }
+        } else {
+            board.categories.filter { it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.NEEDS_REDRAW }
+        }
+        targets.forEach { previews[it.category.id] = preview(it.category, it.system, board.method, seeds()) }
         DrawOutcome.Done
     }
 
@@ -178,11 +193,14 @@ class CompetitionDrawService(
     /** The system of a category; the preview is redrawn with the same seed, a confirmed draw gets a preview to confirm. */
     @Synchronized
     fun setSystem(categoryId: String, system: DrawSystem): DrawOutcome = withCategory(categoryId) { board, state ->
-        systems[categoryId] = system
-        val seed = state.preview?.seed ?: state.confirmed?.seed ?: seeds()
-        if (state.preview != null || state.status == CategoryStatus.CONFIRMED) {
-            previews[categoryId] = preview(state.category, system, board.method, seed)
-        }
+        applySystem(board, state, system)
+        DrawOutcome.Done
+    }
+
+    /** «Применить ко всем»: [system] for every category whose system can be chosen and that has not started. */
+    @Synchronized
+    fun setSystemForAll(system: DrawSystem): DrawOutcome = withBoard { board ->
+        board.systemSelectable.forEach { applySystem(board, it, system) }
         DrawOutcome.Done
     }
 
@@ -264,6 +282,15 @@ class CompetitionDrawService(
         val confirmed = state.confirmed?.takeIf { state.status == CategoryStatus.CONFIRMED }
             ?: return@withCategory DrawOutcome.Rejected(DrawRejection.NOT_CONFIRMED)
         write(listOf(DrawEvent.Started(checkNotNull(board.competitionId), categoryId, confirmed.ownership.bracketId.value)))
+    }
+
+    private fun applySystem(board: DrawBoard, state: CategoryDrawState, system: DrawSystem) {
+        val categoryId = state.category.id
+        systems[categoryId] = system
+        val seed = state.preview?.seed ?: state.confirmed?.seed ?: seeds()
+        if (state.preview != null || state.status == CategoryStatus.CONFIRMED) {
+            previews[categoryId] = preview(state.category, system, board.method, seed)
+        }
     }
 
     private fun preview(category: ApplicationCategory, system: DrawSystem, method: DrawMethod, seed: Long) =

@@ -132,6 +132,35 @@ class CompetitionDrawServiceTest {
     }
 
     @Test
+    fun `once everything is drawn the operator redraws all categories and sets one system for all`() {
+        val (applications, draws) = services("draw-again")
+        val other = category(List(4) { "Тренер $it" }, id = "kerugi-44", weight = "до 44 кг")
+        applications.import(competition(kerugi, small, other, single, forms), replaceConfirmed = false)
+        draws.drawAll()
+        draws.confirm()
+        assertTrue(draws.board().drawn)
+        draws.start("kerugi-44")
+
+        // «Провести жеребьёвку заново»: new previews for every confirmed category that has not started.
+        val confirmed = draws.board().categories.associate { it.category.id to it.confirmed?.seed }
+        assertEquals(DrawOutcome.Done, draws.drawAll())
+        val again = draws.board()
+        assertEquals(setOf("kerugi-33", "kerugi-36", "forms"), again.categories.filter { it.preview != null }.map { it.category.id }.toSet())
+        assertNotEquals(confirmed["kerugi-33"], again.category("kerugi-33")!!.preview!!.seed)
+        assertEquals(confirmed["kerugi-33"], again.category("kerugi-33")!!.confirmed!!.seed)
+
+        // «Применить ко всем»: the Kerugi categories with a choice get the system, the started one keeps its draw.
+        assertEquals(listOf("kerugi-33", "kerugi-36"), again.systemSelectable.map { it.category.id })
+        assertEquals(DrawOutcome.Done, draws.setSystemForAll(DrawSystem.ROUND_ROBIN))
+        val roundRobin = draws.board()
+        assertEquals(DrawFormat.ROUND_ROBIN, roundRobin.category("kerugi-33")!!.shown!!.format)
+        assertEquals(DrawFormat.ROUND_ROBIN, roundRobin.category("kerugi-36")!!.shown!!.format)
+        assertEquals(CategoryStatus.STARTED, roundRobin.category("kerugi-44")!!.status)
+        assertEquals(DrawOutcome.Done, draws.confirm())
+        assertEquals(DrawFormat.ROUND_ROBIN, draws.board().category("kerugi-33")!!.shown!!.format)
+    }
+
+    @Test
     fun `a started category rejects a redraw and edits, also after a restart`() {
         val (applications, draws) = services("draw-lock")
         applications.import(competition(kerugi), replaceConfirmed = false)
