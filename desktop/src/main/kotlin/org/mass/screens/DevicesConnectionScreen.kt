@@ -5,8 +5,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
@@ -23,6 +26,11 @@ import u_judge_server.desktop.generated.resources.empty_connected_devices
 import u_judge_server.desktop.generated.resources.server_computer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ScrollbarStyle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -206,6 +214,7 @@ object DevicesConnectionScreen : Screen {
     ) {
         val running = state as? ServerRuntimeState.Running
         val host = remember { hostDescription() }
+        val scroll = rememberScrollState()
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -231,9 +240,33 @@ object DevicesConnectionScreen : Screen {
                 InfoPill(Localization.getString("devices_code_unavailable"))
                 HostCard(host, Modifier)
             }
-            StatusItems(state)
-            error?.let { InfoPill(it, background = FAILURE_COLOR) }
-            Spacer(Modifier.weight(1f))
+            // In a small window only the component statuses scroll, so they never push the confirmation block out.
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(scroll)
+                        .padding(end = if (scroll.maxValue > 0) 12.dp else 0.dp),
+                ) {
+                    StatusItems(state)
+                    error?.let { InfoPill(it, background = FAILURE_COLOR) }
+                }
+                if (scroll.maxValue > 0) {
+                    VerticalScrollbar(
+                        adapter = rememberScrollbarAdapter(scroll),
+                        style = ScrollbarStyle(
+                            minimalHeight = 24.dp,
+                            thickness = 6.dp,
+                            shape = RoundedCornerShape(3.dp),
+                            hoverDurationMillis = 300,
+                            unhoverColor = Color.White.copy(alpha = 0.35f),
+                            hoverColor = Color.White.copy(alpha = 0.7f),
+                        ),
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                    )
+                }
+            }
             ConfirmBlock(canResetDevices, onResetDevices)
         }
     }
@@ -588,9 +621,9 @@ object DevicesConnectionScreen : Screen {
     @Composable
     private fun PendingRow(number: Int, request: PendingPairingRequest, onApprove: () -> Unit, onReject: () -> Unit) {
         DeviceRow("$number. ${request.surname} - ${platformName(request.platform)}", null) {
-            ActionIcon(Localization.getString("devices_reject"), Res.drawable.cross_icon, size = 22, onClick = onReject)
-            Spacer(Modifier.width(14.dp))
-            ActionIcon(Localization.getString("devices_approve"), Res.drawable.check_icon, size = 30, onClick = onApprove)
+            ActionIcon(Localization.getString("devices_reject"), Res.drawable.cross_icon, onClick = onReject)
+            Spacer(Modifier.width(6.dp))
+            ActionIcon(Localization.getString("devices_approve"), Res.drawable.check_icon, onClick = onApprove)
         }
     }
 
@@ -599,7 +632,7 @@ object DevicesConnectionScreen : Screen {
         val connected = device.connectionState == DeviceConnectionState.CONNECTED
         val state = Localization.getString(if (connected) "devices_state_connected" else "devices_state_disconnected")
         DeviceRow("$number. ${device.surname} - ${platformName(device.platform)}", state, connected) {
-            ActionIcon(Localization.getString("devices_revoke"), Res.drawable.cross_icon, size = 30, onClick = onRevoke)
+            ActionIcon(Localization.getString("devices_revoke"), Res.drawable.cross_icon, onClick = onRevoke)
         }
     }
 
@@ -628,14 +661,22 @@ object DevicesConnectionScreen : Screen {
         }
     }
 
-    /** Figma check or cross icon; the label names the action for screen readers. */
+    /**
+     * Figma check or cross icon; the label names the action for screen readers. Both are drawn at one size, so their marks
+     * are equally tall, inside the same round touch area that the press ripple follows.
+     */
     @Composable
-    private fun ActionIcon(label: String, icon: DrawableResource, size: Int, onClick: () -> Unit) {
-        Image(
-            painter = painterResource(icon),
-            contentDescription = label,
-            modifier = Modifier.size(size.dp).clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
-        )
+    private fun ActionIcon(label: String, icon: DrawableResource, onClick: () -> Unit) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+        ) {
+            Image(painter = painterResource(icon), contentDescription = label, modifier = Modifier.size(26.dp))
+        }
     }
 
     /** Illustrated empty list: what is missing and what to do about it. */
