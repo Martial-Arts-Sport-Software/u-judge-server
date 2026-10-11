@@ -31,24 +31,30 @@ ADR-007 defines how one category is drawn. It leaves open:
    random, or separation by subject, city, organisation or first coach (ADR-007). The criterion can be combined with the
    belt (`гып`, technical qualification), as HapkiPRO's «пояс + тренер» and «пояс + город»: then only entries with the
    same belt and the same criterion value are separated.
-3. **System per category.** Default «Выбывание»; «Круговая» for 3-5 entries; the operator can change it per category.
-   Kerugi always has two third places without a bronze bout (FHR §1.2.2). One entry: no bout, the status is «нет
-   поединков». Two entries: one final bout, the system choice is disabled.
-4. **Workflow.** «Провести жеребьёвку» makes previews for every category without a confirmed draw; «Перемешать» redraws
-   the selected category with a new seed; «Подтвердить» confirms the previews, one `category_draw_confirmed` per category
-   in one transaction. Only confirmed draws are journaled (ADR-007 §2).
-5. **Editing.** Before the start the operator selects two entries of a category (both highlighted), swaps them and saves
-   or goes back without saving; a save is one `bracket_edited` event (ADR-007 §7).
+3. **System per category.** Default «Выбывание»; «Круговая» for 3-5 entries; the operator can change it per category or
+   apply the system of the selected category to all categories that have a choice and have not started. Kerugi always
+   has two third places without a bronze bout (FHR §1.2.2). One entry: no bout, the status is «нет поединков». Two
+   entries: one final bout, the system choice is disabled.
+4. **Workflow.** «Провести жеребьёвку» makes previews for every category without a confirmed draw; once every category
+   is drawn the button becomes «Подтвердить» and the redraw icon «Провести жеребьёвку заново» gives every category that
+   has not started a new seed; «Перемешать» redraws the selected category with a new seed; «Подтвердить» confirms the
+   previews, one `category_draw_confirmed` per category in one transaction. Only confirmed draws are journaled (ADR-007
+   §2).
+5. **Editing.** Before the start the operator picks an entry of a category (highlighted, swap arrows on every entry),
+   then a second one, or drags an entry onto another one in the elimination bracket; the two swap, light up for a moment
+   and look like the others again. The operator saves or goes back without saving; a save is one `bracket_edited` event
+   (ADR-007 §7). Editing a confirmed draw needs no new confirmation: the save is the operator's decision and the journal
+   keeps the previous draw.
 6. **Bout numbers.** One numbering across all courts, derived from the confirmed draws, not stored: round 1 of every
    category (courts in order, categories of a court in the operator's order, default import order), then round 2, and so
    on; round-robin rounds interleave the same way; byes are not numbered. Technical disciplines get performance numbers
    in the same pass. Numbers are frozen once the first bout of the competition starts (I2a); until every category is
    confirmed the views and the PDF say «нумерация предварительная».
-7. **Bracket view.** Per the owner's mockups: rounds left to right, entry boxes in the primary colour (upper slot dark,
-   lower slot light), connectors, a green final box «Победитель» (empty until I2b) and «Бой № N» at every bout. The
-   preview panel shows it under «Список / Сетка» and «Во весь экран»; the full-screen view has close, «← <category> ·
-   Категория N из M →», «Все категории», chips of the categories of the same discipline and age class, «Список / Сетка»
-   and the download.
+7. **Bracket view.** Per the owner's mockups: rounds left to right, entry boxes by side of the bout (upper slot blue,
+   lower slot red, as the client's sides; also while the entry is not known), connectors, a green final box «Победитель»
+   (empty until I2b) and «Бой № N» at every bout. The preview panel shows it under «Список / Сетка» and «Во весь экран»,
+   only for Kerugi categories with bouts; the full-screen view has close, «← <category> · Категория N из M →», «Все
+   категории», chips of the categories of the same discipline and age class, «Список / Сетка» and the download.
 8. **Protocol PDF.** After a draw is confirmed the operator downloads «Протокол хода соревнований» in the organiser's
    layout: A4 landscape, one page per category; title, competition name, date and place; «<section>, <weight>» plus
    «(Площадка № N)» when there is more than one court; boxes «Фамилия И. О. (город)» in the first round and bye entries in
