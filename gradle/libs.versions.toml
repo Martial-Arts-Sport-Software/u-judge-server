@@ -9,6 +9,8 @@ kotlinx-serialization = "1.11.0"
 kotlinx-datetime = "0.8.0-0.6.x-compat"
 
 ktor = "3.5.2"
+# Patched netty-handler CVEs ahead of Ktor's own Netty line.
+netty = "4.2.17.Final"
 exposed = "1.5.0"
 postgresql = "42.7.13"
 postgres-binaries = "18.6.0"
@@ -49,6 +51,7 @@ compose-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", vers
 navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "navigation-compose" }
 
 # Ktor
+netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
 ktor-network-tls-certificates = { module = "io.ktor:ktor-network-tls-certificates", version.ref = "ktor" }
