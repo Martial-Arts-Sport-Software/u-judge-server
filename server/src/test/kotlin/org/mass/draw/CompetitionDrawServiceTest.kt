@@ -132,6 +132,25 @@ class CompetitionDrawServiceTest {
     }
 
     @Test
+    fun `a re-import that drops a previewed category leaves the method and the confirmation working`() {
+        val (applications, draws) = services("draw-dropped")
+        applications.import(competition(kerugi, small), replaceConfirmed = false)
+        draws.drawAll()
+        draws.setSystem("kerugi-36", DrawSystem.SINGLE_ELIMINATION)
+
+        assertIs<ImportOutcome.Imported>(applications.import(competition(kerugi), replaceConfirmed = true))
+        assertEquals(DrawOutcome.Done, draws.setMethod(DrawMethod(SeparationCriterion.COACH)))
+        assertEquals(1, draws.board().previews)
+        assertEquals(DrawOutcome.Done, draws.confirm())
+
+        // The category comes back with the next import as not drawn, with its default system.
+        applications.import(competition(kerugi, small), replaceConfirmed = true)
+        val returned = draws.board().category("kerugi-36")!!
+        assertEquals(CategoryStatus.NOT_DRAWN, returned.status)
+        assertEquals(DrawSystem.ROUND_ROBIN, returned.system)
+    }
+
+    @Test
     fun `once everything is drawn the operator redraws all categories and sets one system for all`() {
         val (applications, draws) = services("draw-again")
         val other = category(List(4) { "Тренер $it" }, id = "kerugi-44", weight = "до 44 кг")

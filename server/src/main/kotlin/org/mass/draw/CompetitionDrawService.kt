@@ -125,6 +125,10 @@ class CompetitionDrawService(
             chosenMethod = null
             previewCompetitionId = current.competitionId
         }
+        // A re-import of the same competition can drop a category: its preview and system go with it.
+        val categoryIds = current.applications.categories.map { it.id }.toSet()
+        previews.keys.retainAll(categoryIds)
+        systems.keys.retainAll(categoryIds)
         val journaled = journaled(current.competitionId)
         // The method of the latest confirmation stays the competition's method after a restart.
         val method = chosenMethod
