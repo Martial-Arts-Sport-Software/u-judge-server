@@ -42,6 +42,9 @@ dependencies {
     // Competition applications (ADR-005)
     implementation(libs.poi.ooxml)
 
+    // Protocol PDFs (ADR-008 §8)
+    implementation(libs.pdfbox)
+
     // Connection Pool
     implementation(libs.hikari)
     implementation(libs.dns.sd.kt)

@@ -23,6 +23,7 @@ kotlin-logging = "8.0.4"
 log4j = "2.26.1"
 
 poi = "5.5.1"
+pdfbox = "3.0.8"
 
 uuid = "0.8.4"
 dnsSdKt = "1.1.0"
@@ -80,6 +81,9 @@ log4j-to-slf4j = { module = "org.apache.logging.log4j:log4j-to-slf4j", version.r
 
 # Applications (XLSX)
 poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "poi" }
+
+# Protocols (PDF)
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
 
 
 [plugins]
