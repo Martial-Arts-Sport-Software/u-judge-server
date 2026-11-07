@@ -6,6 +6,10 @@ import org.mass.applications.ImportOutcome
 import org.mass.applications.ImportPreparation
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.applications.SyntheticApplications
+import org.mass.draw.CategoryStatus
+import org.mass.draw.CompetitionDrawService
+import org.mass.draw.DrawOutcome
+import org.mass.draw.JdbcCompetitionDrawJournal
 import org.mass.replication.JdbcPeerJournal
 import java.nio.file.Files
 import java.nio.file.Path
@@ -112,7 +116,7 @@ class RealPostgresLifecycleTest {
     }
 
     @Test
-    fun `imports 500 participants atomically with a backup and restores them after a PostgreSQL restart`() {
+    fun `imports and draws 500 participants atomically and restores them after a PostgreSQL restart`() {
         val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
         assumeTrue(
             !installationDirectory.isNullOrBlank(),
@@ -127,28 +131,37 @@ class RealPostgresLifecycleTest {
                 platform = PostgresPlatform.current(),
             ),
         )
-        fun service(): CompetitionApplicationsService {
+        fun services(): Pair<CompetitionApplicationsService, CompetitionDrawService> {
             val dataSource = requireNotNull(runtime.dataSource)
             val store = JdbcDomainEventStore(dataSource)
-            return CompetitionApplicationsService(
-                journal = JdbcCompetitionApplicationsJournal(store, LocalPeerIdentity.loadOrCreate(dataSource)),
+            val peerId = LocalPeerIdentity.loadOrCreate(dataSource)
+            val applications = CompetitionApplicationsService(
+                journal = JdbcCompetitionApplicationsJournal(store, peerId),
                 backup = { CompetitionApplicationsService.backupPath(root.resolve("backups"), Instant.now()).also(store::exportJournal) },
             )
+            return applications to CompetitionDrawService(JdbcCompetitionDrawJournal(store, peerId), applications.history, peerId)
         }
 
         try {
             assertIs<PostgresState.Running>(runtime.start())
-            val service = service()
+            val (service, draws) = services()
             val preparation = service.prepare("Синтетика", LocalDate.of(2025, 11, 15), SyntheticApplications.files(participants = 500))
             val applications = assertIs<ImportPreparation.Valid>(preparation).applications
             val imported = assertIs<ImportOutcome.Imported>(service.import(applications, replaceConfirmed = false))
             assertTrue(Files.exists(requireNotNull(imported.backup)))
+            // Every category is confirmed in one transaction.
+            assertEquals(DrawOutcome.Done, draws.drawAll())
+            assertEquals(DrawOutcome.Done, draws.confirm())
+            val drawn = draws.board()
+            assertTrue(drawn.categories.none { it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.PREVIEW })
 
             assertEquals(PostgresState.Stopped, runtime.stop())
             assertIs<PostgresState.Running>(runtime.start())
-            val restored = requireNotNull(service().history.value.current)
+            val (restartedApplications, restartedDraws) = services()
+            val restored = requireNotNull(restartedApplications.history.value.current)
             assertEquals(imported.record, restored)
             assertEquals(500, restored.applications.athleteCount)
+            assertEquals(drawn.categories.map { it.shown }, restartedDraws.board().categories.map { it.shown })
         } finally {
             runtime.stop()
             root.toFile().deleteRecursively()

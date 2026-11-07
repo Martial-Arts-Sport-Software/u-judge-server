@@ -21,6 +21,8 @@ import kotlinx.coroutines.launch
 import org.mass.applications.CompetitionApplicationsService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.domain.PeerId
+import org.mass.draw.CompetitionDrawService
+import org.mass.draw.JdbcCompetitionDrawJournal
 import org.mass.persistence.JdbcDomainEventStore
 import org.mass.persistence.LocalPeerIdentity
 import org.mass.persistence.ManagedPostgresRuntime
@@ -114,6 +116,11 @@ class ServerRuntime(
     var competitionApplications: CompetitionApplicationsService? = null
         private set
 
+    /** The draw of the current competition (ADR-007, ADR-008); null while the server and its journal are not running. */
+    @Volatile
+    var competitionDraws: CompetitionDrawService? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -141,6 +148,7 @@ class ServerRuntime(
         postgres?.stop()
         postgres = null
         competitionApplications = null
+        competitionDraws = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -198,6 +206,11 @@ class ServerRuntime(
             )
         } catch (exception: Exception) {
             return failStartup("Competition applications could not be restored: ${exception.message}")
+        }
+        competitionDraws = try {
+            CompetitionDrawService(JdbcCompetitionDrawJournal(store, peerId), checkNotNull(competitionApplications).history, peerId)
+        } catch (exception: Exception) {
+            return failStartup("Competition draw could not be restored: ${exception.message}")
         }
 
         val certificate = try {
@@ -292,6 +305,7 @@ class ServerRuntime(
         postgres?.stop()
         postgres = null
         competitionApplications = null
+        competitionDraws = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }

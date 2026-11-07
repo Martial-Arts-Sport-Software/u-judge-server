@@ -1,13 +1,14 @@
 package org.mass.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollbarStyle
-import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,8 +33,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +61,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +69,7 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.mass.Server
 import org.mass.applications.ApplicationCategory
+import org.mass.applications.ApplicationDiscipline
 import org.mass.applications.ApplicationError
 import org.mass.applications.ApplicationFileInput
 import org.mass.applications.ApplicationsHistory
@@ -73,11 +79,26 @@ import org.mass.applications.CompetitionApplications
 import org.mass.applications.ImportOutcome
 import org.mass.applications.ImportPreparation
 import org.mass.applications.ImportRecord
+import org.mass.draw.CategoryDraw
+import org.mass.draw.CategoryDrawState
+import org.mass.draw.CategoryStatus
+import org.mass.draw.CompetitionDrawService
+import org.mass.draw.DrawBoard
+import org.mass.draw.DrawFormat
+import org.mass.draw.DrawMethod
+import org.mass.draw.DrawOutcome
+import org.mass.draw.DrawRejection
+import org.mass.draw.DrawSystem
+import org.mass.draw.SeparationCriterion
+import org.mass.draw.drawKey
 import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
+import org.mass.ui.bracket.BracketComponent
+import org.mass.ui.bracket.BracketEditing
 import org.mass.ui.dialog.ConfirmDialogComponent
+import org.mass.ui.tooltip.TooltipComponent
 import org.mass.ui.input.TextInputComponent
 import org.mass.ui.screen_header.ScreenHeaderComponent
 import org.mass.ui.toast.Toast
@@ -89,6 +110,9 @@ import u_judge_server.desktop.generated.resources.empty_categories
 import u_judge_server.desktop.generated.resources.empty_preview
 import u_judge_server.desktop.generated.resources.fullscreen_icon
 import u_judge_server.desktop.generated.resources.list_icon
+import u_judge_server.desktop.generated.resources.redraw_icon
+import u_judge_server.desktop.generated.resources.shuffle_icon
+import u_judge_server.desktop.generated.resources.swap_icon
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
@@ -96,11 +120,13 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
- * «Настройка турнирных сеток» (I4a, ADR-005). The upload tab takes the competition name and date and several application
- * files; «Загрузить» checks them against «Требования к заполнению заявок» and imports them in one step. The history tab
- * lists every import, lets the operator view or restore one, reset them all, and holds the draw of I4b.
+ * «Настройка турнирных сеток» (I4a, I4b; ADR-005, ADR-007, ADR-008). The upload tab takes the competition name and date and
+ * several application files; «Загрузить» checks them against «Требования к заполнению заявок» and imports them in one step.
+ * The history tab lists every import, lets the operator view or restore one, reset them all, and holds the draw of the
+ * current import: previews, «Перемешать», the system per category, «Подтвердить», and swaps in the preview list.
  */
 object BracketsSetupScreen : Screen {
     private enum class Tab(val key: String) { UPLOAD("brackets_tab_upload"), HISTORY("brackets_tab_history") }
@@ -110,13 +136,31 @@ object BracketsSetupScreen : Screen {
         data class Replace(val applications: CompetitionApplications, val current: ImportRecord) : Confirmation
         data class Restore(val record: ImportRecord, val number: Int) : Confirmation
         data object Reset : Confirmation
+
+        /** «Подтвердить» replaces the confirmed draw of [categories] categories that were shuffled again. */
+        data class ReplaceDraws(val categories: Int) : Confirmation
     }
+
+    /**
+     * Unsaved swaps of one category: two clicks swap two entries locally; «Сохранить» sends them all, «Назад без сохранения»
+     * drops them. [swapped] is the last pair, highlighted as in HapkiPRO.
+     */
+    private data class Editing(
+        val categoryId: String,
+        val draw: CategoryDraw,
+        val swaps: List<Pair<String, String>> = emptyList(),
+        val picked: String? = null,
+        val swapped: Pair<String, String>? = null,
+    )
 
     @Composable
     override fun Load() {
         val runtimeState by Server.runtime.state.collectAsState()
         val service = remember(runtimeState) { Server.runtime.competitionApplications }
         val history by (service?.history ?: remember { MutableStateFlow(ApplicationsHistory(emptyList(), null)) }).collectAsState()
+        val draws = remember(runtimeState) { Server.runtime.competitionDraws }
+        val revision by (draws?.revision ?: remember { MutableStateFlow(0L) }).collectAsState()
+        val board = remember(history, revision, draws) { draws?.board() ?: DrawBoard(null, DrawMethod(), emptyList()) }
         val scope = rememberCoroutineScope()
 
         var tab by remember { mutableStateOf(Tab.UPLOAD) }
@@ -129,6 +173,8 @@ object BracketsSetupScreen : Screen {
         var busy by remember { mutableStateOf(false) }
         var toast by remember { mutableStateOf<Toast?>(null) }
         var confirmation by remember { mutableStateOf<Confirmation?>(null) }
+        var bracketView by remember { mutableStateOf(false) }
+        var editing by remember { mutableStateOf<Editing?>(null) }
 
         val formReady = nameError(competitionName) == null && parseDate(dateText) != null
 
@@ -185,6 +231,30 @@ object BracketsSetupScreen : Screen {
             }
         }
 
+        /**
+         * Runs a draw command off the UI thread and reports a refusal or a failed write as an error toast. A click while a
+         * command runs is ignored: disabling the draw form for the few milliseconds of a write made it blink.
+         */
+        fun drawCommand(success: String? = null, onDone: () -> Unit = {}, action: CompetitionDrawService.() -> DrawOutcome) {
+            val drawService = draws ?: return
+            if (busy) return
+            run {
+                when (val outcome = withContext(Dispatchers.IO) { drawService.action() }) {
+                    DrawOutcome.Done -> {
+                        onDone()
+                        success?.let { toast = Toast(it) }
+                    }
+                    is DrawOutcome.Rejected -> toast = Toast(rejection(outcome.reason), error = true)
+                    is DrawOutcome.Failed -> toast = Toast(outcome.diagnostic, error = true)
+                }
+            }
+        }
+
+        fun confirmDraws() {
+            val count = board.previews
+            drawCommand(Localization.getString("brackets_draw_confirmed").replace("%d", count.toString())) { confirm() }
+        }
+
         fun confirm(action: Confirmation) {
             val importService = service ?: return
             confirmation = null
@@ -203,6 +273,7 @@ object BracketsSetupScreen : Screen {
                         ClearOutcome.NothingToClear -> Unit
                         is ClearOutcome.Failed -> toast = Toast(outcome.diagnostic, error = true)
                     }
+                    is Confirmation.ReplaceDraws -> Unit
                 }
             }
         }
@@ -210,6 +281,44 @@ object BracketsSetupScreen : Screen {
         val viewed = history.imports.firstOrNull { it.eventId == viewedEventId } ?: history.current
         val shown = viewed?.applications
         val selected = shown?.categories?.firstOrNull { it.id == selectedCategoryId } ?: shown?.categories?.firstOrNull()
+        // The draw belongs to the current import; an import opened from the history shows only its athletes.
+        val drawing = viewed != null && viewed.eventId == history.currentEventId
+        val drawStates = if (drawing) board.categories.associateBy { it.category.id } else emptyMap()
+        val selectedState = selected?.let { drawStates[it.id] }
+        val editingHere = editing?.takeIf { it.categoryId == selected?.id && selectedState?.shown != null }
+        val shownDraw = editingHere?.draw ?: selectedState?.shown
+        val bracketAvailable = shownDraw?.format == DrawFormat.ELIMINATION || shownDraw?.format == DrawFormat.ROUND_ROBIN
+        val hasBracket = selected?.discipline == ApplicationDiscipline.KERUGI && selectedState?.status != CategoryStatus.NO_BOUTS
+        val bracketShown = bracketView && bracketAvailable && hasBracket
+
+        /** Swaps two entries of the edited draw locally; «Сохранить» sends every swap. */
+        fun swapEntries(first: String, second: String) {
+            val pending = editingHere ?: return
+            editing = pending.copy(
+                draw = pending.draw.swap(first, second),
+                swaps = pending.swaps + (first to second),
+                picked = null,
+                swapped = first to second,
+            )
+        }
+
+        /** The first click picks an entry, a second click on another one swaps the two, on the picked one drops it. */
+        fun pickEntry(key: String) {
+            val pending = editingHere ?: return
+            when (pending.picked) {
+                null -> editing = pending.copy(picked = key, swapped = null)
+                key -> editing = pending.copy(picked = null)
+                else -> swapEntries(pending.picked, key)
+            }
+        }
+
+        // The swapped pair lights up so the operator sees what moved, then both entries look like the others again.
+        LaunchedEffect(editing?.swapped) {
+            if (editing?.swapped != null) {
+                delay(SWAP_HIGHLIGHT)
+                editing = editing?.copy(swapped = null)
+            }
+        }
 
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             ScreenHeaderComponent(modifier = Modifier.fillMaxHeight(0.08f).fillMaxWidth())
@@ -257,6 +366,30 @@ object BracketsSetupScreen : Screen {
                                 onRestore = { record -> confirmation = Confirmation.Restore(record, history.imports.indexOf(record) + 1) },
                                 onReset = { confirmation = Confirmation.Reset },
                                 enabled = !busy && service != null,
+                                drawBlock = {
+                                    DrawBlock(
+                                        board = board.takeIf { drawing },
+                                        selected = selectedState,
+                                        enabled = draws != null && editingHere == null,
+                                        onMethod = { method -> drawCommand { setMethod(method) } },
+                                        onSystem = { system -> selectedState?.let { state -> drawCommand { setSystem(state.category.id, system) } } },
+                                        onSystemForAll = { system ->
+                                            val applied = Localization.getString("brackets_draw_system_applied")
+                                                .replaceFirst("%s", systemLabel(system))
+                                                .replaceFirst("%d", board.systemSelectable.size.toString())
+                                            drawCommand(applied) { setSystemForAll(system) }
+                                        },
+                                        onDrawAll = { drawCommand { drawAll() } },
+                                        onShuffle = { selectedState?.let { state -> drawCommand { shuffle(state.category.id) } } },
+                                        onConfirm = {
+                                            val replacing = board.categories.count { state ->
+                                                state.preview != null && state.confirmed?.draw?.entryKeys?.toSet() ==
+                                                    state.category.entries.map { it.drawKey }.toSet()
+                                            }
+                                            if (replacing > 0) confirmation = Confirmation.ReplaceDraws(replacing) else confirmDraws()
+                                        },
+                                    )
+                                },
                             )
                         }
                     }
@@ -279,7 +412,15 @@ object BracketsSetupScreen : Screen {
                             ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { state ->
                                 LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                                     itemsIndexed(shown?.categories.orEmpty(), key = { _, category -> category.id }) { _, category ->
-                                        CategoryRow(category, selected = category.id == selected?.id, onClick = { selectedCategoryId = category.id })
+                                        CategoryRow(
+                                            category,
+                                            state = drawStates[category.id],
+                                            selected = category.id == selected?.id,
+                                            onClick = {
+                                                if (category.id != selected?.id) editing = null
+                                                selectedCategoryId = category.id
+                                            },
+                                        )
                                     }
                                 }
                             }
@@ -296,14 +437,80 @@ object BracketsSetupScreen : Screen {
                             modifier = Modifier.weight(0.55f),
                             empty = errorList == null && selected == null,
                             emptyState = { EmptyState(Res.drawable.empty_preview, "brackets_preview_empty", "brackets_preview_empty_hint") },
-                            // List/bracket and full screen on their own line; the bracket views open once the draw made one (I4b).
-                            toolbar = if (errorList == null) {
-                                { PreviewNavigation(bracketAvailable = false) }
+                            // List/bracket and full screen on their own line; the bracket view opens once the draw made one.
+                            // Technical disciplines and a single entry have no bouts, so there is no bracket to switch to.
+                            toolbar = if (errorList == null && hasBracket) {
+                                {
+                                    PreviewNavigation(
+                                        bracketAvailable = bracketAvailable,
+                                        bracketSelected = bracketShown,
+                                        onSelect = { bracket ->
+                                            bracketView = bracket
+                                            // An elimination bracket is edited by dragging; a round robin only in the list.
+                                            if (bracket && shownDraw?.format != DrawFormat.ELIMINATION) editing = null
+                                        },
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            footer = if (
+                                errorList == null && selectedState?.shown != null && shownDraw != null &&
+                                (!bracketShown || shownDraw.format == DrawFormat.ELIMINATION)
+                            ) {
+                                {
+                                    EditBar(
+                                        editing = editingHere,
+                                        locked = selectedState.status == CategoryStatus.STARTED,
+                                        editable = shownDraw.entryKeys.size > 1,
+                                        inBracket = bracketShown,
+                                        onEdit = { editing = Editing(selectedState.category.id, shownDraw) },
+                                        onSave = {
+                                            val pending = editingHere ?: return@EditBar
+                                            if (pending.swaps.isEmpty()) {
+                                                editing = null
+                                            } else {
+                                                drawCommand(Localization.getString("brackets_edit_saved"), onDone = { editing = null }) {
+                                                    swap(pending.categoryId, pending.swaps)
+                                                }
+                                            }
+                                        },
+                                        onBack = { editing = null },
+                                    )
+                                }
                             } else {
                                 null
                             },
                         ) {
-                            if (errorList != null) ErrorList(errorList) else selected?.let { CategoryPreview(it) }
+                            when {
+                                errorList != null -> ErrorList(errorList)
+                                selected == null -> Unit
+                                shownDraw == null -> CategoryPreview(selected)
+                                bracketShown -> Column(Modifier.fillMaxSize()) {
+                                    BracketComponent(
+                                        draw = shownDraw,
+                                        entries = selected.entries,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        editing = editingHere?.let { pending ->
+                                            BracketEditing(
+                                                highlighted = setOfNotNull(pending.picked, pending.swapped?.first, pending.swapped?.second),
+                                                onPick = ::pickEntry,
+                                                onSwap = ::swapEntries,
+                                            )
+                                        },
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    BoutsPlaceholder()
+                                }
+                                else -> DrawList(
+                                    category = selected,
+                                    draw = shownDraw,
+                                    state = selectedState,
+                                    method = board.method,
+                                    editing = editingHere,
+                                    onPick = ::pickEntry,
+                                )
+                            }
                         }
                     }
                 }
@@ -343,6 +550,17 @@ object BracketsSetupScreen : Screen {
                 onConfirm = { confirm(Confirmation.Reset) },
                 onCancel = { confirmation = null },
             )
+            is Confirmation.ReplaceDraws -> ConfirmDialogComponent(
+                title = Localization.getString("brackets_replace_draws_title"),
+                text = Localization.getString("brackets_replace_draws_text").replace("%d", pending.categories.toString()),
+                confirmText = Localization.getString("brackets_replace_draws"),
+                cancelText = Localization.getString("devices_cancel"),
+                onConfirm = {
+                    confirmation = null
+                    confirmDraws()
+                },
+                onCancel = { confirmation = null },
+            )
             null -> Unit
         }
     }
@@ -358,11 +576,16 @@ object BracketsSetupScreen : Screen {
         )
     }
 
-    private data class Segment(val label: String, val icon: DrawableResource? = null, val enabled: Boolean = true)
+    private data class Segment(
+        val label: String,
+        val icon: DrawableResource? = null,
+        val enabled: Boolean = true,
+        val tooltip: String? = null,
+    )
 
     /**
      * Tabs of the mockup: the selected segment is primary; [dark] is for the gray panel, otherwise the light cards.
-     * A disabled segment is faded and does not react.
+     * A disabled segment is faded and does not react; its tooltip says why.
      */
     @Composable
     private fun SegmentedControl(
@@ -390,80 +613,74 @@ object BracketsSetupScreen : Screen {
                     active -> Colors.PRIMARY.color.copy(alpha = 0.45f)
                     else -> Color.Transparent
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .then(if (fill) Modifier.weight(1f) else Modifier)
-                        .clip(ROW_SHAPE)
-                        .background(background)
-                        .then(
-                            if (segment.enabled) {
-                                Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Tab) { onSelect(index) }
-                            } else {
-                                Modifier
-                            },
+                TooltipComponent(segment.tooltip, if (fill) Modifier.weight(1f) else Modifier) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .clip(ROW_SHAPE)
+                            .background(background)
+                            .then(
+                                if (segment.enabled) {
+                                    Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Tab) { onSelect(index) }
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .semantics { this.selected = active }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) {
+                        segment.icon?.let {
+                            Image(painterResource(it), contentDescription = null, colorFilter = ColorFilter.tint(content), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(
+                            segment.label,
+                            color = content,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
                         )
-                        .semantics { this.selected = active }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                ) {
-                    segment.icon?.let {
-                        Image(painterResource(it), contentDescription = null, colorFilter = ColorFilter.tint(content), modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
                     }
-                    Text(
-                        segment.label,
-                        color = content,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
                 }
             }
         }
     }
 
     /**
-     * The preview line of the mockup: list or bracket view and the full screen view. The bracket views need a bracket, which
-     * the draw of I4b produces, so until then they are disabled and say why.
+     * The preview line of the mockup: list or bracket view and the full screen view. The bracket view needs a drawn
+     * elimination or round robin; the full screen view comes with the bout numbers, so until then it is disabled and says why.
      */
-    @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun PreviewNavigation(bracketAvailable: Boolean) {
-        val hint = Localization.getString("brackets_bracket_after_draw")
-        TooltipArea(
-            tooltip = {
-                Text(
-                    hint,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.clip(ROW_SHAPE).background(Colors.BROWN.color).padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            },
+    private fun PreviewNavigation(bracketAvailable: Boolean, bracketSelected: Boolean, onSelect: (Boolean) -> Unit) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                SegmentedControl(
-                    segments = listOf(
-                        Segment(Localization.getString("brackets_view_list"), Res.drawable.list_icon),
-                        Segment(Localization.getString("brackets_view_bracket"), Res.drawable.bracket_icon, enabled = bracketAvailable),
+            SegmentedControl(
+                segments = listOf(
+                    Segment(Localization.getString("brackets_view_list"), Res.drawable.list_icon),
+                    Segment(
+                        Localization.getString("brackets_view_bracket"),
+                        Res.drawable.bracket_icon,
+                        enabled = bracketAvailable,
+                        tooltip = if (bracketAvailable) null else Localization.getString("brackets_bracket_after_draw"),
                     ),
-                    selectedIndex = 0,
-                    onSelect = {},
-                    dark = false,
-                    fill = false,
-                )
-                val content = if (bracketAvailable) Colors.PRIMARY.color else Colors.PRIMARY.color.copy(alpha = 0.4f)
+                ),
+                selectedIndex = if (bracketSelected) 1 else 0,
+                onSelect = { onSelect(it == 1) },
+                dark = false,
+                fill = false,
+            )
+            val content = Colors.PRIMARY.color.copy(alpha = 0.4f)
+            TooltipComponent(Localization.getString("brackets_fullscreen_next")) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(ROW_SHAPE)
-                        .background(Color.White.copy(alpha = if (bracketAvailable) 0.9f else 0.5f))
+                        .background(Color.White.copy(alpha = 0.5f))
                         .border(1.dp, content, ROW_SHAPE)
                         .padding(horizontal = 12.dp, vertical = 9.dp)
                         .semantics { contentDescription = Localization.getString("brackets_fullscreen") },
@@ -471,6 +688,67 @@ object BracketsSetupScreen : Screen {
                     Image(painterResource(Res.drawable.fullscreen_icon), contentDescription = null, colorFilter = ColorFilter.tint(content), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(Localization.getString("brackets_fullscreen"), color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        }
+    }
+
+    /**
+     * Under the preview list: «Редактировать», or while editing the hint with «Сохранить» and «Назад без сохранения» of equal
+     * width; locked once started. Clicks during a write are ignored by the draw command itself.
+     */
+    @Composable
+    private fun EditBar(
+        editing: Editing?,
+        locked: Boolean,
+        editable: Boolean,
+        inBracket: Boolean,
+        onEdit: () -> Unit,
+        onSave: () -> Unit,
+        onBack: () -> Unit,
+    ) {
+        when {
+            locked -> Text(
+                Localization.getString("brackets_edit_locked"),
+                color = Colors.BROWN.color.copy(alpha = 0.65f),
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            editing == null -> ButtonComponent(
+                text = Localization.getString("brackets_edit"),
+                onclick = onEdit,
+                enabled = editable,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+            else -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    Localization.getString(
+                        when {
+                            editing.picked != null -> "brackets_edit_hint_second"
+                            inBracket -> "brackets_edit_hint_bracket"
+                            else -> "brackets_edit_hint"
+                        },
+                    ),
+                    color = Colors.BROWN.color.copy(alpha = 0.65f),
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    ButtonComponent(
+                        text = Localization.getString("brackets_edit_save"),
+                        onclick = onSave,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    ButtonComponent(
+                        text = Localization.getString("brackets_edit_back"),
+                        style = ButtonStyles.Secondary,
+                        onclick = onBack,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
@@ -563,6 +841,7 @@ object BracketsSetupScreen : Screen {
         onRestore: (ImportRecord) -> Unit,
         onReset: () -> Unit,
         enabled: Boolean,
+        drawBlock: @Composable () -> Unit,
     ) {
         Column(
             modifier = Modifier
@@ -610,7 +889,7 @@ object BracketsSetupScreen : Screen {
                 )
             }
         }
-        DrawBlock()
+        drawBlock()
     }
 
     @Composable
@@ -696,11 +975,24 @@ object BracketsSetupScreen : Screen {
     }
 
     /**
-     * The draw card of the mockup: system, method and «Перемешать». The draw by FHR 2024 §1.2 and §1.4 (ADR-007) arrives
-     * with I4b, so the controls are shown but disabled.
+     * The draw card of the mockup (ADR-008 §2-4): the method of the competition with the separation criterion and the belt,
+     * the system of the selected category, «Провести жеребьёвку», «Перемешать» and «Подтвердить». [board] is null while an
+     * import from the history is open: the draw belongs to the current one.
      */
     @Composable
-    private fun DrawBlock() {
+    private fun DrawBlock(
+        board: DrawBoard?,
+        selected: CategoryDrawState?,
+        enabled: Boolean,
+        onMethod: (DrawMethod) -> Unit,
+        onSystem: (DrawSystem) -> Unit,
+        onSystemForAll: (DrawSystem) -> Unit,
+        onDrawAll: () -> Unit,
+        onShuffle: () -> Unit,
+        onConfirm: () -> Unit,
+    ) {
+        val active = enabled && board != null && board.categories.isNotEmpty()
+        val method = board?.method ?: DrawMethod()
         ActionBlock {
             Text(
                 Localization.getString("brackets_draw"),
@@ -708,33 +1000,151 @@ object BracketsSetupScreen : Screen {
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
             )
-            DrawChoice(Localization.getString("brackets_draw_system"), listOf("brackets_draw_single_elimination", "brackets_draw_round_robin"))
-            DrawChoice(Localization.getString("brackets_draw_method"), listOf("brackets_draw_random", "brackets_draw_separation"))
+            DrawChoice(
+                title = Localization.getString("brackets_draw_method"),
+                optionKeys = listOf("brackets_draw_random", "brackets_draw_separation"),
+                selectedIndex = if (method.criterion == null) 0 else 1,
+                enabled = active,
+                onSelect = { index -> onMethod(if (index == 0) DrawMethod() else DrawMethod(SeparationCriterion.COACH)) },
+            )
+            // The separation options unfold under the method; the last criterion stays shown while they fold away.
+            var lastCriterion by remember { mutableStateOf(method.criterion ?: SeparationCriterion.COACH) }
+            method.criterion?.let { lastCriterion = it }
+            AnimatedVisibility(
+                visible = method.criterion != null,
+                enter = expandVertically(tween(300)) + fadeIn(tween(300)),
+                exit = shrinkVertically(tween(300)) + fadeOut(tween(300)),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DrawChoice(
+                        title = Localization.getString("brackets_draw_criterion"),
+                        optionKeys = listOf("brackets_draw_region", "brackets_draw_city", "brackets_draw_organisation", "brackets_draw_coach"),
+                        selectedIndex = lastCriterion.ordinal,
+                        enabled = active,
+                        onSelect = { index -> onMethod(method.copy(criterion = SeparationCriterion.entries[index])) },
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(ROW_SHAPE)
+                            .then(
+                                if (active) {
+                                    Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.RadioButton) {
+                                        onMethod(method.copy(withBelt = !method.withBelt))
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .padding(vertical = 4.dp),
+                    ) {
+                        RadioButton(
+                            selected = method.withBelt,
+                            onClick = null,
+                            enabled = active,
+                            colors = RadioButtonDefaults.colors(selectedColor = Colors.PRIMARY.color, unselectedColor = Colors.PRIMARY.color),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(Localization.getString("brackets_draw_belt"), color = Colors.BROWN.color, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            val systemChoosable = active && selected != null && selected.systemSelectable && selected.status != CategoryStatus.STARTED
+            DrawChoice(
+                title = Localization.getString("brackets_draw_system_of"),
+                optionKeys = listOf("brackets_draw_single_elimination", "brackets_draw_round_robin"),
+                selectedIndex = (selected?.system ?: DrawSystem.SINGLE_ELIMINATION).ordinal,
+                enabled = systemChoosable,
+                onSelect = { index -> onSystem(DrawSystem.entries[index]) },
+            )
             ButtonComponent(
-                text = Localization.getString("brackets_draw_shuffle"),
-                onclick = {},
-                enabled = false,
+                text = Localization.getString("brackets_draw_system_for_all"),
+                style = ButtonStyles.Plain,
+                onclick = { selected?.let { onSystemForAll(it.system) } },
+                enabled = systemChoosable && (board?.systemSelectable?.size ?: 0) > 1,
                 modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodySmall,
             )
-            Text(
-                Localization.getString("brackets_draw_next"),
-                color = Colors.PRIMARY.color,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
+            // One line: the next step as a text button, «Провести жеребьёвку» while categories wait for a draw and then
+            // «Подтвердить»; the redraw of all categories and «Перемешать» as icons with tooltips.
+            val previews = board?.previews ?: 0
+            val undrawn = board?.drawn == false
+            val redrawable = board?.drawn == true &&
+                board.categories.any { it.status == CategoryStatus.CONFIRMED || it.status == CategoryStatus.PREVIEW }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                if (undrawn) {
+                    ButtonComponent(
+                        text = Localization.getString("brackets_draw_all"),
+                        onclick = onDrawAll,
+                        enabled = active,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    ButtonComponent(
+                        text = Localization.getString("brackets_draw_confirm").replace("%d", previews.toString()),
+                        onclick = onConfirm,
+                        enabled = active && previews > 0,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                DrawIconButton(
+                    icon = Res.drawable.redraw_icon,
+                    tooltip = Localization.getString("brackets_draw_again"),
+                    enabled = active && redrawable,
+                    onClick = onDrawAll,
+                )
+                DrawIconButton(
+                    icon = Res.drawable.shuffle_icon,
+                    tooltip = Localization.getString("brackets_draw_shuffle_hint"),
+                    enabled = active && selected != null && selected.status != CategoryStatus.STARTED && selected.status != CategoryStatus.NO_BOUTS,
+                    onClick = onShuffle,
+                )
+            }
+            board?.let {
+                val confirmed = it.categories.count { state ->
+                    state.status == CategoryStatus.CONFIRMED || state.status == CategoryStatus.STARTED || state.status == CategoryStatus.NO_BOUTS
+                }
+                Text(
+                    Localization.getString("brackets_draw_summary")
+                        .replaceFirst("%d", confirmed.toString())
+                        .replaceFirst("%d", it.categories.size.toString())
+                        .replaceFirst("%d", it.previews.toString()),
+                    color = Colors.PRIMARY.color,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 
-    /** A titled choice of the draw as tabs; disabled until the draw arrives with I4b. */
+    /** A square primary icon button of the draw block, as tall as the text buttons; the tooltip names the action. */
     @Composable
-    private fun DrawChoice(title: String, optionKeys: List<String>) {
+    private fun DrawIconButton(icon: DrawableResource, tooltip: String, enabled: Boolean, onClick: () -> Unit) {
+        ButtonComponent(
+            style = ButtonStyles.Icon,
+            iconSrc = icon,
+            onclick = onClick,
+            enabled = enabled,
+            tooltip = tooltip,
+            iconPadding = 10.dp,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (enabled) Colors.PRIMARY.color else Colors.PRIMARY.color.copy(alpha = 0.4f)),
+        )
+    }
+
+    /** A titled choice of the draw as tabs. */
+    @Composable
+    private fun DrawChoice(title: String, optionKeys: List<String>, selectedIndex: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, color = Colors.BROWN.color.copy(alpha = 0.72f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
             SegmentedControl(
-                segments = optionKeys.map { Segment(Localization.getString(it), enabled = false) },
-                selectedIndex = 0,
-                onSelect = {},
+                segments = optionKeys.map { Segment(Localization.getString(it), enabled = enabled) },
+                selectedIndex = selectedIndex,
+                onSelect = { if (it != selectedIndex) onSelect(it) },
                 dark = false,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -780,7 +1190,7 @@ object BracketsSetupScreen : Screen {
 
     /**
      * A titled light card; when [empty], [emptyState] is centered in the whole card instead of the content. [toolbar] is a
-     * line of controls under the title.
+     * line of controls under the title, [footer] a line under the content as wide as the card.
      */
     @Composable
     private fun ListCard(
@@ -790,6 +1200,7 @@ object BracketsSetupScreen : Screen {
         empty: Boolean,
         emptyState: @Composable () -> Unit,
         toolbar: (@Composable () -> Unit)? = null,
+        footer: (@Composable () -> Unit)? = null,
         content: @Composable () -> Unit,
     ) {
         Box(modifier = modifier.fillMaxSize().clip(LIST_SHAPE).background(Colors.SECONDARY.color)) {
@@ -811,8 +1222,12 @@ object BracketsSetupScreen : Screen {
                     it()
                 }
                 Spacer(Modifier.height(14.dp))
-                AnimatedVisibility(visible = !empty, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
+                AnimatedVisibility(visible = !empty, enter = fadeIn(tween(300)), exit = fadeOut(tween(300)), modifier = Modifier.weight(1f)) {
                     Box(Modifier.fillMaxSize()) { content() }
+                }
+                if (footer != null && !empty) {
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.fillMaxWidth()) { footer() }
                 }
             }
             AnimatedVisibility(
@@ -905,17 +1320,20 @@ object BracketsSetupScreen : Screen {
         }
     }
 
-    /** Unselected categories are primary; the selected one has the secondary button style. */
+    /**
+     * Categories have the secondary button style; the selected one is primary. Under the title: the draw status (ADR-008 §11)
+     * and the clashes separation could not avoid.
+     */
     @Composable
-    private fun CategoryRow(category: ApplicationCategory, selected: Boolean, onClick: () -> Unit) {
-        val content = if (selected) Colors.PRIMARY.color else Color.White
+    private fun CategoryRow(category: ApplicationCategory, state: CategoryDrawState?, selected: Boolean, onClick: () -> Unit) {
+        val content = if (selected) Color.White else Colors.PRIMARY.color
         val hint = Localization.getString("brackets_open_category")
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(ROW_SHAPE)
-                .background(if (selected) SELECTED_ROW_COLOR else Colors.PRIMARY.color)
+                .background(if (selected) Colors.PRIMARY.color else SECONDARY_ROW_COLOR)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .clickable(role = Role.Button, onClickLabel = hint, onClick = onClick)
                 .semantics(mergeDescendants = true) {
@@ -924,7 +1342,22 @@ object BracketsSetupScreen : Screen {
                 }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            Text(category.title, color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(category.title, color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                state?.let {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        StatusBadge(it.status, inverted = !selected)
+                        if (it.clashes.isNotEmpty()) {
+                            Text(
+                                Localization.getString("brackets_clashes").replace("%d", it.clashes.size.toString()),
+                                color = if (selected) Colors.SECONDARY.color else FAILURE_COLOR,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.width(8.dp))
             Image(
                 painterResource(Res.drawable.bracket_icon),
@@ -932,6 +1365,116 @@ object BracketsSetupScreen : Screen {
                 colorFilter = ColorFilter.tint(content),
                 modifier = Modifier.size(20.dp),
             )
+        }
+    }
+
+    /** The draw status as a badge; «требует новой жеребьёвки» stands out in the error colour. */
+    @Composable
+    private fun StatusBadge(status: CategoryStatus, inverted: Boolean) {
+        if (status == CategoryStatus.NEEDS_REDRAW) {
+            Text(
+                statusLabel(status),
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(FAILURE_COLOR).padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        } else {
+            Badge(statusLabel(status), inverted = inverted)
+        }
+    }
+
+    /**
+     * Entries in draw order: elimination by first-round pairs (a bye says the entry starts in round 2), round robin and
+     * performance order numbered. Entries have the secondary button style. While [editing], every entry shows the swap arrows,
+     * a click picks an entry (primary) and a second click swaps the two; the swapped pair lights up for a moment.
+     */
+    @Composable
+    private fun DrawList(
+        category: ApplicationCategory,
+        draw: CategoryDraw,
+        state: CategoryDrawState?,
+        method: DrawMethod,
+        editing: Editing?,
+        onPick: (String) -> Unit,
+    ) {
+        val byKey = category.entries.associateBy { it.drawKey }
+        val clashing = state?.clashes.orEmpty().flatMap { listOf(it.first, it.second) }.toSet()
+        val clashHint = clashHint(method, draw.format)
+        val highlighted = setOfNotNull(editing?.picked, editing?.swapped?.first, editing?.swapped?.second)
+
+        @Composable
+        fun EntryRow(number: String, key: String, note: String? = null) {
+            val entry = byKey[key] ?: return
+            val light = key in highlighted
+            val background by animateColorAsState(if (light) Colors.PRIMARY.color else SECONDARY_ROW_COLOR, tween(300))
+            val textColor by animateColorAsState(if (light) Color.White else Colors.PRIMARY.color, tween(300))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(ROW_SHAPE)
+                    .background(background)
+                    .then(
+                        if (editing != null) {
+                            Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button) { onPick(key) }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .semantics { selected = light }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
+                    entry.athletes.forEachIndexed { memberIndex, athlete ->
+                        AthleteLines(if (memberIndex == 0) number else "", athlete, textColor)
+                    }
+                    note?.let { Text(it, color = textColor.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall) }
+                    if (key in clashing) {
+                        Text(clashHint, color = if (light) Colors.SECONDARY.color else FAILURE_COLOR, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                }
+                AnimatedVisibility(visible = editing != null, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
+                    Image(
+                        painterResource(Res.drawable.swap_icon),
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(textColor.copy(alpha = if (light || editing?.picked != null) 1f else 0.45f)),
+                        modifier = Modifier.padding(start = 8.dp).size(20.dp),
+                    )
+                }
+            }
+        }
+
+        ScrollableList(rememberLazyListState(), Colors.SECONDARY.color) { listState ->
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+                when (draw.format) {
+                    DrawFormat.ELIMINATION -> itemsIndexed(draw.positions.chunked(2)) { pairIndex, pair ->
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                Localization.getString("brackets_pair").replace("%d", (pairIndex + 1).toString()),
+                                color = Colors.PRIMARY.color,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            val bye = pair.count { it != null } == 1
+                            pair.forEachIndexed { side, key ->
+                                if (key != null) {
+                                    EntryRow("${pairIndex * 2 + side + 1}.", key, Localization.getString("brackets_bye").takeIf { bye })
+                                }
+                            }
+                        }
+                    }
+                    DrawFormat.NO_BOUTS -> itemsIndexed(draw.entryKeys) { _, key ->
+                        EntryRow("1.", key, Localization.getString("brackets_no_bouts_place"))
+                    }
+                    // Keyed by the entry, so a swap moves both rows to their new places.
+                    DrawFormat.ROUND_ROBIN, DrawFormat.PERFORMANCE_ORDER -> itemsIndexed(draw.entryKeys, key = { _, key -> key }) { index, key ->
+                        Box(Modifier.animateItem(fadeInSpec = tween(300), placementSpec = tween(300), fadeOutSpec = tween(300))) {
+                            EntryRow("${index + 1}.", key)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -943,14 +1486,14 @@ object BracketsSetupScreen : Screen {
                 itemsIndexed(category.entries, key = { _, entry -> entry.id }) { index, entry ->
                     Column(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth().clip(ROW_SHAPE).background(Colors.PRIMARY.color).padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().clip(ROW_SHAPE).background(SECONDARY_ROW_COLOR).padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         entry.athletes.forEachIndexed { memberIndex, athlete ->
-                            AthleteLines(if (memberIndex == 0) "${index + 1}." else "", athlete)
+                            AthleteLines(if (memberIndex == 0) "${index + 1}." else "", athlete, Colors.PRIMARY.color)
                         }
                         Text(
                             entry.sources.first().let { "${it.fileName} · ${it.sheet} · ${Localization.getString("brackets_row")} ${it.row}" },
-                            color = MUTED_LAVENDER,
+                            color = Colors.PRIMARY.color.copy(alpha = 0.75f),
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -960,11 +1503,11 @@ object BracketsSetupScreen : Screen {
     }
 
     @Composable
-    private fun AthleteLines(number: String, athlete: Athlete) {
+    private fun AthleteLines(number: String, athlete: Athlete, color: Color) {
         Row {
-            Text(number, color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
+            Text(number, color = color, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
             Column {
-                Text(athlete.fullName, color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                Text(athlete.fullName, color = color, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                 Text(
                     listOf(
                         DATE_FORMAT.format(athlete.birthDate),
@@ -975,7 +1518,7 @@ object BracketsSetupScreen : Screen {
                         athlete.school,
                         athlete.coaches.distinct().joinToString(", "),
                     ).joinToString(" · "),
-                    color = Colors.SECONDARY.color,
+                    color = if (color == Color.White) Colors.SECONDARY.color else color.copy(alpha = 0.75f),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
@@ -1020,6 +1563,67 @@ object BracketsSetupScreen : Screen {
         }
     }
 
+    /** The bracket view's place for the bouts and their results, which come with the bouts themselves. */
+    @Composable
+    private fun BoutsPlaceholder() {
+        Text(
+            Localization.getString("brackets_bouts_placeholder"),
+            color = Colors.PRIMARY.color.copy(alpha = 0.75f),
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ROW_SHAPE)
+                .background(SECONDARY_ROW_COLOR)
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+        )
+    }
+
+    /** Why an entry is marked: it meets, or performs right after, an entry the separation should have kept apart. */
+    private fun clashHint(method: DrawMethod, format: DrawFormat): String {
+        val criterion = method.criterion ?: SeparationCriterion.COACH
+        val same = Localization.getString(
+            when (criterion) {
+                SeparationCriterion.REGION -> "brackets_clash_region"
+                SeparationCriterion.CITY -> "brackets_clash_city"
+                SeparationCriterion.ORGANISATION -> "brackets_clash_organisation"
+                SeparationCriterion.COACH -> "brackets_clash_coach"
+            },
+        )
+        val origin = if (method.withBelt) Localization.getString("brackets_clash_belt").replace("%s", same) else same
+        val key = if (format == DrawFormat.PERFORMANCE_ORDER) "brackets_clash_order" else "brackets_clash_bout"
+        return Localization.getString(key).replace("%s", origin)
+    }
+
+    private fun systemLabel(system: DrawSystem) = Localization.getString(
+        when (system) {
+            DrawSystem.SINGLE_ELIMINATION -> "brackets_draw_single_elimination"
+            DrawSystem.ROUND_ROBIN -> "brackets_draw_round_robin"
+        },
+    )
+
+    private fun statusLabel(status: CategoryStatus) = Localization.getString(
+        when (status) {
+            CategoryStatus.NOT_DRAWN -> "brackets_status_not_drawn"
+            CategoryStatus.PREVIEW -> "brackets_status_preview"
+            CategoryStatus.CONFIRMED -> "brackets_status_confirmed"
+            CategoryStatus.NEEDS_REDRAW -> "brackets_status_needs_redraw"
+            CategoryStatus.NO_BOUTS -> "brackets_status_no_bouts"
+            CategoryStatus.STARTED -> "brackets_status_started"
+        },
+    )
+
+    private fun rejection(reason: DrawRejection) = Localization.getString(
+        when (reason) {
+            DrawRejection.NO_COMPETITION -> "brackets_draw_rejected_no_competition"
+            DrawRejection.UNKNOWN_CATEGORY -> "brackets_draw_rejected_unknown_category"
+            DrawRejection.STARTED -> "brackets_edit_locked"
+            DrawRejection.NOTHING_TO_CONFIRM -> "brackets_draw_rejected_nothing_to_confirm"
+            DrawRejection.NOT_CONFIRMED -> "brackets_draw_rejected_not_confirmed"
+            DrawRejection.UNKNOWN_ENTRY -> "brackets_draw_rejected_unknown_entry"
+        },
+    )
+
     private fun recordLabel(history: ApplicationsHistory, record: ImportRecord): String {
         val number = history.imports.indexOf(record) + 1
         val key = if (record.eventId == history.currentEventId) "brackets_viewing_current" else "brackets_viewing_history"
@@ -1057,8 +1661,9 @@ object BracketsSetupScreen : Screen {
     private val LIST_SHAPE = RoundedCornerShape(15.dp)
     private val CARD_SHAPE = RoundedCornerShape(16.dp)
     private val ROW_SHAPE = RoundedCornerShape(8.dp)
-    // The secondary button's fill: a selected category reads like `ButtonStyles.Secondary`, text in primary.
-    private val SELECTED_ROW_COLOR = Color.White.copy(alpha = 0.48f)
+    // The secondary button's fill: list rows read like `ButtonStyles.Secondary`, text in primary; the selected row is primary.
+    private val SECONDARY_ROW_COLOR = Color.White.copy(alpha = 0.48f)
+    private val SWAP_HIGHLIGHT = 900.milliseconds
     private val FAILURE_COLOR = Color(0xFFB3261E)
     private val CARD_COLOR = Color(0xFF27262D)
     private val CARD_BORDER = Color(0xFF34333B)

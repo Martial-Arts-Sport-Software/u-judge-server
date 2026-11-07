@@ -31,6 +31,7 @@ dependencies {
     implementation(libs.exposed.java.time)
 
     // Ktor Server
+    implementation(platform(libs.netty.bom))
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.network.tls.certificates)
