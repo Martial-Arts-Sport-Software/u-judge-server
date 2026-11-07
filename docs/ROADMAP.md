@@ -167,6 +167,8 @@ macOS 27 (arm64) с `./gradlew :desktop:run`: отчёт об ошибках, з
   настройки; проведение поединков и продвижение победителя перенесены в I2b. 27.09.2026 разделён на I4a (импорт заявок,
   ADR-005) и I4b (жеребьёвка, ADR-007, ADR-008): входные файлы - заявки без сеток, сетки строятся по правилам ФХР 2024.
   I4b идёт двумя PR под одной issue: жеребьёвка, затем площадки, нумерация, PDF и панель площадки.
+  Ручной прогон переработанного экрана жеребьёвки (PR #132) отложен до полного регресса desktop в этапе 7
+  (решение 08.11.2026).
 - I2a: Kerugi bout aggregate поверх единого журнала и один realtime command dispatcher вместо отдельных `Realtime*Commands`
   (перенесено из I1 26.09.2026: до I2a Kerugi-команды недостижимы из production, а их контракт меняется вместе с session
   snapshot); session snapshot/assignment для client (`DEV-008`) и resync после reconnect; симулятор судей для acceptance
@@ -456,6 +458,8 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 - Clean Windows installer.
 - Clean macOS installer.
 - Проверка lifecycle PostgreSQL без IDE и developer tooling.
+- Полный ручной регресс desktop UI по сценариям всех инкрементов пилота, когда они реализованы (решение 08.11.2026);
+  он закрывает отложенные ручные прогоны, начиная с экрана жеребьёвки I4b.
 - Подпись Windows и notarization macOS явно отложены после pilot.
 
 ### Mobile
