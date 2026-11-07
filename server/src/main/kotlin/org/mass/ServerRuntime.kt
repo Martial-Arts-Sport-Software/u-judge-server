@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.mass.applications.CompetitionApplicationsService
+import org.mass.bout.CourtBouts
 import org.mass.bout.JdbcBoutEventJournal
 import org.mass.bout.KerugiBoutService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
@@ -133,6 +134,11 @@ class ServerRuntime(
     var realtime: RealtimeHub? = null
         private set
 
+    /** «Начать» and the operator actions of the bout, used in-process by the desktop; null while the server is not running. */
+    @Volatile
+    var courtBouts: CourtBouts? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -163,6 +169,7 @@ class ServerRuntime(
         competitionDraws = null
         competitionCourts = null
         realtime = null
+        courtBouts = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -231,6 +238,7 @@ class ServerRuntime(
         } catch (exception: Exception) {
             return failStartup("Kerugi bouts could not be restored: ${exception.message}")
         }.also { realtime = it }
+        courtBouts = CourtBouts(hub, checkNotNull(competitionDraws), pairing)
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
@@ -327,6 +335,7 @@ class ServerRuntime(
         competitionDraws = null
         competitionCourts = null
         realtime = null
+        courtBouts = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }
