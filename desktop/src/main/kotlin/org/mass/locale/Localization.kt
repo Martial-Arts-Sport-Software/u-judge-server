@@ -179,6 +179,7 @@ object Localization {
             "brackets_draw_rejected_unknown_entry" to "The athlete is not in this draw",
             "brackets_draw_rejected_invalid_court" to "There is no such court",
             "brackets_draw_rejected_unknown_bout" to "The bout is not waiting on this court",
+            "brackets_draw_rejected_invalid_officials" to "Keep every setting within 200 characters",
 
 
 
@@ -431,6 +432,7 @@ object Localization {
             "brackets_draw_rejected_unknown_entry" to "Участника нет в этой жеребьёвке",
             "brackets_draw_rejected_invalid_court" to "Такой площадки нет",
             "brackets_draw_rejected_unknown_bout" to "Этот бой не ждёт на этой площадке",
+            "brackets_draw_rejected_invalid_officials" to "Каждое поле - не длиннее 200 символов",
 
 
 

@@ -103,6 +103,9 @@ enum class DrawRejection {
 
     /** Not a bout of this desktop's court whose participants are known. */
     UNKNOWN_BOUT,
+
+    /** A competition setting longer than [CompetitionOfficials.MAX_LENGTH]. */
+    INVALID_OFFICIALS,
 }
 
 sealed interface DrawOutcome {

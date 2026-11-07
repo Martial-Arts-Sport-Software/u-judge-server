@@ -38,6 +38,7 @@ data class CourtsBoard(
     val preliminary: Boolean,
     /** A bout started: the numbers of the bouts numbered then no longer change (I2a). */
     val frozen: Boolean,
+    val officials: CompetitionOfficials = CompetitionOfficials(),
 ) {
     fun number(ref: ItemRef): Int? = numbers[ref]
 
@@ -92,7 +93,18 @@ class CompetitionCourtsService(
         val preliminary = drawBoard.categories.any {
             it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.PREVIEW || it.status == CategoryStatus.NEEDS_REDRAW
         }
-        return CourtsBoard(competitionId, drawBoard, plan, localCourt, numbers, preliminary, frozen != null)
+        val officials = events.map { it.event }.filterIsInstance<DrawEvent.OfficialsSet>().lastOrNull()?.officials
+            ?: CompetitionOfficials()
+        return CourtsBoard(competitionId, drawBoard, plan, localCourt, numbers, preliminary, frozen != null, officials)
+    }
+
+    /** Place, chief judge and chief secretary of the protocols (`competition_officials_set`); unchanged values write nothing. */
+    @Synchronized
+    fun setOfficials(officials: CompetitionOfficials): DrawOutcome = withBoard { board ->
+        val normalised = officials.normalised()
+        if (!normalised.valid) return@withBoard DrawOutcome.Rejected(DrawRejection.INVALID_OFFICIALS)
+        if (normalised == board.officials) return@withBoard DrawOutcome.Done
+        draws.record(listOf(DrawEvent.OfficialsSet(checkNotNull(board.competitionId), normalised)))
     }
 
     /**

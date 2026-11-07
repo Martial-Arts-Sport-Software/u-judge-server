@@ -1623,6 +1623,7 @@ object BracketsSetupScreen : Screen {
             DrawRejection.UNKNOWN_ENTRY -> "brackets_draw_rejected_unknown_entry"
             DrawRejection.INVALID_COURT -> "brackets_draw_rejected_invalid_court"
             DrawRejection.UNKNOWN_BOUT -> "brackets_draw_rejected_unknown_bout"
+            DrawRejection.INVALID_OFFICIALS -> "brackets_draw_rejected_invalid_officials"
         },
     )
 

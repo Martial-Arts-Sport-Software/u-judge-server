@@ -59,6 +59,25 @@ data class CourtPlan(val courts: List<List<String>>) {
 }
 
 /**
+ * Competition settings printed on the protocols (ADR-008 §8): the place and the names of the chief judge and the chief
+ * secretary. They are not part of the applications; empty until the operator enters them.
+ */
+@Serializable
+data class CompetitionOfficials(val place: String = "", val chiefJudge: String = "", val chiefSecretary: String = "") {
+    /** The settings without surrounding and repeated whitespace, as they are journaled. */
+    fun normalised() = CompetitionOfficials(place.clean(), chiefJudge.clean(), chiefSecretary.clean())
+
+    val valid: Boolean
+        get() = listOf(place, chiefJudge, chiefSecretary).all { it.length <= MAX_LENGTH }
+
+    private fun String.clean() = trim().replace(Regex("\\s+"), " ")
+
+    companion object {
+        const val MAX_LENGTH = 200
+    }
+}
+
+/**
  * A bout or a performance of a category: elimination and round-robin bouts by their round and their index within the round
  * ([Bout]), performances of technical disciplines in round 1 by their place in the performance order.
  */

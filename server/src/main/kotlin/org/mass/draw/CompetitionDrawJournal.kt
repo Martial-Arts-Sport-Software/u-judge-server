@@ -66,6 +66,10 @@ sealed interface DrawEvent {
     @Serializable
     data class DesktopCourtSelected(override val competitionId: String, val peerId: String, val court: Int) : DrawEvent
 
+    /** Place, chief judge and chief secretary for the protocols (ADR-008 §8). */
+    @Serializable
+    data class OfficialsSet(override val competitionId: String, val officials: CompetitionOfficials) : DrawEvent
+
     /** The operator picked the next bout of [court] instead of the default one (ADR-008 §9, `SES-003`). */
     @Serializable
     data class NextBoutSelected(
@@ -118,6 +122,7 @@ class JdbcCompetitionDrawJournal(
                     is DrawEvent.CourtsSet -> COURTS_SET to json.encodeToString(event)
                     is DrawEvent.DesktopCourtSelected -> DESKTOP_COURT_SELECTED to json.encodeToString(event)
                     is DrawEvent.NextBoutSelected -> NEXT_BOUT_SELECTED to json.encodeToString(event)
+                    is DrawEvent.OfficialsSet -> OFFICIALS_SET to json.encodeToString(event)
                 }
                 JdbcDomainEventStore.PeerScopedEvent(
                     eventId = EventId(stored.eventId),
@@ -142,7 +147,8 @@ class JdbcCompetitionDrawJournal(
                 STARTED -> json.decodeFromString<DrawEvent.Started>(stored.payload)
                 COURTS_SET -> json.decodeFromString<DrawEvent.CourtsSet>(stored.payload)
                 DESKTOP_COURT_SELECTED -> json.decodeFromString<DrawEvent.DesktopCourtSelected>(stored.payload)
-                else -> json.decodeFromString<DrawEvent.NextBoutSelected>(stored.payload)
+                NEXT_BOUT_SELECTED -> json.decodeFromString<DrawEvent.NextBoutSelected>(stored.payload)
+                else -> json.decodeFromString<DrawEvent.OfficialsSet>(stored.payload)
             }
             StoredDrawEvent(stored.eventId.value, stored.occurredAt, event)
         }
@@ -154,7 +160,8 @@ class JdbcCompetitionDrawJournal(
         const val COURTS_SET = "competition_courts_set"
         const val DESKTOP_COURT_SELECTED = "desktop_court_selected"
         const val NEXT_BOUT_SELECTED = "court_next_bout_selected"
-        val TYPES = setOf(CONFIRMED, EDITED, STARTED, COURTS_SET, DESKTOP_COURT_SELECTED, NEXT_BOUT_SELECTED)
+        const val OFFICIALS_SET = "competition_officials_set"
+        val TYPES = setOf(CONFIRMED, EDITED, STARTED, COURTS_SET, DESKTOP_COURT_SELECTED, NEXT_BOUT_SELECTED, OFFICIALS_SET)
         val json = Json { explicitNulls = false }
     }
 }
