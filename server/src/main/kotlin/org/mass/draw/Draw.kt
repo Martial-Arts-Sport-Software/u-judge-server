@@ -173,10 +173,25 @@ object Draw {
 
     /**
      * Greedy placement can leave a later group without free sections, so pairs of entries swap while that lowers the
-     * separation penalty. Deterministic for the placement it starts from, so the seed still replays the draw.
+     * separation penalty. Deterministic for the placement it starts from, so the seed still replays the draw. A swap only
+     * changes the pairs of the two moved entries, so it is priced by their groups alone instead of the whole penalty.
      */
     private fun improve(slots: Array<String?>, groups: Map<String, String>) {
         val occupied = slots.indices.filter { slots[it] != null }
+        val rounds = Integer.numberOfTrailingZeros(slots.size)
+        val members = occupied.filter { slots[it] in groups }.groupBy { groups.getValue(slots[it]!!) }
+            .mapValues { it.value.toMutableList() }
+        val ideals = members.mapValues { (_, slotsOfGroup) -> idealRound(rounds, slotsOfGroup.size) }
+
+        /** The penalty of the pairs an entry of [group] in [slot] forms with the other entries of its group. */
+        fun penaltyAt(slot: Int, group: String?, leaving: Int): Long {
+            if (group == null) return 0L
+            val ideal = ideals.getValue(group)
+            return members.getValue(group).sumOf { other ->
+                if (other == leaving) 0L else pairPenalty(ideal, meetingRound(slot, other))
+            }
+        }
+
         var cost = separationPenalty(slots, groups)
         var improved = true
         while (improved && cost > 0) {
@@ -185,14 +200,17 @@ object Draw {
                 for (second in first + 1 until occupied.size) {
                     val a = occupied[first]
                     val b = occupied[second]
-                    if (groups[slots[a]] == groups[slots[b]]) continue
-                    slots[a] = slots[b].also { slots[b] = slots[a] }
-                    val swapped = separationPenalty(slots, groups)
-                    if (swapped < cost) {
-                        cost = swapped
-                        improved = true
-                    } else {
+                    val groupA = groups[slots[a]]
+                    val groupB = groups[slots[b]]
+                    if (groupA == groupB) continue
+                    val delta = penaltyAt(b, groupA, a) + penaltyAt(a, groupB, b) -
+                        penaltyAt(a, groupA, a) - penaltyAt(b, groupB, b)
+                    if (delta < 0) {
                         slots[a] = slots[b].also { slots[b] = slots[a] }
+                        groupA?.let { members.getValue(it).replaceAll { slot -> if (slot == a) b else slot } }
+                        groupB?.let { members.getValue(it).replaceAll { slot -> if (slot == b) a else slot } }
+                        cost += delta
+                        improved = true
                     }
                 }
             }
@@ -207,15 +225,24 @@ object Draw {
         val rounds = Integer.numberOfTrailingZeros(slots.size)
         return slots.indices.filter { slots[it] in groups }.groupBy { groups.getValue(slots[it]!!) }.values.sumOf { members ->
             if (members.size < 2) return@sumOf 0L
-            val sections = Integer.highestOneBit(members.size * 2 - 1)
-            val ideal = maxOf(1, rounds - Integer.numberOfTrailingZeros(sections) + 1)
+            val ideal = idealRound(rounds, members.size)
             var penalty = 0L
             for (i in members.indices) for (j in i + 1 until members.size) {
-                val earlier = ideal - meetingRound(members[i], members[j])
-                if (earlier > 0) penalty += 1L shl (3 * earlier)
+                penalty += pairPenalty(ideal, meetingRound(members[i], members[j]))
             }
             penalty
         }
+    }
+
+    /** The latest round by which a group of [size] entries in a bracket of [rounds] rounds must have met. */
+    private fun idealRound(rounds: Int, size: Int): Int {
+        val sections = Integer.highestOneBit(maxOf(1, size * 2 - 1))
+        return maxOf(1, rounds - Integer.numberOfTrailingZeros(sections) + 1)
+    }
+
+    private fun pairPenalty(ideal: Int, round: Int): Long {
+        val earlier = ideal - round
+        return if (earlier > 0) 1L shl (3 * earlier) else 0L
     }
 
     /** Slot → seed number of a standard bracket of [size]: `1, 8, 4, 5, 2, 7, 3, 6` for 8. */
