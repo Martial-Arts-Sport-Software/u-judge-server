@@ -11,26 +11,24 @@ import kotlin.test.assertIs
 
 class JdbcDomainEventStoreTest {
     @Test
-    fun `allocates one per-peer sequence across lifecycle and timer journals`() {
+    fun `allocates one per-peer sequence across bout and timer events`() {
         val store = JdbcDomainEventStore(dataSource("domain-events-sequence"))
-        val lifecycle = JdbcSessionLifecycleJournal(store, DomainJournalFixture.ownership, DomainJournalFixture.sessionId)
         val timer = JdbcKerugiTimerJournal(store, DomainJournalFixture.ownership, DomainJournalFixture.sessionId)
 
-        val started = assertIs<SessionLifecycleResult.Applied>(lifecycle.apply(DomainJournalFixture.command("session_started"), DomainJournalFixture.eventId(1)))
+        val started = DomainJournalFixture.append(store, "session_started", 1)
         val timerStarted = assertIs<KerugiTimerResult.Applied>(timer.apply(DomainJournalFixture.command("kerugi_timer_started"), DomainJournalFixture.eventId(2)))
-        val paused = assertIs<SessionLifecycleResult.Applied>(lifecycle.apply(DomainJournalFixture.command("session_paused"), DomainJournalFixture.eventId(3)))
+        val paused = DomainJournalFixture.append(store, "session_paused", 3)
 
-        assertEquals(listOf(1L, 2L, 3L), listOf(started.event.sequence, timerStarted.event.sequence, paused.event.sequence))
-        assertEquals(listOf(started.event, paused.event), lifecycle.events())
+        assertEquals(listOf(1L, 2L, 3L), listOf(started.sequence, timerStarted.event.sequence, paused.sequence))
+        assertEquals(listOf(started, paused), DomainJournalFixture.lifecycleEvents(store))
         assertEquals(listOf(timerStarted.event), timer.events())
     }
 
     @Test
     fun `rejects an event ID already used by another command type`() {
         val store = JdbcDomainEventStore(dataSource("domain-events-conflict"))
-        val lifecycle = JdbcSessionLifecycleJournal(store, DomainJournalFixture.ownership, DomainJournalFixture.sessionId)
         val timer = JdbcKerugiTimerJournal(store, DomainJournalFixture.ownership, DomainJournalFixture.sessionId)
-        assertIs<SessionLifecycleResult.Applied>(lifecycle.apply(DomainJournalFixture.command("session_started"), DomainJournalFixture.eventId(1)))
+        DomainJournalFixture.append(store, "session_started", 1)
 
         assertIs<KerugiTimerResult.Rejected>(timer.apply(DomainJournalFixture.command("kerugi_timer_started"), DomainJournalFixture.eventId(1)))
         assertEquals(emptyList(), timer.events())
@@ -59,6 +57,13 @@ internal object DomainJournalFixture {
         EventSource("operator"), "operator", type, "{}",
     )
 
+    private val lifecycleTypes = setOf("session_started", "session_paused", "session_resumed")
+
+    fun append(store: JdbcDomainEventStore, type: String, number: Int): SequencedDomainEvent =
+        store.append(command(type).toEvent(eventId(number), Instant.parse("2026-09-20T10:00:00Z")))
+
+    fun lifecycleEvents(store: JdbcDomainEventStore) = store.sessionEvents(bracketId, sessionId, lifecycleTypes)
+
     fun eventId(number: Int) = EventId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")
 
     /**
@@ -72,15 +77,12 @@ internal object DomainJournalFixture {
         insertLegacy(dataSource, "session_lifecycle_events", eventId(3), "session_paused", sequence = 2, at = "2026-09-20T10:00:02Z")
 
         val store = JdbcDomainEventStore(dataSource)
-        val lifecycle = JdbcSessionLifecycleJournal(store, ownership, sessionId)
         val timer = JdbcKerugiTimerJournal(store, ownership, sessionId)
 
-        assertEquals(SessionState.PAUSED, lifecycle.projection().state)
         assertEquals(KerugiTimerState.RUNNING, timer.projection().state)
-        assertEquals(listOf(eventId(1) to 1L, eventId(3) to 3L), lifecycle.events().map { it.event.eventId to it.sequence })
+        assertEquals(listOf(eventId(1) to 1L, eventId(3) to 3L), lifecycleEvents(store).map { it.event.eventId to it.sequence })
         assertEquals(listOf(eventId(2) to 2L), timer.events().map { it.event.eventId to it.sequence })
-        val resumed = assertIs<SessionLifecycleResult.Applied>(lifecycle.apply(command("session_resumed"), eventId(4)))
-        assertEquals(4L, resumed.event.sequence)
+        assertEquals(4L, append(store, "session_resumed", 4).sequence)
         dataSource.connection.use { connection ->
             val legacyTables = connection.metaData.getTables(null, null, "%", arrayOf("TABLE")).use { tables ->
                 buildList { while (tables.next()) add(tables.getString("TABLE_NAME").lowercase()) }
