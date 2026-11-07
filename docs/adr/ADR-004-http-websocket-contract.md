@@ -4,6 +4,7 @@
 - Date: 2026-08-31
 - Requirements: `DEV-003`--`DEV-010`, `SES-004`, `NET-001`--`NET-006`, `NFR-006`, `NFR-007`, `NFR-012`,
   `KER-003`, `KER-005`, `KER-009`, `CLI-005`, `CLI-014`--`CLI-018`, `CLI-060`--`CLI-068`
+- Amended by: [ADR-009](ADR-009-kerugi-bout-contract.md) (session snapshot, resync, Kerugi commands, deprecated generic `command`)
 
 ## Context
 
