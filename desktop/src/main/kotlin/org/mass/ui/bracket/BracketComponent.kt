@@ -64,10 +64,18 @@ import u_judge_server.desktop.generated.resources.user_icon
 import kotlin.math.roundToInt
 
 /** Sizes of one bracket drawing: the preview panel is compact, the full-screen view is large (owner's mockups). */
-data class BracketScale(val boxWidth: Dp, val boxHeight: Dp, val slotHeight: Dp, val columnGap: Dp, val fullNames: Boolean) {
+data class BracketScale(
+    val boxWidth: Dp,
+    val boxHeight: Dp,
+    val slotHeight: Dp,
+    val columnGap: Dp,
+    val fullNames: Boolean,
+    /** The height of «Бой № N» above a winner's box. */
+    val labelHeight: Dp,
+) {
     companion object {
-        val Compact = BracketScale(boxWidth = 180.dp, boxHeight = 34.dp, slotHeight = 44.dp, columnGap = 36.dp, fullNames = false)
-        val Large = BracketScale(boxWidth = 300.dp, boxHeight = 56.dp, slotHeight = 72.dp, columnGap = 56.dp, fullNames = true)
+        val Compact = BracketScale(boxWidth = 180.dp, boxHeight = 34.dp, slotHeight = 44.dp, columnGap = 36.dp, fullNames = false, labelHeight = 16.dp)
+        val Large = BracketScale(boxWidth = 300.dp, boxHeight = 56.dp, slotHeight = 72.dp, columnGap = 56.dp, fullNames = true, labelHeight = 20.dp)
     }
 }
 
@@ -85,7 +93,8 @@ data class BracketEditing(
  * The drawn bracket of a category (ADR-008 §7): an elimination bracket with rounds left to right, byes placed straight in
  * the second round as in the organiser's protocols and a final «Победитель» box, or the rounds of a round robin. The upper
  * side of every pair is blue and the lower one red, also while the entry is not known yet. With [editing] the entries of
- * an elimination bracket can be dragged onto each other.
+ * an elimination bracket can be dragged onto each other. [number] gives «Бой № N» of a bout by its round and index
+ * (ADR-008 §6), null while the draw is not confirmed.
  */
 @Composable
 fun BracketComponent(
@@ -94,13 +103,14 @@ fun BracketComponent(
     modifier: Modifier = Modifier,
     scale: BracketScale = BracketScale.Compact,
     editing: BracketEditing? = null,
+    number: (round: Int, index: Int) -> Int? = { _, _ -> null },
 ) {
     val byKey = entries.associateBy { it.drawKey }
     val label = { key: String -> byKey[key]?.let { entryLabel(it, scale.fullNames) } ?: key }
     Box(modifier.verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(16.dp)) {
         when (draw.format) {
-            DrawFormat.ELIMINATION -> Elimination(draw, label, scale, editing)
-            DrawFormat.ROUND_ROBIN -> RoundRobin(draw, label, scale)
+            DrawFormat.ELIMINATION -> Elimination(draw, label, scale, editing, number)
+            DrawFormat.ROUND_ROBIN -> RoundRobin(draw, label, scale, number)
             DrawFormat.PERFORMANCE_ORDER, DrawFormat.NO_BOUTS -> Unit
         }
     }
@@ -122,7 +132,13 @@ fun entryLabel(entry: CategoryEntry, full: Boolean): String = entry.athletes.joi
  * entry passed with a bye).
  */
 @Composable
-private fun Elimination(draw: CategoryDraw, label: (String) -> String, scale: BracketScale, editing: BracketEditing?) {
+private fun Elimination(
+    draw: CategoryDraw,
+    label: (String) -> String,
+    scale: BracketScale,
+    editing: BracketEditing?,
+    number: (round: Int, index: Int) -> Int?,
+) {
     val size = draw.positions.size
     val rounds = Bouts.rounds(draw)
     val occupied = mutableListOf(draw.positions.map { it != null })
@@ -232,6 +248,21 @@ private fun Elimination(draw: CategoryDraw, label: (String) -> String, scale: Br
             )
         }
         WinnerBox(scale, x = column * rounds, y = centre(rounds, 0))
+        // «Бой № N» above the box the winner of the bout goes to, as on the organiser's protocol.
+        (1..rounds).forEach { round ->
+            (0 until (size shr round)).filter { bout(round, it) }.forEachIndexed { boutIndex, index ->
+                number(round, boutIndex)?.let { boutNumber ->
+                    Text(
+                        Localization.getString("brackets_bout_number").replace("%d", boutNumber.toString()),
+                        color = Colors.PRIMARY.color,
+                        style = if (scale.fullNames) MaterialTheme.typography.bodySmall else MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        modifier = Modifier.offset(column * round, centre(round, index) - scale.boxHeight / 2 - scale.labelHeight),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -310,7 +341,7 @@ private fun WinnerBox(scale: BracketScale, x: Dp, y: Dp) {
 
 /** Round robin: every round with its pairs; places are decided by wins (ADR-007 §4). */
 @Composable
-private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: BracketScale) {
+private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: BracketScale, number: (round: Int, index: Int) -> Int?) {
     val bouts = Bouts.of(draw)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         bouts.groupBy { it.round }.forEach { (round, roundBouts) ->
@@ -322,6 +353,16 @@ private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: Bra
             )
             roundBouts.forEach { bout ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    number(bout.round, bout.index)?.let { boutNumber ->
+                        Text(
+                            Localization.getString("brackets_bout_number").replace("%d", boutNumber.toString()),
+                            color = Colors.PRIMARY.color,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier.width(72.dp),
+                        )
+                    }
                     listOf(bout.first, bout.second).forEachIndexed { side, entry ->
                         val key = (entry as BoutSide.Entry).key
                         Box(

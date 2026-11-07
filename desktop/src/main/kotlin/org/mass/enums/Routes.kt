@@ -8,6 +8,7 @@ enum class Routes(val path: String) {
     ENTRY("entry"),
     DEVICES_CONNECTION("devices_connection"),
     BRACKETS_SETUP("brackets_setup"),
+    COURTS("courts"),
 
     BACK("");
 
