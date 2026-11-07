@@ -18,8 +18,24 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.mass.bout.BoutAthlete
+import org.mass.bout.BoutCommand
+import org.mass.bout.BoutCorner
+import org.mass.bout.BoutEventJournal
+import org.mass.bout.BoutOutcome
+import org.mass.bout.BoutStartSpec
+import org.mass.bout.BoutStateAction
+import org.mass.bout.KerugiBoutService
+import org.mass.bout.RosterJudge
+import org.mass.domain.BracketId
+import org.mass.domain.CompetitionId
+import org.mass.domain.EventId
+import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiOperatorActionType
+import org.mass.domain.PeerId
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -32,7 +48,7 @@ import kotlin.test.assertEquals
 class ContractFixturesTest {
     private val metadata = ServerMetadata(
         protocolVersion = "1.0",
-        capabilities = mapOf("metadata" to true),
+        capabilities = mapOf("metadata" to true, "kerugi_bout" to true),
         peerId = "00000000-0000-4000-8000-000000000001",
         courtId = "court-local",
         serverName = "U'Judge Server",
@@ -83,10 +99,6 @@ class ContractFixturesTest {
             generated = setOf("serverReceiveTimestamp", "serverSendTimestamp"),
         )
         assertMatches("heartbeat_ack", socket.exchange(fixture("heartbeat_request")))
-        assertMatches("command_ack", socket.exchange(fixture("command_request")))
-
-        val conflicting = JsonObject(fixture("command_request") + ("sequence" to JsonPrimitive(2)))
-        assertMatches("command_rejected", socket.exchange(conflicting))
 
         pairing.revoke(submitted.request.requestId)
 
@@ -94,10 +106,106 @@ class ContractFixturesTest {
         assertMatches("handshake_rejected", revokedSocket.exchange(withCredential(fixture("handshake_request"), credential)))
     }
 
-    private fun ApplicationTestBuilder.contractModule(pairing: PairingRequests) = application {
+    @Test
+    fun `Kerugi bout messages match the fixtures`() = testApplication {
+        val pairing = PairingRequests()
+        var clock = Instant.parse("2026-11-08T10:15:30Z")
+        val hub = RealtimeHub(KerugiBoutService(BoutEventJournal.InMemory(), PeerId(metadata.peerId), now = { clock }))
+        contractModule(pairing, hub)
+        val judge = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        val second = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        judge.exchange(withCredential(fixture("handshake_request"), approve(pairing, "android-contract")))
+        second.exchange(withCredential(fixture("handshake_request"), approve(pairing, "android-2")))
+        assertMatches("resync_response_idle", judge.exchange(fixture("resync_request")))
+        second.exchange(fixture("resync_request"))
+
+        val sessionId = (hub.operator("Оператор", BoutCommand.StartBout(EventId.new(), boutSpec())) as BoutOutcome.Applied).sessionId
+        val bout = hub.bouts.current()!!
+        val generated = mapOf(
+            "sessionId" to sessionId.value,
+            "courtId" to bout.courtId.value,
+            "judgeId" to bout.seatOf("android-contract")!!.judgeId,
+        )
+        val sessionPaths = setOf("cursor", "session.sessionId", "session.courtId", "session.seat.judgeId")
+        assertMatches("session_snapshot", judge.receiveText(), generated = sessionPaths)
+        second.receiveText()
+        hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START))
+        judge.receiveText()
+        second.receiveText()
+
+        val score = withValues(fixture("kerugi_score_command"), generated)
+        assertMatches("command_ack", judge.exchange(score))
+        val secondTap = withValues(
+            score,
+            mapOf("eventId" to EventId.new().value, "judgeId" to bout.seatOf("android-2")!!.judgeId, "deviceId" to "android-2",
+                "clientTimestamp" to "2026-11-08T10:15:30.500Z"),
+        )
+        assertEquals("command_ack", Json.parseToJsonElement(second.exchange(secondTap)).jsonObject.getValue("type").jsonPrimitive.content)
+        assertMatches("command_rejected", judge.exchangeSkipping(withValues(score, mapOf("area" to "BODY")), "kerugi_score_updated"))
+        clock = Instant.parse("2026-11-08T10:15:41Z")
+        val attention = withValues(fixture("judge_attention_command"), generated)
+        assertEquals(attention.getValue("eventId"), Json.parseToJsonElement(judge.exchange(attention)).jsonObject.getValue("eventId"))
+
+        repeat(10) { hub.operator("Оператор", BoutCommand.AwardAction(EventId.new(), sessionId, KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.RED, 1)) }
+        repeat(9) { judge.receiveText() }
+        assertMatches("kerugi_score_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
+        assertMatches("resync_response", judge.exchange(fixture("resync_request")), generated = sessionPaths)
+        val invalidResync = JsonObject(fixture("resync_request") + ("cursor" to JsonPrimitive("latest")))
+        assertMatches("resync_rejected", judge.exchange(invalidResync))
+
+        hub.operator("Оператор", BoutCommand.CompleteBout(EventId.new(), sessionId))
+        assertMatches("session_state_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
+    }
+
+    private fun approve(pairing: PairingRequests, deviceId: String): String {
+        val submitted = pairing.submit(PairingRequestCommand(deviceId, "Ivanov", "android")) as PairingSubmission.Pending
+        return (pairing.approve(submitted.request.requestId) as PairingApproval.Accepted).request.reconnectCredential
+    }
+
+    private fun boutSpec(): BoutStartSpec {
+        val snapshot = fixture("session_snapshot").getValue("session").jsonObject
+        fun corner(side: String) = snapshot.getValue(side).jsonObject.let { corner ->
+            BoutCorner(
+                corner.getValue("entryId").jsonPrimitive.content,
+                corner.getValue("label").jsonPrimitive.content,
+                corner.getValue("athletes").jsonArray.map {
+                    BoutAthlete(it.jsonObject.getValue("fullName").jsonPrimitive.content, it.jsonObject.getValue("city").jsonPrimitive.content)
+                },
+            )
+        }
+        return BoutStartSpec(
+            competitionId = CompetitionId(snapshot.getValue("competitionId").jsonPrimitive.content),
+            bracketId = BracketId(snapshot.getValue("bracketId").jsonPrimitive.content),
+            categoryId = "category",
+            categoryTitle = snapshot.getValue("categoryTitle").jsonPrimitive.content,
+            boutNumber = snapshot.getValue("boutNumber").jsonPrimitive.content.toInt(),
+            round = 1,
+            index = 0,
+            blue = corner("blue"),
+            red = corner("red"),
+            judges = listOf(RosterJudge("android-contract", "Ivanov"), RosterJudge("android-2", "Petrova")),
+        )
+    }
+
+    private fun withValues(message: JsonObject, values: Map<String, String>) =
+        JsonObject(message.mapValues { (key, value) -> values[key]?.let(::JsonPrimitive) ?: value })
+
+    private suspend fun WebSocketSession.receiveText() = (incoming.receive() as Frame.Text).readText()
+
+    /** Sends [message] and returns the first reply that is not a push of [pushType]. */
+    private suspend fun WebSocketSession.exchangeSkipping(message: JsonObject, pushType: String): String {
+        send(Frame.Text(message.toString()))
+        while (true) {
+            val text = receiveText()
+            if (Json.parseToJsonElement(text).jsonObject.getValue("type").jsonPrimitive.content != pushType) return text
+        }
+    }
+
+    private fun ApplicationTestBuilder.contractModule(pairing: PairingRequests, realtime: RealtimeHub = RealtimeHub.inMemory()) = application {
         module(
             metadata = metadata,
             pairingRequests = pairing,
+            realtime = realtime,
             credentialDeliveryIsSecure = { true },
             clock = { Instant.parse("2026-09-26T10:00:00Z") },
         )
@@ -118,13 +226,24 @@ class ContractFixturesTest {
     private fun withCredential(message: JsonObject, credential: String) =
         JsonObject(message + ("reconnectCredential" to JsonPrimitive(credential)))
 
+    /** [generated] lists dotted paths of server-generated values, compared by presence; everything else literally. */
     private fun assertMatches(name: String, actualText: String, generated: Set<String> = emptySet()) {
         val expected = fixture(name)
         val actual = Json.parseToJsonElement(actualText).jsonObject
         assertEquals(expected.keys, actual.keys, "$name keys")
-        val normalized = JsonObject(actual.mapValues { (key, value) -> if (key in generated) expected.getValue(key) else value })
-        generated.forEach { key -> assert(actual.getValue(key) is JsonPrimitive) { "$name.$key must be a value" } }
+        val normalized = generated.fold(actual) { message, path -> replaceGenerated(name, message, expected, path.split(".")) }
         assertEquals<JsonElement>(expected, normalized, name)
+    }
+
+    private fun replaceGenerated(name: String, actual: JsonObject, expected: JsonObject, path: List<String>): JsonObject {
+        val key = path.first()
+        val value = actual.getValue(key)
+        return if (path.size == 1) {
+            assert(value is JsonPrimitive) { "$name.$key must be a value" }
+            JsonObject(actual + (key to expected.getValue(key)))
+        } else {
+            JsonObject(actual + (key to replaceGenerated(name, value.jsonObject, expected.getValue(key).jsonObject, path.drop(1))))
+        }
     }
 
     private fun fixture(name: String): JsonObject = Json.parseToJsonElement(

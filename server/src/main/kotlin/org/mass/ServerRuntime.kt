@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.mass.applications.CompetitionApplicationsService
+import org.mass.bout.JdbcBoutEventJournal
+import org.mass.bout.KerugiBoutService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.domain.PeerId
 import org.mass.draw.CompetitionCourtsService
@@ -31,7 +33,6 @@ import org.mass.persistence.PostgresCommand
 import org.mass.persistence.PostgresPlatform
 import org.mass.persistence.PostgresRuntimeConfiguration
 import org.mass.persistence.PostgresState
-import org.mass.replication.JdbcPeerJournal
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.nio.file.Files
@@ -127,6 +128,11 @@ class ServerRuntime(
     var competitionCourts: CompetitionCourtsService? = null
         private set
 
+    /** The realtime dispatcher and the Kerugi bouts of this court (ADR-009); null while the server is not running. */
+    @Volatile
+    var realtime: RealtimeHub? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -156,6 +162,7 @@ class ServerRuntime(
         competitionApplications = null
         competitionDraws = null
         competitionCourts = null
+        realtime = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -196,7 +203,6 @@ class ServerRuntime(
             return failStartup("Database migration failed: ${exception.message}")
         }
         val metadata = ServerMetadata.local(peerId = peerId.value)
-        val realtimeCommands = RealtimeCommands(journal = JdbcPeerJournal(peerId.value, dataSource))
         val store = JdbcDomainEventStore(dataSource)
         val pairing = try {
             PairingRequests(JdbcDeviceRegistryJournal(store, peerId))
@@ -220,6 +226,11 @@ class ServerRuntime(
             return failStartup("Competition draw could not be restored: ${exception.message}")
         }
         competitionCourts = CompetitionCourtsService(checkNotNull(competitionDraws), peerId)
+        val hub = try {
+            RealtimeHub(KerugiBoutService(JdbcBoutEventJournal(store), peerId))
+        } catch (exception: Exception) {
+            return failStartup("Kerugi bouts could not be restored: ${exception.message}")
+        }.also { realtime = it }
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
@@ -242,7 +253,7 @@ class ServerRuntime(
                     }
                 },
             ) {
-                module(metadata = metadata, pairingRequests = pairing, realtimeCommands = realtimeCommands)
+                module(metadata = metadata, pairingRequests = pairing, realtime = hub)
             }.start(wait = false)
         } catch (exception: Exception) {
             return failStartup("HTTPS port ${configuration.port} is unavailable: ${exception.message}")
@@ -315,6 +326,7 @@ class ServerRuntime(
         competitionApplications = null
         competitionDraws = null
         competitionCourts = null
+        realtime = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }
