@@ -1621,6 +1621,7 @@ object BracketsSetupScreen : Screen {
             DrawRejection.NOTHING_TO_CONFIRM -> "brackets_draw_rejected_nothing_to_confirm"
             DrawRejection.NOT_CONFIRMED -> "brackets_draw_rejected_not_confirmed"
             DrawRejection.UNKNOWN_ENTRY -> "brackets_draw_rejected_unknown_entry"
+            DrawRejection.INVALID_COURT -> "brackets_draw_rejected_invalid_court"
         },
     )
 

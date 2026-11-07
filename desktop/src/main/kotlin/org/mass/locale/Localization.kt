@@ -177,6 +177,7 @@ object Localization {
             "brackets_draw_rejected_nothing_to_confirm" to "There are no previews to confirm",
             "brackets_draw_rejected_not_confirmed" to "Draw the category first",
             "brackets_draw_rejected_unknown_entry" to "The athlete is not in this draw",
+            "brackets_draw_rejected_invalid_court" to "There is no such court",
 
 
 
@@ -427,6 +428,7 @@ object Localization {
             "brackets_draw_rejected_nothing_to_confirm" to "Нет предпросмотров для подтверждения",
             "brackets_draw_rejected_not_confirmed" to "Сначала проведите жеребьёвку категории",
             "brackets_draw_rejected_unknown_entry" to "Участника нет в этой жеребьёвке",
+            "brackets_draw_rejected_invalid_court" to "Такой площадки нет",
 
 
 
