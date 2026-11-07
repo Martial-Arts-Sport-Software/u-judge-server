@@ -155,6 +155,21 @@ class JdbcDomainEventStore(private val dataSource: DataSource) {
             }
         }
 
+    /** Session-scoped events of [types] across all sessions, in journal order. */
+    fun sessionEvents(types: Set<String>): List<SequencedDomainEvent> = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT * FROM domain_events WHERE session_id IS NOT NULL ORDER BY owner_peer_id, sequence, event_id",
+        ).use { statement ->
+            statement.executeQuery().use { result ->
+                buildList {
+                    while (result.next()) {
+                        if (result.getString("event_type") in types) add(result.toSequencedEvent())
+                    }
+                }
+            }
+        }
+    }
+
     private fun nextSequence(connection: Connection, ownerPeerId: String): Long = connection.prepareStatement(
         "SELECT COALESCE(MAX(sequence), 0) FROM domain_events WHERE owner_peer_id = ?",
     ).use { statement ->
