@@ -100,6 +100,9 @@ enum class DrawRejection {
 
     /** A court outside 1..[CourtPlan.MAX_COURTS] or above the number of courts. */
     INVALID_COURT,
+
+    /** Not a bout of this desktop's court whose participants are known. */
+    UNKNOWN_BOUT,
 }
 
 sealed interface DrawOutcome {

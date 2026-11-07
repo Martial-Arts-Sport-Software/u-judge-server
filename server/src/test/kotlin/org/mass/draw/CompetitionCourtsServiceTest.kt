@@ -105,6 +105,71 @@ class CompetitionCourtsServiceTest {
     }
 
     @Test
+    fun `the court panel shows the next bout of this desktop's court and the operator picks another one`() {
+        val services = services("courts-panel")
+        services.applications.import(competition(kerugi, small, forms), replaceConfirmed = false)
+        val courts = services.courts
+        assertEquals(null, courts.courtPanel().next)
+        services.draws.drawAll()
+        services.draws.confirm()
+        courts.setCourtCount(2)
+        courts.placeCategory("kerugi-36", court = 2, position = 0)
+        courts.selectLocalCourt(2)
+
+        // Court 2 has the round robin of «до 36 кг»: every bout has known participants, the lowest number is next.
+        val panel = courts.courtPanel()
+        assertEquals(2, panel.court)
+        assertEquals(null, panel.current)
+        assertFalse(panel.nextSelected)
+        assertEquals(listOf(10, 11, 14, 15, 17, 18), panel.queue.map { it.number })
+        val first = assertIs<CourtItem.Bout>(panel.next)
+        assertEquals(10, first.number)
+        assertEquals("kerugi-36", first.category.id)
+        // Blue is the upper entry of the pair, red the lower one.
+        val bout = Bouts.of(services.draws.board().category("kerugi-36")!!.shown!!).first()
+        assertEquals((bout.first as BoutSide.Entry).key, first.blue.drawKey)
+        assertEquals((bout.second as BoutSide.Entry).key, first.red.drawKey)
+        assertEquals(services.draws.board().category("kerugi-36")!!.confirmed!!.ownership.bracketId, first.bracketId)
+
+        // The operator picks bout 15; picking it again writes nothing.
+        val picked = panel.queue.first { it.number == 15 }.ref
+        assertEquals(DrawOutcome.Done, courts.selectNextBout(picked))
+        val journalSize = services.draws.journal().size
+        assertEquals(DrawOutcome.Done, courts.selectNextBout(picked))
+        assertEquals(journalSize, services.draws.journal().size)
+        assertEquals(15, courts.courtPanel().next!!.number)
+        assertTrue(courts.courtPanel().nextSelected)
+
+        // A bout of another court or one whose participants are not known yet cannot be picked.
+        val unknown = DrawOutcome.Rejected(DrawRejection.UNKNOWN_BOUT)
+        assertEquals(unknown, courts.selectNextBout(ItemRef("kerugi-33", 1, 0)))
+        assertEquals(unknown, courts.selectNextBout(ItemRef("kerugi-36", 9, 0)))
+        assertEquals(journalSize, services.draws.journal().size)
+
+        // Restart: the pick is restored.
+        assertEquals(picked, services("courts-panel").courts.courtPanel().next!!.ref)
+
+        // Court 1: round 1 of «до 33 кг» and the performances; the later elimination rounds wait for the results (I2b).
+        courts.selectLocalCourt(1)
+        val courtOne = courts.courtPanel()
+        assertEquals((1..9).toList(), courtOne.queue.map { it.number })
+        assertEquals(4, courtOne.queue.count { it is CourtItem.Bout })
+        assertIs<CourtItem.Performance>(courtOne.queue.last())
+        assertEquals(1, courtOne.next!!.number)
+        assertEquals(unknown, courts.selectNextBout(ItemRef("kerugi-33", 2, 0)))
+
+        // Selecting does not lock: the category can still be drawn again; the pick stays while its bout exists.
+        courts.selectLocalCourt(2)
+        assertEquals(DrawOutcome.Done, services.draws.shuffle("kerugi-36"))
+        assertEquals(DrawOutcome.Done, services.draws.confirm())
+        assertEquals(picked, courts.courtPanel().next!!.ref)
+
+        // The seam of I2a: the next bout's category starts by its ID.
+        assertEquals(DrawOutcome.Done, services.draws.start(courts.courtPanel().next!!.ref.categoryId))
+        assertEquals(CategoryProgress.IN_PROGRESS, courts.board().draws.category("kerugi-36")!!.progress)
+    }
+
+    @Test
     fun `the first start freezes the numbers and keeps a started category on its court`() {
         val services = services("courts-freeze")
         services.applications.import(competition(kerugi, small), replaceConfirmed = false)

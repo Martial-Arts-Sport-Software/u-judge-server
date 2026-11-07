@@ -65,6 +65,17 @@ sealed interface DrawEvent {
     /** The court the desktop [peerId] judges (ADR-008 §1). */
     @Serializable
     data class DesktopCourtSelected(override val competitionId: String, val peerId: String, val court: Int) : DrawEvent
+
+    /** The operator picked the next bout of [court] instead of the default one (ADR-008 §9, `SES-003`). */
+    @Serializable
+    data class NextBoutSelected(
+        override val competitionId: String,
+        val court: Int,
+        override val categoryId: String,
+        override val bracketId: String,
+        val round: Int,
+        val index: Int,
+    ) : OfCategory
 }
 
 data class StoredDrawEvent(val eventId: String, val occurredAt: Instant, val event: DrawEvent)
@@ -106,6 +117,7 @@ class JdbcCompetitionDrawJournal(
                     is DrawEvent.Started -> STARTED to json.encodeToString(event)
                     is DrawEvent.CourtsSet -> COURTS_SET to json.encodeToString(event)
                     is DrawEvent.DesktopCourtSelected -> DESKTOP_COURT_SELECTED to json.encodeToString(event)
+                    is DrawEvent.NextBoutSelected -> NEXT_BOUT_SELECTED to json.encodeToString(event)
                 }
                 JdbcDomainEventStore.PeerScopedEvent(
                     eventId = EventId(stored.eventId),
@@ -129,7 +141,8 @@ class JdbcCompetitionDrawJournal(
                 EDITED -> json.decodeFromString<DrawEvent.Edited>(stored.payload)
                 STARTED -> json.decodeFromString<DrawEvent.Started>(stored.payload)
                 COURTS_SET -> json.decodeFromString<DrawEvent.CourtsSet>(stored.payload)
-                else -> json.decodeFromString<DrawEvent.DesktopCourtSelected>(stored.payload)
+                DESKTOP_COURT_SELECTED -> json.decodeFromString<DrawEvent.DesktopCourtSelected>(stored.payload)
+                else -> json.decodeFromString<DrawEvent.NextBoutSelected>(stored.payload)
             }
             StoredDrawEvent(stored.eventId.value, stored.occurredAt, event)
         }
@@ -140,7 +153,8 @@ class JdbcCompetitionDrawJournal(
         const val STARTED = "bracket_started"
         const val COURTS_SET = "competition_courts_set"
         const val DESKTOP_COURT_SELECTED = "desktop_court_selected"
-        val TYPES = setOf(CONFIRMED, EDITED, STARTED, COURTS_SET, DESKTOP_COURT_SELECTED)
+        const val NEXT_BOUT_SELECTED = "court_next_bout_selected"
+        val TYPES = setOf(CONFIRMED, EDITED, STARTED, COURTS_SET, DESKTOP_COURT_SELECTED, NEXT_BOUT_SELECTED)
         val json = Json { explicitNulls = false }
     }
 }

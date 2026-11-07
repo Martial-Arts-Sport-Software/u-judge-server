@@ -131,6 +131,77 @@ class CompetitionCourtsService(
         draws.record(listOf(DrawEvent.DesktopCourtSelected(checkNotNull(board.competitionId), peerId.value, court)))
     }
 
+    /**
+     * The court panel of this desktop's court (ADR-008 §9): the seam of I2a's «Начать». The next bout is the operator's pick
+     * while it waits on this court, otherwise the lowest number whose participants are known.
+     */
+    @Synchronized
+    fun courtPanel(): CourtPanel = panel(board())
+
+    /**
+     * «Следующий бой»: makes [ref], a waiting bout or performance of this desktop's court, the next one instead of the
+     * default (`court_next_bout_selected`). Picking the current pick again writes nothing. Selecting does not lock anything.
+     */
+    @Synchronized
+    fun selectNextBout(ref: ItemRef): DrawOutcome = withBoard { board ->
+        val panel = panel(board)
+        val item = panel.queue.firstOrNull { it.ref == ref } ?: return@withBoard DrawOutcome.Rejected(DrawRejection.UNKNOWN_BOUT)
+        if (panel.nextSelected && panel.next?.ref == ref) return@withBoard DrawOutcome.Done
+        draws.record(
+            listOf(
+                DrawEvent.NextBoutSelected(
+                    competitionId = checkNotNull(board.competitionId),
+                    court = panel.court,
+                    categoryId = ref.categoryId,
+                    bracketId = item.bracketId.value,
+                    round = ref.round,
+                    index = ref.index,
+                ),
+            ),
+        )
+    }
+
+    private fun panel(board: CourtsBoard): CourtPanel {
+        val competitionId = board.competitionId ?: return CourtPanel.Empty
+        val court = board.localCourt
+        val queue = board.categoriesOf(court).flatMap { state -> items(board, state, court) }.sortedBy { it.number }
+        val picked = draws.journal().map { it.event }
+            .filterIsInstance<DrawEvent.NextBoutSelected>()
+            .lastOrNull { it.competitionId == competitionId && it.court == court }
+            ?.let { event -> queue.firstOrNull { it.ref == ItemRef(event.categoryId, event.round, event.index) } }
+        return CourtPanel(
+            court = court,
+            current = null,
+            next = picked ?: queue.firstOrNull(),
+            nextSelected = picked != null,
+            queue = queue,
+            preliminary = board.preliminary,
+        )
+    }
+
+    /** The numbered bouts and performances of a category whose participants are known. */
+    private fun items(board: CourtsBoard, state: CategoryDrawState, court: Int): List<CourtItem> {
+        val draw = state.numbered ?: return emptyList()
+        val bracketId = state.confirmed?.ownership?.bracketId ?: return emptyList()
+        val entries = state.category.entries.associateBy { it.drawKey }
+        val categoryId = state.category.id
+        return when (draw.format) {
+            DrawFormat.ELIMINATION, DrawFormat.ROUND_ROBIN -> Bouts.of(draw).mapNotNull { bout ->
+                val blue = (bout.first as? BoutSide.Entry)?.let { entries[it.key] } ?: return@mapNotNull null
+                val red = (bout.second as? BoutSide.Entry)?.let { entries[it.key] } ?: return@mapNotNull null
+                val ref = ItemRef(categoryId, bout.round, bout.index)
+                val number = board.number(ref) ?: return@mapNotNull null
+                CourtItem.Bout(ref, number, court, state.category, bracketId, blue, red)
+            }
+            DrawFormat.PERFORMANCE_ORDER -> draw.entryKeys.mapIndexedNotNull { index, key ->
+                val ref = ItemRef(categoryId, 1, index)
+                val number = board.number(ref) ?: return@mapIndexedNotNull null
+                CourtItem.Performance(ref, number, court, state.category, bracketId, entries[key] ?: return@mapIndexedNotNull null)
+            }
+            DrawFormat.NO_BOUTS -> emptyList()
+        }
+    }
+
     private fun setPlan(board: CourtsBoard, plan: CourtPlan): DrawOutcome =
         if (plan == board.plan) {
             DrawOutcome.Done
