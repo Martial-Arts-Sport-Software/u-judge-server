@@ -53,7 +53,8 @@ Pilot не считается production-ready до отдельного hardeni
   mobile realtime на физических устройствах (I3) открыты; P2P остаётся post-v1.
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
-- [ ] Gate G4: не готов.
+- [ ] Gate G4: импорт заявок (I4a), жеребьёвка, площадки, нумерация боёв и протоколы (I4b) подтверждены тестами;
+  проведение сеток с подключёнными судьями и продвижение победителя открыты (I2a, I2b).
 - [ ] Gate G5: не готов.
 - [ ] Gate G6: не готов.
 - [ ] Gate G7: не готов.
@@ -103,7 +104,7 @@ baseline; при расхождении действует этот план.
 |--------|----|--------|------|----------------------------------|-----------------|------------|
 | [x] | I1 | 4-5 | G1 (PostgreSQL), основа G2 | Desktop запускает managed PostgreSQL и server; судья на emulator проходит pairing по local TLS, оператор одобряет, видит и отзывает устройство; после `kill -9` и перезапуска журнал, реестр устройств и reconnect credential сохранены, client переподключается без повторного pairing | `NFR-004`, `NFR-008`-`NFR-010`, `DEV-003`-`DEV-006`, `UI-007`, `NET-006`, `SYS-007`-`SYS-009`, `AUD-001` | Да: client pairing и reconnect против desktop server |
 | [x] | I4a | 5-6 | G4 (импорт) | Оператор выбирает сразу несколько файлов заявок `df-template-v1` (500 участников), видит отчёт об ошибках с файлом, листом, строкой, колонкой, значением и причиной или preview категорий и участников; «Загрузить» проверяет и загружает за один шаг, загрузка атомарна, перед ней делается backup журнала; повторная загрузка до старта заменяет прежнюю с подтверждением, одинаковая ничего не меняет; история загрузок позволяет посмотреть и восстановить любую загрузку или сбросить все; после перезапуска соревнование и история восстановлены | `IMP-001`-`IMP-003`, `IMP-005`-`IMP-008`, `BAK-001`, `SYS-003`, `AUD-001`; ADR-005 | Нет |
-| [ ] | I4b | 6 | G4 | Оператор проводит жеребьёвку по ФХР 2024: система (выбывание, круговая) и метод (случайная, с разведением по одному критерию), «Перемешать», preview и правка до старта, подтверждение; порядок выступлений в технических дисциплинах; площадки, общая нумерация боёв и PDF «Протокол хода соревнований»; выбор текущего и следующего поединка | `IMP-004`, `BRK-001`, `BRK-002`, `BRK-005`, `SES-003`, `CMP-005`, `CMP-006`, `CMP-008`; ADR-007, ADR-008 | Нет |
+| [x] | I4b | 6 | G4 | Оператор проводит жеребьёвку по ФХР 2024: система (выбывание, круговая) и метод (случайная, с разведением по одному критерию), «Перемешать», preview и правка до старта, подтверждение; порядок выступлений в технических дисциплинах; площадки, общая нумерация боёв и PDF «Протокол хода соревнований»; выбор текущего и следующего поединка | `IMP-004`, `BRK-001`, `BRK-002`, `BRK-005`, `SES-003`, `CMP-005`, `CMP-006`, `CMP-008`; ADR-007, ADR-008 | Нет |
 | [ ] | I2a | 6-7 | G2, server-часть G3 | Kerugi: бой по баллам. Оператор стартует поединок импортированной сетки; состав судей фиксируется из подключённых устройств (2 или 3), кворум и окно; судьи на emulator ставят `HEAD`/`BODY` через `kerugi_score_command`, оператор вводит броски, вращение и Gamjeom, делает коррекцию и сброс с причиной и подтверждением, фиксирует результат по финальному счёту; restart и reconnect посреди боя дают тот же счёт | `KER-001`-`KER-009`, `KER-015`, `SES-001`, `SES-002`, `SES-004`-`SES-006`, `UI-002`, `UI-008`, `NET-001`, `NET-003`, `AUD-002`, `DEV-008` | Да: client session snapshot, `kerugi_score_command`, outbox после app kill |
 | [ ] | I2b | 7-8 | server-часть G3 | Kerugi: время боя и ход сетки. Таймер по FHR 2024 для возрастной категории, два раунда, перерыв, golden round и победа по нему; экран оператора и экран зрителей на втором мониторе (то же без операторских кнопок); победитель продвигается по сетке, судьи переходят к следующему поединку без перезапуска | `KER-010`-`KER-013`, `UI-001`, `UI-003`-`UI-005`, `SES-007`, `BRK-003`, `BRK-004` | Да: client последовательные сессии |
 | [ ] | I3 | 8-9 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
@@ -156,6 +157,27 @@ macOS 27 (arm64) с `./gradlew :desktop:run`: отчёт об ошибках, з
 | `BAK-001` | Implemented | Backup перед каждой загрузкой; ошибка backup отменяет загрузку (`CompetitionApplicationsServiceTest`) |
 | `SYS-003` | Partial | Импорт 500 участников: проверка меньше 10 с (`ApplicationImportTest`), запись и восстановление после перезапуска PostgreSQL 18.6 (`RealPostgresLifecycleTest`); навигация, расчёт и экспорт - следующие инкременты |
 | `AUD-001` | Implemented | Загрузки, замены, восстановления и сбросы только дописываются в `domain_events` (с I1) |
+
+#### Доказательства I4b
+
+Server [#132](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/132) (жеребьёвка),
+[#133](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/133) (площадки, нумерация, PDF, полноэкранный
+просмотр, панель площадки). Сценарий доказан acceptance tests сервисов на JDBC journal и production wiring
+(`ServerRuntime` → desktop): жеребьёвка, правка, подтверждение, площадки, нумерация, протокол и следующий бой, повтор,
+отказ, перезапуск, в том числе 500 участников на PostgreSQL 18.6. Ручной прогон desktop отложен до полного регресса этапа
+7 (решение 08.11.2026). Старт поединка из сетки появляется с I2a, поэтому блокировка после старта доказана сервисными
+тестами.
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `IMP-004` | Implemented | Сетки и порядок выступлений строятся жеребьёвкой по ФХР 2024 §1.2, §1.4 из импортированных участников: детерминизм по seed, byes, разведение (`DrawTest`); подтверждение одной транзакцией и восстановление после перезапуска (`CompetitionDrawServiceTest`, `RealPostgresLifecycleTest`) |
+| `BRK-001` | Implemented | Список категорий со статусами; preview с участниками, парами, «Бой № N», сеткой и полноэкранным просмотром; одна нумерация по всем площадкам по кругам, без byes, с номерами выступлений (`BoutNumberingTest`, `CompetitionCourtsServiceTest`). Результаты в сетке - I2b |
+| `BRK-002` | Implemented | Обмен участников до старта журналируется `bracket_edited` одной транзакцией, отклонённый обмен ничего не пишет; после старта перемешивание, правка, система и смена площадки отклоняются типизированной ошибкой, также после перезапуска (`CompetitionDrawServiceTest`, `CompetitionCourtsServiceTest`). Репликация - post-v1 |
+| `BRK-005` | Implemented | Выбывание и круговая; случайная жеребьёвка и разведение по субъекту, городу, организации или тренеру, в том числе внутри пояса; посева, двойного выбывания и олимпийской системы в UI нет (`DrawTest`, `CompetitionDrawServiceTest`) |
+| `SES-003` | Partial | Панель площадки показывает следующий бой или выступление площадки этого компьютера (наименьший номер с известными участниками) и выбор оператора `court_next_bout_selected`, восстановленный после перезапуска (`CompetitionCourtsServiceTest`, `RealPostgresLifecycleTest`); текущий бой появляется с «Начать» (I2a) |
+| `CMP-005` | Implemented | Подтверждённая сетка назначается единственному локальному peer, bracket ID сохраняется при повторной жеребьёвке и перезапуске (`CompetitionDrawServiceTest`) |
+| `CMP-006` | Partial | `bracket_started` переводит сетку в `IN_PROGRESS`, изменения отклоняются (`CompetitionDrawServiceTest`); end-to-end - со стартом поединка (I2a) |
+| `CMP-008` | Partial | «Все категории» показывает все категории по площадкам с номерами боёв и статусами «свободна», «нет поединков», «требует новой жеребьёвки», «в процессе» (`CompetitionCourtsServiceTest`); «завершена» и результаты - I2b |
 
 Технические задачи, обязательные внутри инкрементов:
 
@@ -301,7 +323,7 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 | `DomainCommand` → `DomainEvent` | Полный typed audit context, source, author, UTC timestamp, type и raw payload; event только с назначенными ID и timestamp; rejection blank fields | - |
 | `SequencedDomainEvent`, `DomainEventOrder`, `PeerEventSequence` | Positive per-owner sequence, deterministic order, rejection owner/sequence conflicts | Sequence уникальна только внутри каждой таблицы `V2`-`V5` (I1) |
 | `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I2a) |
-| `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection | Persistence сетки (I4b); P2P claims post-v1 |
+| `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection; сетка восстанавливается из журнала жеребьёвки (I4b) | P2P claims post-v1 |
 | `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2a) |
 | `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | - |
 
