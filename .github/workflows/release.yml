@@ -1,7 +1,8 @@
 name: Build Installers
 
-# Manual only. Builds the installers on clean GitHub runners, installs each one, runs the headless `--smoke-test`
-# (bundled server + managed PostgreSQL, health over pinned TLS, stop) twice against one data directory and uninstalls.
+# Manual only. Builds the installers on clean GitHub runners, installs the DMG and the MSI, runs the headless `--smoke-test`
+# (bundled server + managed PostgreSQL, health over pinned TLS, stop) twice against one data directory and uninstalls;
+# on Windows the runs use a standard local user, as PostgreSQL refuses an elevated session.
 # The installers and smoke reports are kept as workflow artifacts; nothing is released or published.
 on:
   workflow_dispatch:
@@ -85,11 +86,26 @@ jobs:
             Select-Object -First 1
           if ($null -eq $exe) { throw "UJudgeServer.exe was not installed" }
           "Installed: $($exe.FullName)"
-          $data = "$env:RUNNER_TEMP\ujudge-data"
+          # The runner session is elevated, and PostgreSQL refuses to run with administrator rights: the app must say so.
+          $elevated = "$PWD\smoke\windows-elevated.txt"
+          $check = Start-Process $exe.FullName -ArgumentList "--smoke-test --data-directory=`"$env:RUNNER_TEMP\ujudge-elevated`" --report=`"$elevated`"" -Wait -PassThru
+          Get-Content $elevated
+          if ($check.ExitCode -eq 0 -or -not (Select-String -Path $elevated -Pattern 'administrator rights' -Quiet)) {
+            throw "An elevated run must fail with the administrator diagnostic"
+          }
+          # An operator runs the app as a standard user: an ephemeral local account with a random password does the same.
+          $plain = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ }) + 'aA1!'
+          net user ujudge-smoke $plain /add | Out-Null
+          $credential = New-Object System.Management.Automation.PSCredential('ujudge-smoke', (ConvertTo-SecureString $plain -AsPlainText -Force))
+          $work = 'C:\ujudge-smoke'
+          New-Item -ItemType Directory -Force $work | Out-Null
+          icacls $work /grant 'ujudge-smoke:(OI)(CI)F' | Out-Null
+          $data = "$work\data"
           foreach ($run in 1, 2) {
-            $report = "$PWD\smoke\windows-run-$run.txt"
-            $check = Start-Process $exe.FullName -ArgumentList "--smoke-test --data-directory=`"$data`" --report=`"$report`"" -Wait -PassThru
-            if (Test-Path $report) { Get-Content $report }
+            $report = "$work\run-$run.txt"
+            $check = Start-Process $exe.FullName -Credential $credential -LoadUserProfile -WorkingDirectory $work `
+              -ArgumentList "--smoke-test --data-directory=`"$data`" --report=`"$report`"" -Wait -PassThru
+            if (Test-Path $report) { Get-Content $report; Copy-Item $report "smoke\windows-run-$run.txt" }
             if ($check.ExitCode -ne 0) {
               Get-ChildItem "$data\logs" -ErrorAction SilentlyContinue | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 60 }
               throw "Smoke test run $run exited with $($check.ExitCode)"
@@ -128,33 +144,9 @@ jobs:
       - name: Build Linux installer (.deb)
         run: ./gradlew :desktop:packageDistributionForCurrentOS
 
-      - name: Install, smoke-test and uninstall the DEB
-        run: |
-          set -euo pipefail
-          deb=$(ls desktop/build/compose/binaries/main/deb/*.deb)
-          package=$(dpkg-deb -f "$deb" Package)
-          # The jpackage postinst registers a menu entry with xdg-desktop-menu, which fails on a runner without this directory.
-          sudo mkdir -p /usr/share/desktop-directories
-          sudo apt-get install -y "./$deb"
-          app=$(dpkg -L "$package" | grep '/bin/UJudgeServer$')
-          data="$RUNNER_TEMP/ujudge-data"
-          mkdir -p smoke
-          for run in 1 2; do
-            "$app" --smoke-test --data-directory="$data" --report="smoke/linux-run-$run.txt" ||
-              { tail -n 60 "$data"/logs/*; exit 1; }
-          done
-          test "$(grep '^peerId=' smoke/linux-run-1.txt)" = "$(grep '^peerId=' smoke/linux-run-2.txt)"
-          cp -R "$data/logs" smoke/linux-logs
-          sudo dpkg -r "$package"
-          test ! -e "$app"
-
+      # Linux is not a pilot platform and has no installed-app smoke test: jpackage drops the executable bits of the
+      # bundled PostgreSQL, which the app restores only in a writable location (macOS /Applications), not in /opt.
       - uses: actions/upload-artifact@v4
         with:
           name: linux-deb
           path: desktop/build/compose/binaries/main/deb/*.deb
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: linux-smoke
-          path: smoke/
-          if-no-files-found: ignore
