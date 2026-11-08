@@ -40,7 +40,7 @@ sealed interface CourtItem {
 /**
  * The court panel of this desktop (ADR-008 §9, `SES-003`): the right column of the operator screen.
  *
- * - [current] is the bout in progress. Bouts start with I2a, so it is null until then; I2a's «Начать» makes [next] current.
+ * - [current] is the bout in progress or the last one, until «Начать» (I2a) makes [next] current; decided bouts leave [queue].
  * - [next] is the operator's pick when it is still waiting, otherwise the lowest number of [queue]; [nextSelected] tells
  *   which of the two it is.
  * - [queue] are the confirmed bouts and performances of [court] whose participants are known, in number order. Later
@@ -57,5 +57,15 @@ data class CourtPanel(
 ) {
     companion object {
         val Empty = CourtPanel(court = 1, current = null, next = null, nextSelected = false, queue = emptyList(), preliminary = false)
+    }
+}
+
+/**
+ * What the bouts of I2a report to the court panel: the bout in progress and the bouts already decided, which leave the
+ * queue.
+ */
+data class CourtProgress(val current: ItemRef?, val judged: Set<ItemRef>) {
+    companion object {
+        val None = CourtProgress(current = null, judged = emptySet())
     }
 }

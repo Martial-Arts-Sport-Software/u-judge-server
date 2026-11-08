@@ -1,6 +1,20 @@
 package org.mass.persistence
 
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.mass.bout.BoutCommand
+import org.mass.bout.BoutOrigin
+import org.mass.bout.BoutOutcome
+import org.mass.bout.BoutStateAction
+import org.mass.bout.JdbcBoutEventJournal
+import org.mass.bout.JudgeContext
+import org.mass.bout.KerugiBoutService
+import org.mass.domain.EventId
+import org.mass.domain.JudgeId
+import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiOperatorActionType
+import org.mass.domain.KerugiScoringArea
+import org.mass.domain.SessionState
+import org.mass.testBoutSpec
 import org.mass.applications.CompetitionApplicationsService
 import org.mass.applications.ImportOutcome
 import org.mass.applications.ImportPreparation
@@ -182,6 +196,67 @@ class RealPostgresLifecycleTest {
             assertEquals(arranged.officials, reopened.officials)
             assertEquals(arranged.numbers, reopened.numbers)
             assertEquals(picked, restartedCourts.courtPanel().next?.ref)
+        } finally {
+            runtime.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `recovers a Kerugi bout in the middle with the same score, seats and idempotent retry after a PostgreSQL restart`() {
+        val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
+        assumeTrue(
+            !installationDirectory.isNullOrBlank(),
+            "Set -DuJudge.postgres.installationDirectory to a PostgreSQL bundle root to run this acceptance test",
+        )
+        val root = createTempDirectory()
+        val runtime = ManagedPostgresRuntime(
+            PostgresRuntimeConfiguration(
+                installationDirectory = Path.of(installationDirectory),
+                applicationDataDirectory = root.resolve("application-data"),
+                port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
+                platform = PostgresPlatform.current(),
+            ),
+        )
+        val clock = Instant.parse("2026-11-08T10:00:00Z")
+        fun bouts(): KerugiBoutService {
+            val dataSource = requireNotNull(runtime.dataSource)
+            return KerugiBoutService(JdbcBoutEventJournal(JdbcDomainEventStore(dataSource)), LocalPeerIdentity.loadOrCreate(dataSource), now = { clock })
+        }
+
+        try {
+            assertIs<PostgresState.Running>(runtime.start())
+            val first = bouts()
+            val operator = BoutOrigin.Operator("Оператор")
+            val started = assertIs<BoutOutcome.Applied>(first.dispatch(operator, BoutCommand.StartBout(EventId.new(), testBoutSpec(listOf("android-1", "android-2")))))
+            first.dispatch(operator, BoutCommand.ChangeState(EventId.new(), started.sessionId, BoutStateAction.START))
+            val bout = requireNotNull(first.current())
+            fun tap(device: String, millis: Long) = BoutCommand.SubmitScore(
+                EventId.new(), 0, clock.plusMillis(millis),
+                JudgeContext(bout.competitionId, bout.peerId, bout.courtId, bout.bracketId, bout.sessionId,
+                    JudgeId(requireNotNull(bout.seatOf(device)).judgeId), device),
+                KerugiCompetitor.BLUE, KerugiScoringArea.HEAD,
+            )
+            val firstTap = tap("android-1", 100)
+            assertIs<BoutOutcome.Applied>(first.dispatch(BoutOrigin.Judge("android-1"), firstTap))
+            assertIs<BoutOutcome.Applied>(first.dispatch(BoutOrigin.Judge("android-2"), tap("android-2", 400)))
+            first.dispatch(operator, BoutCommand.AwardAction(EventId.new(), started.sessionId, KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1))
+            val before = requireNotNull(first.current())
+
+            assertEquals(PostgresState.Stopped, runtime.stop())
+            assertIs<PostgresState.Running>(runtime.start())
+            val restarted = bouts()
+
+            val after = requireNotNull(restarted.current())
+            assertEquals(started.sessionId, after.sessionId)
+            assertEquals(SessionState.RUNNING, after.state)
+            assertEquals(before.score(), after.score())
+            assertEquals(2, after.score().blue)
+            assertEquals(1, after.score().red)
+            assertEquals(before.started.seats, after.started.seats)
+            assertEquals(before.lastSequence, restarted.cursor)
+            assertEquals(false, assertIs<BoutOutcome.Applied>(restarted.dispatch(BoutOrigin.Judge("android-1"), firstTap)).isNew)
+            assertEquals(before.events.size, requireNotNull(restarted.current()).events.size)
         } finally {
             runtime.stop()
             root.toFile().deleteRecursively()

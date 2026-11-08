@@ -19,7 +19,13 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.encodeToString
+import org.mass.bout.BoutCommand
+import org.mass.bout.BoutOutcome
+import org.mass.bout.BoutStateAction
+import org.mass.domain.EventId
 import org.slf4j.LoggerFactory
+import java.time.Instant
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -42,9 +48,10 @@ class ServerLogTest {
     }
 
     @Test
-    fun `realtime log correlates by device and event IDs without surname credential or payload`() = testApplication {
+    fun `realtime log correlates by device and event IDs without surname credential or athlete names`() = testApplication {
         val pairingRequests = PairingRequests()
-        application { module(pairingRequests = pairingRequests) }
+        val hub = RealtimeHub.inMemory()
+        application { module(pairingRequests = pairingRequests, realtime = hub) }
 
         val requestId = Json.parseToJsonElement(
             client.post("/v1/pairing-requests") {
@@ -53,15 +60,14 @@ class ServerLogTest {
             }.bodyAsText(),
         ).jsonObject.getValue("requestId").jsonPrimitive.content
         val credential = (pairingRequests.approve(requestId) as PairingApproval.Accepted).request.reconnectCredential
+        val started = hub.operator("Оператор", BoutCommand.StartBout(EventId.new(), testBoutSpec(listOf("device-log-1", "device-log-2"), quorum = 1)))
+        hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), (started as BoutOutcome.Applied).sessionId, BoutStateAction.START))
+        val session = Json.parseToJsonElement(realtimeJson.encodeToString(hub.session("device-log-1"))).jsonObject
+        val eventId = EventId.new().value
         val socket = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
         socket.send(Frame.Text("""{"type":"handshake","protocolVersion":"1.0","reconnectCredential":"$credential"}"""))
         (socket.incoming.receive() as Frame.Text).readText()
-        socket.send(
-            Frame.Text(
-                """{"type":"command","eventId":"event-log-1","sequence":1,"clientTimestamp":"2026-09-26T10:00:00Z",""" +
-                    """"sessionId":"session-1","payload":{"type":"kerugi_score","secret":"payload-marker"}}""",
-            ),
-        )
+        socket.send(Frame.Text(scoreCommandFor(session, eventId, Instant.now()).toString()))
         (socket.incoming.receive() as Frame.Text).readText()
         socket.close()
         val events = withTimeout(5_000) {
@@ -71,14 +77,14 @@ class ServerLogTest {
 
         val acknowledged = events.single { it.message == "command_acknowledged" }
         assertEquals(
-            mapOf("deviceId" to "device-log-1", "eventId" to "event-log-1"),
+            mapOf("deviceId" to "device-log-1", "eventId" to eventId),
             acknowledged.keyValuePairs.associate { it.key to it.value.toString() },
         )
         val rendered = events.joinToString("\n") { event ->
             event.formattedMessage + event.keyValuePairs.orEmpty().joinToString { "${it.key}=${it.value}" }
         }
         assertTrue("realtime_connected" in rendered)
-        listOf("Ivanova", credential, "payload-marker").forEach { secret -> assertTrue(secret !in rendered, secret) }
+        listOf("Ivanova", credential, "Иванов", "Петров").forEach { secret -> assertTrue(secret !in rendered, secret) }
     }
 
     private fun snapshot(): List<ILoggingEvent> = synchronized(appender) { appender.list.toList() }

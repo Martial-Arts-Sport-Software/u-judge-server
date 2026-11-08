@@ -1,7 +1,11 @@
 package org.mass
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
+import org.mass.bout.BoutCommand
+import org.mass.bout.BoutOutcome
+import org.mass.bout.BoutStateAction
+import org.mass.domain.EventId
+import java.time.Instant
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -56,8 +60,14 @@ class ServerRuntimeTest {
         assertEquals(running.verificationCode, PeerCertificate.verificationCode(pinnedSpki))
 
         val credential = pairAndApprove(firstRun, port)
-        val command = command(eventId = "event-1")
+        val hub = requireNotNull(firstRun.realtime)
+        val started = hub.operator("Оператор", BoutCommand.StartBout(EventId.new(), testBoutSpec(listOf("device-1", "device-2"), quorum = 1)))
+        hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), (started as BoutOutcome.Applied).sessionId, BoutStateAction.START))
+        lateinit var command: String
         realtime(port, credential).use { socket ->
+            assertEquals("resync_response", socket.request(RESYNC_REQUEST)["type"])
+            val session = Json.parseToJsonElement(socket.lastText).jsonObject.getValue("session").jsonObject
+            command = scoreCommandFor(session, EventId.new().value, Instant.now()).toString()
             assertEquals("command_ack", socket.request(command)["type"])
         }
         firstRun.stop()
@@ -68,12 +78,14 @@ class ServerRuntimeTest {
         assertEquals(running.verificationCode, restarted.verificationCode)
         assertEquals(listOf("device-1"), secondRun.pairingRequests.operatorRegistry().devices.map(OperatorDevice::deviceId))
         realtime(port, credential).use { socket ->
+            assertEquals("resync_response", socket.request(RESYNC_REQUEST)["type"])
+            val session = Json.parseToJsonElement(socket.lastText).jsonObject.getValue("session").jsonObject
+            assertEquals("running", session.string("state"))
+            assertEquals("1", session.getValue("seat").jsonObject.getValue("number").jsonPrimitive.content)
+            assertEquals("2", session.getValue("score").jsonObject.getValue("blue").jsonPrimitive.content)
             assertEquals("command_ack", socket.request(command)["type"])
-            val resync = socket.request("""{"type":"resync_request","cursor":null}""")
-            assertEquals("resync_response", resync["type"])
-            val events = Json.parseToJsonElement(socket.lastText).jsonObject.getValue("events").jsonArray
-            assertEquals(listOf("event-1"), events.map { it.jsonObject.getValue("id").jsonPrimitive.content })
         }
+        assertEquals(2, secondRun.realtime!!.bouts.current()!!.score().blue)
     }
 
     @Test
@@ -94,7 +106,7 @@ class ServerRuntimeTest {
         assertEquals(null, pairingStatus(port, requestId, deliveryProof = "other-proof")["reconnectCredential"])
         val credential = requireNotNull(pairingStatus(port, requestId, deliveryProof = "proof-tls")["reconnectCredential"])
         realtime(port, credential).use { socket ->
-            assertEquals("command_ack", socket.request(command("event-tls"))["type"])
+            assertEquals("resync_response", socket.request(RESYNC_REQUEST)["type"])
             assertEquals(DeviceConnectionState.CONNECTED, runtime.pairingRequests.operatorRegistry().devices.single().connectionState)
 
             runtime.pairingRequests.revoke(requestId)
@@ -191,9 +203,9 @@ class ServerRuntimeTest {
             ).body(),
         ).jsonObject.filterValues { runCatching { it.jsonPrimitive }.isSuccess }.mapValues { it.value.jsonPrimitive.content }
 
-    private fun command(eventId: String) =
-        """{"type":"command","eventId":"$eventId","sequence":1,"clientTimestamp":"2026-09-26T10:00:00Z",""" +
-            """"sessionId":"session-1","payload":{"type":"kerugi_score"}}"""
+    private companion object {
+        const val RESYNC_REQUEST = """{"type":"resync_request","requestId":"1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6","cursor":null}"""
+    }
 
     private fun get(port: Int, path: String): String = http.send(
         HttpRequest.newBuilder(URI("https://127.0.0.1:$port$path")).build(),

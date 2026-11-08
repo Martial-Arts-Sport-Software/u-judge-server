@@ -58,6 +58,8 @@ import org.mass.protocol.ProtocolDocument
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.court.AllCategoriesComponent
 import org.mass.ui.court.CourtPanelComponent
+import org.mass.enums.Routes
+import org.mass.ui.button.clickWithTransition
 import org.mass.ui.input.TextInputComponent
 import org.mass.ui.protocol.ProtocolFiles
 import org.mass.ui.screen_header.ScreenHeaderComponent
@@ -213,6 +215,8 @@ object CourtsScreen : Screen {
                                     }
                                 },
                                 modifier = Modifier.fillMaxSize(),
+                                // I2a: «Начать» opens the bout screen, where the judges and settings are fixed for the bout.
+                                onStart = { clickWithTransition(Routes.BOUT) },
                             )
                         }
                     }
