@@ -151,7 +151,24 @@ class ManagedPostgresRuntime(
         }
     }
 
-    fun stop(): PostgresState = managedPostgres.stop()
+    /**
+     * On Windows `Process.destroy()` terminates the postmaster without a shutdown, so every start would run crash recovery
+     * (seen on the Windows installer smoke test, I7). There the cluster is first shut down through `pg_ctl` in fast mode;
+     * elsewhere `destroy()` sends SIGTERM, which PostgreSQL already handles as a clean shutdown.
+     */
+    fun stop(): PostgresState {
+        if (configuration.platform == PostgresPlatform.Windows && managedPostgres.state is PostgresState.Running) {
+            runCatching {
+                val process = ProcessBuilder(
+                    configuration.pgCtlExecutable.toString(), "stop",
+                    "-D", configuration.dataDirectory.toString(),
+                    "-m", "fast", "-w", "-t", orphanStopTimeout.seconds.toString(),
+                ).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+                if (!process.waitFor(orphanStopTimeout.toMillis() + 5_000, TimeUnit.MILLISECONDS)) process.destroyForcibly()
+            }
+        }
+        return managedPostgres.stop()
+    }
 
     fun restart(): PostgresState {
         stop()
