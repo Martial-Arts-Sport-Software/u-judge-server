@@ -129,6 +129,9 @@ jobs:
               throw "Smoke test run $run exited with $($check.ExitCode)"
             }
           }
+          if (-not (Select-String -Path smoke\windows-run-2.txt -Pattern '^postgresLockFile=removed' -Quiet)) {
+            throw "PostgreSQL was terminated instead of shut down"
+          }
           $peer1 = Select-String -Path smoke\windows-run-1.txt -Pattern '^peerId='
           $peer2 = Select-String -Path smoke\windows-run-2.txt -Pattern '^peerId='
           if ($peer1.Line -ne $peer2.Line) { throw "The peer ID changed between runs" }
