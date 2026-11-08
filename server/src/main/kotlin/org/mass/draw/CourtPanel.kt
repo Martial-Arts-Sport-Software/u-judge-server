@@ -44,7 +44,7 @@ sealed interface CourtItem {
  * - [next] is the operator's pick when it is still waiting, otherwise the lowest number of [queue]; [nextSelected] tells
  *   which of the two it is.
  * - [queue] are the confirmed bouts and performances of [court] whose participants are known, in number order. Later
- *   elimination rounds join it once the results name their participants (I2b).
+ *   elimination rounds join it once the results name their participants (ADR-010 §6).
  */
 data class CourtPanel(
     val court: Int,
@@ -61,10 +61,14 @@ data class CourtPanel(
 }
 
 /**
- * What the bouts of I2a report to the court panel: the bout in progress and the bouts already decided, which leave the
- * queue.
+ * What the bouts report to the court panel: the bout in progress, the bouts already decided, which leave the queue, and
+ * their results, which move the winners on in the bracket (ADR-010 §6).
  */
-data class CourtProgress(val current: ItemRef?, val judged: Set<ItemRef>) {
+data class CourtProgress(
+    val current: ItemRef?,
+    val judged: Set<ItemRef>,
+    val decisions: Map<ItemRef, BoutDecision> = emptyMap(),
+) {
     companion object {
         val None = CourtProgress(current = null, judged = emptySet())
     }

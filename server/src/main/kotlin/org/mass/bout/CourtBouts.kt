@@ -8,6 +8,7 @@ import org.mass.applications.CategoryEntry
 import org.mass.domain.CompetitionId
 import org.mass.domain.EventId
 import org.mass.domain.SessionState
+import org.mass.draw.BoutDecision
 import org.mass.draw.CategoryStatus
 import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
@@ -107,11 +108,21 @@ class CourtBouts(
         const val NO_NEXT_BOUT = "no_next_bout"
         const val NOT_KERUGI = "not_kerugi"
 
-        /** The court panel's view of the bouts: the current one (unless cancelled) and the decided ones. */
-        fun progress(bouts: KerugiBoutService): CourtProgress = CourtProgress(
-            current = bouts.current()?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf),
-            judged = bouts.bouts().filter { it.state == SessionState.COMPLETED }.map(::refOf).toSet(),
-        )
+        /**
+         * The court panel's view of the bouts: the current one (unless cancelled), the decided ones and their results, which
+         * move the winners on in the bracket (ADR-010 §6, `BRK-004`, `SES-007`).
+         */
+        fun progress(bouts: KerugiBoutService): CourtProgress {
+            val completed = bouts.bouts().filter { it.state == SessionState.COMPLETED }
+            return CourtProgress(
+                current = bouts.current()?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf),
+                judged = completed.map(::refOf).toSet(),
+                decisions = completed.associate { bout ->
+                    val result = checkNotNull(bout.result)
+                    refOf(bout) to BoutDecision(result.winner, result.reason, bout.sessionId)
+                },
+            )
+        }
 
         private fun refOf(bout: KerugiBout) = ItemRef(bout.started.categoryId, bout.started.round, bout.started.index)
 
