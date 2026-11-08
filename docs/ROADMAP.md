@@ -60,7 +60,8 @@ Pilot не считается production-ready до отдельного hardeni
   заключение эксперта-судьи по векторам и чтению tie-break (решение 08.11.2026) открыты.
 - [x] Gate G6: история объясняет результат любой сессии, XLSX/CSV совпадают до и после backup/restore на чистом peer
   (I6, тесты на H2, PostgreSQL 18.6 и production `ServerRuntime`); ручной прогон desktop - регресс этапа 7.
-- [ ] Gate G7: не готов.
+- [ ] Gate G7: автоматизируемая часть I7 (установка DMG и MSI на чистых runners, fault-injection нагрузка семи клиентов,
+  security check, release APK и iOS archive в CI) подтверждена; открыт [чек-лист владельца](#чек-лист-владельца).
 - [ ] Gate G8: не готов.
 
 ## Инкременты поставки
@@ -129,7 +130,7 @@ macOS 27 (arm64) с `./gradlew :desktop:run` и Android emulator `sdk_gphone16k_
 | `NFR-004` | Implemented | `kill -9` desktop: журнал, реестр устройств и credential сохранены (emulator); `RealPostgresLifecycleTest`, `ServerRuntimeTest` на PostgreSQL 18.6 |
 | `NFR-008` | Implemented | JSON-логи `logs/server.jsonl` по device/event ID; `ServerLogTest` проверяет отсутствие фамилии, credential и payload |
 | `NFR-009` | Implemented | Upgrade `V5` → `V6` с данными на H2 и PostgreSQL 18.6 в CI |
-| `NFR-010` | Partial | Start/stop, ошибка порта, restart после аварийного завершения на macOS и Linux CI; Windows не проверялась (I7) |
+| `NFR-010` | Partial | Start/stop, ошибка порта, restart после аварийного завершения на macOS и Linux CI; на Windows runner установленный MSI запускает PostgreSQL, останавливает его штатно через `pg_ctl` и сообщает об отказе под администратором (I7); ошибка порта и upgrade на Windows не проверялись |
 | `DEV-003` | Implemented | Пустая фамилия отклоняется (`PairingRoutesTest`); оператор видит фамилию на экране устройств |
 | `DEV-004` | Implemented | Credential выдаётся только после подтверждения оператором и только по matching delivery proof на TLS (`ServerRuntimeTest`, emulator) |
 | `DEV-005` | Implemented | Экран устройств показывает Android/iOS и «на связи»/«не на связи» (emulator, `ServerRuntimeTest`) |
@@ -303,6 +304,63 @@ Server issue [#140](https://github.com/Martial-Arts-Sport-Software/u-judge-serve
 | `BAK-004` | Implemented | Восстановление на чистом peer в новую базу managed PostgreSQL с проверкой SHA-256 и числа событий, peer ID и проекции восстановлены, выгрузки совпадают; повреждённый, чужой, неполный, более новый файл и непустая база отклоняются без изменений (`JournalBackupTest`, `ServerRuntimeTest`, `RealPostgresLifecycleTest`) |
 | `SYS-004` | Partial | Русский по умолчанию, английский переключается без перезапуска; все ключи в обоих языках, нет кириллических строк в коде desktop, коды отказов и истории переведены (`LocalizationTest`); технические диагностики server остаются английскими внутри переведённого сообщения (ADR-012 §8) |
 
+#### Доказательства I7 (автоматизируемая часть)
+
+Server issue [#142](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/142) поверх I6 #141, client
+[u-judge-client#129](https://github.com/Martial-Arts-Sport-Software/u-judge-client/issues/129). Доказано автоматизацией;
+пункты, которые автоматизация не доказывает, - в [чек-листе владельца](#чек-лист-владельца), и до их выполнения I7 и G7
+открыты.
+
+- **Installers.** Workflow «Build Installers» (`workflow_dispatch`, ничего не публикует) после `./gradlew build` и
+  `:server:faultTest` собирает DMG (238 MB), MSI (141 MB) и DEB, устанавливает DMG в `/Applications` на macOS 26.7 runner и MSI в
+  `C:\Program Files` на Windows Server 2025 runner, дважды запускает установленное приложение с `--smoke-test` на одном
+  каталоге данных (production `ServerRuntime`: bundled PostgreSQL 18.6, миграции, peer ID, HTTPS, `GET /v1/health` и
+  `/v1/metadata` с доверием только к сертификату peer, остановка, выход postmaster) и удаляет приложение; peer ID второго
+  запуска совпадает. MSI запускается от обычного локального пользователя; запуск в повышенной сессии отклоняется с
+  понятной диагностикой (PostgreSQL не работает с правами администратора, `ManagedPostgresTest`). Зелёный прогон:
+  [run 42506582484](https://github.com/Martial-Arts-Sport-Software/u-judge-server/actions/runs/42506582484). Локально DMG
+  собран и проверен тем же `--smoke-test` на macOS 27 (arm64). Прогоны нашли и закрыли: отсутствие `java.net.http` в
+  runtime installer, ожидание 30 с вместо причины отказа PostgreSQL под администратором, остановку PostgreSQL на Windows
+  без shutdown (`Process.destroy()` завершал postmaster, теперь `pg_ctl stop -m fast`; workflow требует снятого
+  `postmaster.pid`). DEB только собирается: jpackage теряет
+  executable bits PostgreSQL, а `/opt` не доступен для записи (Linux не платформа пилота).
+- **Нагрузка и сбои.** `FaultInjectionLoadTest` (`:server:faultTest`, около 25 с, в CI): семь телефонов на протоколе ADR-009
+  с outbox через TCP-прокси в процессе (задержка 20-80 мс, задержки 300-800 мс как повторная передача потерянного
+  сегмента, обрыв соединения после 4-8 % фрагментов, разделение 8 с с отказом новых соединений, падение server с
+  нажатиями в пути и перезапуск на том же журнале) против production `module()` на Netty и JDBC журнале. Бой Kerugi: три
+  судьи, четыре наблюдающих устройства, 62 нажатия в 30 обменах, броски оператора и повтор нажатий; техническое выступление
+  Hosinsool: семь судей, повтор Send после перезапуска. Проверяется: каждое нажатие и Send в журнале ровно один раз, нет
+  отказов, счёт равен вычисленному по плану (19:20, итог 6.6 по trimmed mean), все семь устройств после resync видят его.
+  ACK на здоровом loopback p95 около 10 мс (справочно; цель `NFR-002` в LAN - I3).
+- **Security check.** `WriteSurfaceTest` закрепляет полный перечень маршрутов (единственная анонимная запись -
+  `POST /v1/pairing-requests`, создающий запрос на подтверждение оператором), проверяет `POST`/`PUT`/`PATCH`/`DELETE` на всех
+  и угадываемых путях и что ввод судьи без подтверждённого handshake, после отзыва и в слишком большом кадре не попадает в
+  журнал. Анонимный ввод ограничен до бизнес-логики: тело pairing request 4 KB (`413`), кадр WebSocket 64 KB (закрытие
+  `1009`), сообщение 4096 символов, строгая схема. `scripts/check-secrets.sh` в CI обоих репозиториев проверяет tracked
+  files и всю историю (ключи, токены, key stores): находок нет (server 278 файлов и 351 commit, client 260 и 274).
+  Зависимости: открытые Dependabot alerts (server: httpcore5, httpclient5, log4j-api, kotlin-gradle-plugin; client:
+  bouncycastle, jose4j, jdom2, commons-lang3, httpclient, opentelemetry) относятся к classpath Gradle-плагинов; в runtime
+  desktop log4j-api 2.26.1 и commons-lang3 3.18.0 (исправленные версии), в release APK уязвимых библиотек нет. Обновление
+  Kotlin до 2.4.20 (исправление build cache) ждёт стабильного релиза. Backup остаётся без шифрования (ADR-012 §6): решение
+  владельца в чек-листе.
+- **Mobile builds** (client). CI собирает minified release APK (артефакт, подпись ключом из окружения или debug-ключом
+  runner) и unsigned iOS archive; прогон нашёл отсутствующий файл правил R8, из-за которого release не собирался. Release APK
+  установлен и запущен на Android emulator (API 37).
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `SYS-005` | Partial | DMG и MSI устанавливаются и запускаются на чистых runners (macOS 26.7, Windows Server 2025) и на macOS 27; чистые физические Windows 11 и macOS Ventura/Sonoma/Tahoe - чек-лист владельца |
+| `REL-003` | Implemented | Разделение 8 с, обрывы и перезапуск server: семь клиентов восстанавливаются без потерь и дублей (`FaultInjectionLoadTest`); в v1 один peer, разделение peers - post-v1 |
+| `REL-004` | Partial | 7 клиентов (`FaultInjectionLoadTest`) и 500 участников (`ApplicationImportTest`, I4a) отдельно; 8 peers - post-v1; нагрузка реальных телефонов через роутер - чек-лист владельца |
+| `REL-005` | Partial | Installers на чистых runners, release APK на emulator, iOS archive в CI; физические машины, APK на pilot devices и TestFlight - чек-лист владельца |
+| `REL-006` | Implemented | CI на каждом PR и workflow installers (`needs: verify`) блокируются `./gradlew build` (scoring, sync, import, export) и `:server:faultTest` |
+| `REL-007` | Implemented | README и [release notes](RELEASE-NOTES.md) называют сборку пилотом, а не production-релизом, и перечисляют ограничения |
+| `NFR-003` | Partial | 0 потерянных и 0 повторно применённых событий под fault injection на стороне server с симулированными телефонами; outbox настоящего client после app kill (`CLI-102`) и устройства - I3 |
+| `NFR-005` | Implemented | `scripts/check-secrets.sh` в CI обоих репозиториев по файлам и истории; credentials не пишутся в логи (`ServerLogTest`, I1) |
+| `NFR-006` | Implemented | Перечень маршрутов закреплён `WriteSurfaceTest`; изменяющих анонимных запросов, кроме pairing request с подтверждением оператора, нет |
+| `NFR-007` | Implemented | Лимиты тела pairing request, кадра и сообщения WebSocket и строгая схема до бизнес-логики (`WriteSurfaceTest`, `PairingWebSocketTest`, `KerugiBoutScenarioTest`) |
+| `NFR-014` | Planned | Smoke-test UI на реальных устройствах и размерах desktop - чек-лист владельца |
+
 Технические задачи, обязательные внутри инкрементов:
 
 - I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
@@ -392,6 +450,7 @@ architecture. They are not v1 Pilot acceptance gates.
 - [ ] Проверить чистую Windows и macOS machine.
 - [x] Определить upgrade/backup strategy и размер installer (ADR-003; macOS DMG 211 MB, I1).
 
+Установленные DMG и MSI запускают PostgreSQL на чистых CI runners (I7); чистые физические машины - чек-лист владельца.
 Накопленное доказательство - JVM fixture и H2, не real PostgreSQL на clean machine. Детали в
 [ADR-003](adr/ADR-003-managed-postgresql.md).
 
@@ -636,6 +695,31 @@ desktop (этап 7).
 - Packet loss, latency, peer restart и длительный partition.
 - Проверка восстановления durable outbox клиента.
 - Security check: отсутствие anonymous write API и secrets в репозитории.
+
+### Накопленное доказательство
+
+Автоматизируемая часть - в «Доказательства I7»: установка DMG и MSI на чистых runners с `--smoke-test`, fault-injection
+нагрузка семи клиентов, перечень маршрутов без анонимной записи, проверка секретов, release APK и iOS archive в CI.
+
+### Чек-лист владельца
+
+Автоматизация этого не доказывает; I7 и G7 закрываются после всех пунктов с записью ОС, устройства и результата.
+
+- [ ] Чистый физический компьютер Windows 11, обычный пользователь: MSI из артефакта «Build Installers», запуск,
+  pairing телефона, бой, перезапуск, удаление; «Запуск от имени администратора» показывает диагностику прав.
+- [ ] Чистые физические Mac на macOS Ventura, Sonoma и Tahoe: DMG в «Программы», первый запуск неподписанного приложения
+  через «Открыть», pairing, бой, перезапуск, удаление.
+- [ ] Release APK, подписанный ключом пилота (переменные `UJUDGE_RELEASE_*` client), установлен на Honor 50 Lite без
+  developer tooling (`CLI-105`).
+- [ ] TestFlight: подписать archive командой разработчика, зарегистрированный bundle ID, загрузить, установить на iPhone 15,
+  Local Network permission и discovery после чистой установки (`CLI-106`; шаги в client roadmap).
+- [ ] Physical devices I3: Honor 50 Lite и iPhone 15 через роутер площадки, 5-7 телефонов на одном peer, disconnect с
+  buffered events и задержка (`NFR-001`-`NFR-003`, `NFR-014`).
+- [ ] Полный ручной регресс desktop UI по сценариям всех инкрементов (решение 08.11.2026), начиная с экрана жеребьёвки I4b.
+- [ ] Заключение эксперта-судьи: нормативные векторы и чтение tie-break технических дисциплин
+  ([ADR-011](adr/ADR-011-tanbon-technical-contract.md) §8) и места при равенстве побед трёх и более участников в круговой
+  системе ([ADR-012](adr/ADR-012-reports-backup-restore.md) §2).
+- [ ] Решение о шифровании backup для пилота (ADR-012 §6): оставить без шифрования на доверенном компьютере или добавить.
 
 ### Gate G7
 
