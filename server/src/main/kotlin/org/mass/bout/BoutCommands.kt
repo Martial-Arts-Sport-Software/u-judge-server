@@ -168,6 +168,8 @@ sealed interface BoutOutcome {
         val sequence: Long,
         val isNew: Boolean,
         val changes: Set<BoutChange>,
+        /** Events the server journaled as a consequence, published after this one: the golden point's result (ADR-010 §4). */
+        val followUps: List<Applied> = emptyList(),
     ) : BoutOutcome
 
     data class Rejected(val code: String) : BoutOutcome

@@ -273,6 +273,11 @@ class RealtimeHub(val bouts: KerugiBoutService) {
 
     private fun publish(outcome: BoutOutcome) {
         if (outcome !is BoutOutcome.Applied || !outcome.isNew) return
+        publishOne(outcome)
+        outcome.followUps.forEach(::publishOne)
+    }
+
+    private fun publishOne(outcome: BoutOutcome.Applied) {
         val bout = bouts.bout(outcome.sessionId) ?: return
         if (BoutChange.NEW_SESSION in outcome.changes) {
             subscribers.forEach { connection ->

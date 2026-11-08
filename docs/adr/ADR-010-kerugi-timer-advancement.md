@@ -80,13 +80,29 @@ The clock is never derived from the wall time after a restart (roadmap I2b decis
 |-----------|--------|-----------------|
 | A disqualification is confirmed (ADR-009, any time) | The opponent | `disqualification` |
 | Round 2 has ended, the golden round has not started, the score is not tied | The leader | `final_score` |
-| The golden round has started and the score is not tied: its first point decides (§4.1.13) | The leader | `golden_round` |
+| The golden round has started and the score is not tied (the server finishes it itself, see below) | The leader | `golden_round` |
 | The golden round has ended with a tied score | The operator's choice, required | `preference` |
 
 Anything else is rejected: `bout_not_finished` before round 2 ends, `score_tied` for a tie outside the last row,
 `winner_required` or `winner_not_allowed` for a missing or unexpected choice. `preference` is the end of a scoreless golden
 round (§4.1.13); the other reasons of §4.1.14 (ПОР, РБ, СС, ВЗ, ОДС, ООСНП) remain `KER-014` (Should, after the pilot).
 The completion stops the clock. The reason and the winner are journaled in `session_completed`.
+
+**Golden point (§4.1.13).** The golden round ends at the first positive point or Gamjeom against one athlete, so the
+operator does not finish it:
+
+- In round 3 (running or stopped), the first applied input that turns the tied score into a lead — a judges' quorum
+  point, a throw, a spin bonus, or a Gamjeom, which scores for the opponent — makes the server journal `session_completed`
+  right after it (source `server`, author `golden_point`) with `golden_round` for the side ahead. Devices receive the
+  `kerugi_score_updated` of the input and then the `session_state_updated` with `completed`.
+- A lone tap or a candidate outside fighting time forms no point and decides nothing; a correction during the golden round
+  that unties the score is not a golden-round point, and the operator completes such a bout with `golden_round`.
+- The decision is final in the system: the bout is closed, so a correction of the deciding input, a reset or a later tap
+  is rejected with `session_closed` (ADR-009 §8). A disputed golden point goes to the arbitration commission (FHR 2024
+  §5.1.4) outside the system; reopening a bout is not in the pilot.
+- If the result cannot be journaled, the input stays applied and the operator completes the bout with the same reason.
+- A stop of the clock (pause, period end, completion, restore) never cuts off a tap journaled before it: it stops no
+  earlier than the latest candidate `clientTimestamp`, which may run up to 5 s ahead of the server clock.
 
 ### 5. Wire additions
 
@@ -222,6 +238,5 @@ checks them against the running module; the client syncs them by bumping `contra
 
 ## Open questions
 
-- Ending the golden round automatically at its first point instead of by the operator.
 - A round reset (`SES-006`) and the remaining victory reasons (`KER-014`).
 - Result lines and scores in the protocol PDF (ADR-008 §8) move to the result protocols of I6.

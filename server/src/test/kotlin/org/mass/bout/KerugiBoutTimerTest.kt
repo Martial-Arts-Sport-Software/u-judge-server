@@ -125,19 +125,59 @@ class KerugiBoutTimerTest {
         court.state(sessionId, BoutStateAction.RESUME)
         assertEquals(BoutTimer(BoutPeriod.ROUND, 3, true, 60_000, 60_000, court.clock), court.service.current()!!.clock.timer())
         assertEquals(BoutOutcome.Rejected(BoutRejection.SCORE_TIED), court.operator(BoutCommand.CompleteBout(court.id(), sessionId)))
-        court.judge("android-1", court.score("android-1", RED, afterMillis = 4_000))
-        court.judge("android-3", court.score("android-3", RED, afterMillis = 4_300))
-        assertEquals(
-            BoutOutcome.Rejected(BoutRejection.WINNER_NOT_ALLOWED),
-            court.operator(BoutCommand.CompleteBout(court.id(), sessionId, winner = BLUE)),
-        )
+        // A lone tap forms no point and decides nothing.
+        court.judge("android-2", court.score("android-2", BLUE, afterMillis = 1_000))
+        assertEquals(SessionState.RUNNING, court.service.current()!!.state)
 
-        court.advance(5_000)
-        assertIs<BoutOutcome.Applied>(court.operator(BoutCommand.CompleteBout(court.id(), sessionId)))
+        // The judges' quorum is the golden point: the round and the bout end at once (FHR 2024 §4.1.13).
+        court.advance(4_000)
+        court.judge("android-1", court.score("android-1", RED, afterMillis = 0))
+        val point = assertIs<BoutOutcome.Applied>(court.judge("android-3", court.score("android-3", RED, afterMillis = 300)))
+        val result = point.followUps.single()
+        assertEquals(setOf(BoutChange.SCORE), point.changes)
+        assertEquals(setOf(BoutChange.STATE, BoutChange.TIMER), result.changes)
         val bout = court.service.current()!!
+        assertEquals(SessionState.COMPLETED, bout.state)
         assertEquals(BoutResult(RED, KerugiBoutService.REASON_GOLDEN_ROUND), bout.result)
-        assertEquals(55_000, bout.clock.remainingMillis)
+        assertEquals(KerugiBoutEvents.SERVER_SOURCE, bout.events.last().event.source.value)
+        // The clock stops at the deciding tap's time when it runs ahead of the server clock.
+        assertEquals(55_700, bout.clock.remainingMillis)
         assertFalse(bout.clock.running)
+
+        // ADR-010 §4: the golden point is final in the system; a correction of it is refused like any change of a closed bout.
+        val decisive = bout.history().last { it.status == BoutEntryStatus.COUNTED }
+        assertEquals(
+            BoutOutcome.Rejected(BoutRejection.SESSION_CLOSED),
+            court.operator(BoutCommand.CorrectScore(court.id(), sessionId, decisive.eventId)),
+        )
+        assertEquals(BoutResult(RED, KerugiBoutService.REASON_GOLDEN_ROUND), court.service.current()!!.result)
+        // A retry of the deciding tap writes nothing more.
+        court.restart()
+        assertEquals(bout.events.size, court.service.current()!!.events.size)
+    }
+
+    @Test
+    fun `a throw or a Gamjeom in the golden round decides it, a Gamjeom for the opponent`() {
+        fun golden(): Pair<BoutFixture, org.mass.domain.SessionId> {
+            val court = BoutFixture()
+            val sessionId = court.start()
+            court.finishRegularTime(sessionId)
+            court.state(sessionId, BoutStateAction.RESUME)
+            return court to sessionId
+        }
+
+        val (thrown, thrownId) = golden()
+        thrown.state(thrownId, BoutStateAction.PAUSE)
+        val throwOutcome = assertIs<BoutOutcome.Applied>(
+            thrown.operator(BoutCommand.AwardAction(thrown.id(), thrownId, KerugiOperatorActionType.THROW, BLUE, 2)),
+        )
+        assertEquals(1, throwOutcome.followUps.size)
+        assertEquals(BoutResult(BLUE, KerugiBoutService.REASON_GOLDEN_ROUND), thrown.service.current()!!.result)
+
+        val (penalised, penalisedId) = golden()
+        penalised.operator(BoutCommand.AwardAction(penalised.id(), penalisedId, KerugiOperatorActionType.GAMJEOM, RED, 1))
+        assertEquals(BoutResult(BLUE, KerugiBoutService.REASON_GOLDEN_ROUND), penalised.service.current()!!.result)
+        assertEquals(1, penalised.service.current()!!.score().gamjeomRed)
     }
 
     @Test

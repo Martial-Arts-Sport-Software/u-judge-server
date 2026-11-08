@@ -111,6 +111,9 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
         var time = KerugiClock(started.timing)
         val signals = mutableListOf<BoutAttention>()
         val readySeats = mutableSetOf<Int>()
+        // A tap's corrected time may run up to 5 s ahead of the server: a clock stop never cuts off a tap journaled before it.
+        var latestTap: Instant? = null
+        fun stopAt(at: Instant) = latestTap?.let { maxOf(at, it) } ?: at
         // The score at a period end decides whether the golden round follows (ADR-010 §2).
         val tied = {
             val score = scoreWith(time, disqualified)
@@ -131,11 +134,11 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                 }
                 KerugiBoutEvents.SESSION_PAUSED -> {
                     projection = projection.transitionTo(SessionState.PAUSED)
-                    time = time.stop(at, tied)
+                    time = time.stop(stopAt(at), tied)
                 }
                 KerugiBoutEvents.PERIOD_ENDED -> {
                     if (projection.state == SessionState.RUNNING) projection = projection.transitionTo(SessionState.PAUSED)
-                    time = time.endPeriod(at, tied)
+                    time = time.endPeriod(stopAt(at), tied)
                 }
                 KerugiBoutEvents.CLOCK_STOPPED -> {
                     val stoppedAt = Instant.parse(Json.decodeFromString<BoutClockStoppedPayload>(event.payload).stoppedAt)
@@ -150,7 +153,7 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                     projection = projection.transitionTo(
                         if (event.type == KerugiBoutEvents.SESSION_COMPLETED) SessionState.COMPLETED else SessionState.CANCELLED,
                     )
-                    time = time.halt(at)
+                    time = time.halt(stopAt(at))
                     if (event.type == KerugiBoutEvents.SESSION_COMPLETED) {
                         val payload = Json.decodeFromString<BoutCompletedPayload>(event.payload)
                         completed = BoutResult(payload.winner, payload.reason)
@@ -158,9 +161,9 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                 }
                 KerugiBoutEvents.SCORE_CANDIDATE -> {
                     val payload = Json.decodeFromString<BoutScoreCandidatePayload>(event.payload)
-                    candidates += KerugiScoreCandidate(
-                        event.eventId, event.judgeId, payload.competitor, payload.area, Instant.parse(payload.clientTimestamp),
-                    )
+                    val tappedAt = Instant.parse(payload.clientTimestamp)
+                    candidates += KerugiScoreCandidate(event.eventId, event.judgeId, payload.competitor, payload.area, tappedAt)
+                    latestTap = latestTap?.let { maxOf(it, tappedAt) } ?: tappedAt
                 }
                 KerugiBoutEvents.OPERATOR_ACTION -> {
                     val payload = Json.decodeFromString<BoutOperatorActionPayload>(event.payload)

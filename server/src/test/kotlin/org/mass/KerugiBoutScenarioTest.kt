@@ -192,6 +192,41 @@ class KerugiBoutScenarioTest {
     }
 
     @Test
+    fun `the judges' first point in the golden round finishes the bout for every subscriber`() = testApplication {
+        val hub = start()
+        val judges = (1..3).map { judge("android-$it").connect().also { judge -> judge.resync() } }
+        val sessionId = assertIs<BoutOutcome.Applied>(hub.operator("Оператор", BoutCommand.StartBout(id(), spec()))).sessionId
+        judges.forEach { it.push("session_snapshot") }
+        // A 0:0 tie after round 2 leads through the rest into the golden round.
+        listOf(
+            BoutCommand.ChangeState(id(), sessionId, BoutStateAction.START),
+            BoutCommand.EndPeriod(id(), sessionId),
+            BoutCommand.ChangeState(id(), sessionId, BoutStateAction.RESUME),
+            BoutCommand.EndPeriod(id(), sessionId),
+            BoutCommand.ChangeState(id(), sessionId, BoutStateAction.RESUME),
+        ).forEach { assertIs<BoutOutcome.Applied>(hub.operator("Оператор", it)) }
+        val golden = judges.map { judge -> List(5) { judge.push("session_state_updated") }.last() }
+        golden.forEach {
+            assertEquals("running", it.string("state"))
+            assertEquals(timer("round", 3, remaining = 60_000, duration = 60_000, running = true, since = clock), it.getValue("timer"))
+        }
+
+        assertEquals("command_ack", judges[0].command(judges[0].tap("RED", "BODY", clock.plusMillis(100))).string("type"))
+        assertEquals("command_ack", judges[2].command(judges[2].tap("RED", "BODY", clock.plusMillis(400))).string("type"))
+        judges.forEach { judge ->
+            assertEquals(1, judge.push("kerugi_score_updated").score("red"))
+            val finished = judge.push("session_state_updated")
+            assertEquals("completed", finished.string("state"))
+            assertEquals("RED", finished.getValue("result").jsonObject.string("winner"))
+            assertEquals("golden_round", finished.getValue("result").jsonObject.string("reason"))
+            assertEquals(false, finished.getValue("timer").jsonObject.getValue("running").jsonPrimitive.content.toBoolean())
+        }
+        val deciding = hub.bouts.current()!!.history().last { it.type == "kerugi_score_candidate" }
+        assertEquals(BoutOutcome.Rejected("session_closed"), hub.operator("Оператор", BoutCommand.CorrectScore(id(), sessionId, deciding.eventId)))
+        assertEquals("session_closed", judges[1].command(judges[1].tap("BLUE", "HEAD", clock)).string("code"))
+    }
+
+    @Test
     fun `a device without a seat, an unsubscribed socket and malformed or forbidden messages change nothing`() = testApplication {
         val hub = start()
         val seated = judge("android-1").connect()

@@ -149,10 +149,36 @@ class KerugiBoutService(
         }
         if (rejection != null) return BoutOutcome.Rejected(rejection)
         val event = requireNotNull(eventFor(origin, command, now())) { "A validated command must build an event" }
-        return try {
+        val before = bouts[event.sessionId]
+        val applied = try {
             append(event)
         } catch (_: Exception) {
-            BoutOutcome.Rejected(BoutRejection.JOURNAL_UNAVAILABLE)
+            return BoutOutcome.Rejected(BoutRejection.JOURNAL_UNAVAILABLE)
+        }
+        return goldenPoint(before, applied)?.let { applied.copy(followUps = listOf(it)) } ?: applied
+    }
+
+    /**
+     * FHR 2024 §4.1.13 (ADR-010 §4): in the golden round the first point that unties the score — a judges' quorum, a throw,
+     * a spin bonus or a Gamjeom, which scores for the opponent — ends the round and the bout at once, for the side ahead.
+     * The result is journaled by the server right after the deciding input; a journal failure leaves the bout to the
+     * operator, who completes it with the same reason.
+     */
+    private fun goldenPoint(before: KerugiBout?, applied: BoutOutcome.Applied): BoutOutcome.Applied? {
+        val after = bouts[applied.sessionId] ?: return null
+        if (before == null || BoutChange.SCORE !in applied.changes || after.closed) return null
+        if (after.clock.phase != KerugiClock.GOLDEN_ROUND) return null
+        val inputs = setOf(KerugiBoutEvents.SCORE_CANDIDATE, KerugiBoutEvents.OPERATOR_ACTION)
+        if (after.events.last().event.type !in inputs) return null
+        val was = before.score()
+        val now = after.score()
+        if (was.blue != was.red || now.blue == now.red || now.disqualified != null) return null
+        val winner = if (now.blue > now.red) KerugiCompetitor.BLUE else KerugiCompetitor.RED
+        val payload = Json.encodeToString(BoutCompletedPayload(winner, REASON_GOLDEN_ROUND))
+        return try {
+            append(serverEvent(after, KerugiBoutEvents.SESSION_COMPLETED, payload, now(), author = GOLDEN_POINT_AUTHOR))
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -448,6 +474,7 @@ class KerugiBoutService(
         const val REASON_PREFERENCE = "preference"
 
         const val TIMER_AUTHOR = "timer"
+        const val GOLDEN_POINT_AUTHOR = "golden_point"
         const val RESTORE_REASON = "server_restart"
 
         private val allowedPoints = mapOf(
