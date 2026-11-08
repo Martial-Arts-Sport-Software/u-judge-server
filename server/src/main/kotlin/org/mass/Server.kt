@@ -4,7 +4,8 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
-import io.ktor.server.request.receive
+import io.ktor.server.request.contentLength
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -20,6 +21,7 @@ import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +34,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.io.readByteArray
 import java.time.Duration
 import java.time.Instant
 import java.security.SecureRandom
@@ -522,7 +525,10 @@ fun Application.module(
             explicitNulls = false
         })
     }
-    install(WebSockets)
+    install(WebSockets) {
+        // A larger frame closes the socket (1009) before it is buffered whole; up to this size it gets a typed rejection.
+        maxFrameSize = MAX_REALTIME_FRAME_BYTES
+    }
 
     routing {
         get("/") {
@@ -535,7 +541,18 @@ fun Application.module(
             call.respond(metadata.copy(serverTime = clock().toString()))
         }
         post("/v1/pairing-requests") {
-            when (val submission = pairingRequests.submit(call.receive())) {
+            // The only anonymous write: bounded and decoded here, before the pairing service sees it (`NFR-007`).
+            val body = call.receiveBoundedText(MAX_PAIRING_REQUEST_BYTES)
+            if (body == null) {
+                call.respond(HttpStatusCode.PayloadTooLarge, PairingRequestError("pairing_request_too_large"))
+                return@post
+            }
+            val command = runCatching { Json.decodeFromString<PairingRequestCommand>(body) }.getOrNull()
+            if (command == null) {
+                call.respond(HttpStatusCode.BadRequest, PairingRequestError("invalid_pairing_request"))
+                return@post
+            }
+            when (val submission = pairingRequests.submit(command)) {
                 is PairingSubmission.Pending -> {
                     call.respond(
                         if (submission.created) HttpStatusCode.Accepted else HttpStatusCode.OK,
@@ -676,6 +693,19 @@ fun Application.module(
 
 /** Client messages above this length are rejected before decoding (ADR-004). */
 const val MAX_REALTIME_MESSAGE_LENGTH = 4_096
+
+/** WebSocket frames above this size close the connection instead of being read into memory (`NFR-007`). */
+const val MAX_REALTIME_FRAME_BYTES = 64L * 1024
+
+/** A pairing request body above this size is refused unread (`NFR-007`); its fields are at most about 1 KB. */
+const val MAX_PAIRING_REQUEST_BYTES = 4_096
+
+/** The body as UTF-8, or null when it is larger than [limit] bytes; never reads more than [limit] + 1 bytes. */
+private suspend fun ApplicationCall.receiveBoundedText(limit: Int): String? {
+    if ((request.contentLength() ?: 0) > limit) return null
+    val bytes = receiveChannel().readRemaining(limit + 1L).readByteArray()
+    return if (bytes.size > limit) null else bytes.decodeToString()
+}
 
 fun main(args: Array<String>) {
     ServerSmokeCheck.options(args)?.let { exitProcess(ServerSmokeCheck.run(it)) }
