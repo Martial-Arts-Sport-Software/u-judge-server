@@ -46,6 +46,7 @@ import org.mass.persistence.PostgresCommand
 import org.mass.persistence.PostgresPlatform
 import org.mass.persistence.PostgresRuntimeConfiguration
 import org.mass.persistence.PostgresState
+import org.mass.report.CompetitionReports
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.nio.file.Files
@@ -171,6 +172,11 @@ class ServerRuntime(
     var backups: JournalBackups? = null
         private set
 
+    /** History, XLSX and CSV of the current competition (ADR-012); null while the server is not running. */
+    @Volatile
+    var reports: CompetitionReports? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -203,6 +209,7 @@ class ServerRuntime(
         realtime = null
         courtBouts = null
         backups = null
+        reports = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -276,6 +283,7 @@ class ServerRuntime(
             return failStartup("Bouts and performances could not be restored: ${exception.message}")
         }.also { realtime = it }
         courtBouts = CourtBouts(hub, checkNotNull(competitionDraws), checkNotNull(competitionCourts), pairing)
+        reports = CompetitionReports(checkNotNull(competitionApplications), checkNotNull(competitionCourts), hub)
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
@@ -479,6 +487,7 @@ class ServerRuntime(
         realtime = null
         courtBouts = null
         backups = null
+        reports = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }
