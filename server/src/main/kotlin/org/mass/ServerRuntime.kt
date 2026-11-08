@@ -25,6 +25,7 @@ import org.mass.bout.KerugiBoutService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.domain.PeerId
 import org.mass.draw.CompetitionCourtsService
+import org.mass.draw.CourtProgress
 import org.mass.draw.CompetitionDrawService
 import org.mass.draw.JdbcCompetitionDrawJournal
 import org.mass.persistence.JdbcDomainEventStore
@@ -232,13 +233,15 @@ class ServerRuntime(
         } catch (exception: Exception) {
             return failStartup("Competition draw could not be restored: ${exception.message}")
         }
-        competitionCourts = CompetitionCourtsService(checkNotNull(competitionDraws), peerId)
+        competitionCourts = CompetitionCourtsService(checkNotNull(competitionDraws), peerId) {
+            realtime?.bouts?.let(CourtBouts::progress) ?: CourtProgress.None
+        }
         val hub = try {
             RealtimeHub(KerugiBoutService(JdbcBoutEventJournal(store), peerId))
         } catch (exception: Exception) {
             return failStartup("Kerugi bouts could not be restored: ${exception.message}")
         }.also { realtime = it }
-        courtBouts = CourtBouts(hub, checkNotNull(competitionDraws), pairing)
+        courtBouts = CourtBouts(hub, checkNotNull(competitionDraws), checkNotNull(competitionCourts), pairing)
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)

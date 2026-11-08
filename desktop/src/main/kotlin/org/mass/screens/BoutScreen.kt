@@ -51,9 +51,13 @@ import org.mass.bout.BoutEntryStatus
 import org.mass.bout.BoutHistoryEntry
 import org.mass.bout.BoutStateAction
 import org.mass.bout.ConnectedJudge
-import org.mass.bout.CourtBout
 import org.mass.bout.CourtBoutOutcome
 import org.mass.bout.CourtBouts
+import org.mass.draw.CourtItem
+import org.mass.draw.CourtPanel
+import org.mass.draw.DrawOutcome
+import org.mass.draw.ItemRef
+import org.mass.ui.court.CourtPanelComponent
 import org.mass.bout.KerugiBout
 import org.mass.bout.KerugiBoutEvents
 import org.mass.domain.EventId
@@ -92,14 +96,13 @@ object BoutScreen : Screen {
         val drawRevision by (Server.runtime.competitionDraws?.revision ?: remember { MutableStateFlow(0L) }).collectAsState()
         val pairingChanges by Server.runtime.pairingRequests.changes.collectAsState()
         val current = remember(court, boutRevision) { court?.bouts?.current() }
-        val bouts = remember(court, boutRevision, drawRevision) { court?.courtBouts().orEmpty() }
+        val panel = remember(court, boutRevision, drawRevision) { court?.panel() ?: CourtPanel.Empty }
         val connected = remember(court, pairingChanges) { court?.connectedJudges().orEmpty() }
         val registry = remember(pairingChanges) { Server.runtime.pairingRequests.operatorRegistry() }
         val scope = rememberCoroutineScope()
         var busy by remember { mutableStateOf(false) }
         var message by remember { mutableStateOf<String?>(null) }
         var confirmation by remember { mutableStateOf<Confirmation?>(null) }
-        var selectedBout by remember { mutableStateOf<Int?>(null) }
         var seats by remember { mutableStateOf(listOf<String>()) }
         var quorum by remember { mutableStateOf("2") }
         var window by remember { mutableStateOf("1000") }
@@ -135,9 +138,18 @@ object BoutScreen : Screen {
                 ) {
                     if (active == null) {
                         NextBout(
-                            bouts = bouts.filter(CourtBout::startable),
-                            selected = selectedBout,
-                            onSelect = { selectedBout = it },
+                            panel = panel,
+                            onPick = { ref ->
+                                val courts = Server.runtime.competitionCourts
+                                if (courts != null) {
+                                    scope.launch {
+                                        val outcome = withContext(Dispatchers.IO) { courts.selectNextBout(ref) }
+                                        message = (outcome as? DrawOutcome.Rejected)?.let {
+                                            Localization.getString("bout_rejected").replace("%s", it.reason.name.lowercase())
+                                        }
+                                    }
+                                }
+                            },
                             connected = connected,
                             seats = seats,
                             onSeat = { device -> seats = if (device in seats) seats - device else (seats + device).take(3) },
@@ -146,9 +158,9 @@ object BoutScreen : Screen {
                             window = window,
                             onWindow = { window = it },
                             enabled = !busy && court != null,
-                            onStart = { bout ->
+                            onStart = {
                                 act {
-                                    start(bout, seats.filter { it in connected.map(ConnectedJudge::deviceId) }, quorum.toIntOrNull() ?: 0,
+                                    start(seats.filter { it in connected.map(ConnectedJudge::deviceId) }, quorum.toIntOrNull() ?: 0,
                                         window.toLongOrNull() ?: 0, State.judgeSurname)
                                 }
                             },
@@ -266,12 +278,11 @@ object BoutScreen : Screen {
         }
     }
 
-    /** «Следующий бой»: a startable bout, the judges in seat order and the settings fixed at «Начать». */
+    /** The court panel with «Следующий бой» (I4b), the judges in seat order and the settings fixed at «Начать». */
     @Composable
     private fun NextBout(
-        bouts: List<CourtBout>,
-        selected: Int?,
-        onSelect: (Int) -> Unit,
+        panel: CourtPanel,
+        onPick: (ItemRef) -> Unit,
         connected: List<ConnectedJudge>,
         seats: List<String>,
         onSeat: (String) -> Unit,
@@ -280,24 +291,14 @@ object BoutScreen : Screen {
         window: String,
         onWindow: (String) -> Unit,
         enabled: Boolean,
-        onStart: (CourtBout) -> Unit,
+        onStart: () -> Unit,
     ) {
-        PanelTitle(Localization.getString("bout_select_title"))
-        if (bouts.isEmpty()) {
-            Hint(Localization.getString("bout_select_empty"))
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().height(170.dp)) {
-                items(bouts, key = CourtBout::number) { bout ->
-                    SelectableRow(
-                        text = Localization.getString("bout_number").replace("%d", bout.number.toString()) + " · " +
-                            CourtBouts.label(bout.blue!!) + " — " + CourtBouts.label(bout.red!!),
-                        detail = bout.category.title,
-                        selected = bout.number == selected,
-                        onClick = { onSelect(bout.number) },
-                    )
-                }
-            }
+        val seated = seats.count { device -> connected.any { it.deviceId == device } }
+        val startable = enabled && panel.next is CourtItem.Bout && seated in 2..3
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Colors.SECONDARY.color).padding(14.dp)) {
+            CourtPanelComponent(panel, onPick, Modifier.fillMaxWidth().height(260.dp), enabled = enabled, onStart = onStart.takeIf { startable })
         }
+        if (panel.next == null) Hint(Localization.getString("bout_select_empty"))
         PanelTitle(Localization.getString("bout_judges_title"))
         if (connected.isEmpty()) {
             Hint(Localization.getString("bout_judges_empty"))
@@ -317,14 +318,6 @@ object BoutScreen : Screen {
             TextInputComponent(Localization.getString("bout_quorum"), quorum, onQuorum, Modifier.weight(1f), labelColor = Color.White)
             TextInputComponent(Localization.getString("bout_window"), window, onWindow, Modifier.weight(1f), labelColor = Color.White)
         }
-        val bout = bouts.firstOrNull { it.number == selected }
-        val seated = seats.count { device -> connected.any { it.deviceId == device } }
-        ButtonComponent(
-            Localization.getString("bout_start"),
-            onclick = { bout?.let(onStart) },
-            enabled = enabled && bout != null && seated in 2..3,
-            modifier = Modifier.semantics { contentDescription = Localization.getString("bout_start") },
-        )
     }
 
     @Composable

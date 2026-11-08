@@ -3,36 +3,19 @@ package org.mass.bout
 import org.mass.DeviceConnectionState
 import org.mass.PairingRequests
 import org.mass.RealtimeHub
-import org.mass.applications.ApplicationCategory
 import org.mass.applications.ApplicationDiscipline
 import org.mass.applications.CategoryEntry
-import org.mass.domain.BracketId
 import org.mass.domain.CompetitionId
 import org.mass.domain.EventId
-import org.mass.draw.Bout
-import org.mass.draw.BoutSide
-import org.mass.draw.Bouts
+import org.mass.domain.SessionState
 import org.mass.draw.CategoryStatus
+import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
-import org.mass.draw.DrawBoard
+import org.mass.draw.CourtItem
+import org.mass.draw.CourtPanel
+import org.mass.draw.CourtProgress
 import org.mass.draw.DrawOutcome
-import org.mass.draw.drawKey
-
-/** A bout of a confirmed bracket on this court; a side is null while it waits for an earlier winner (I2b). */
-data class CourtBout(
-    val number: Int,
-    val category: ApplicationCategory,
-    val bracketId: BracketId,
-    val round: Int,
-    val index: Int,
-    val blue: CategoryEntry?,
-    val red: CategoryEntry?,
-    val judged: Boolean,
-) {
-    /** A Kerugi bout with both athletes known that has not been decided yet. */
-    val startable: Boolean
-        get() = category.discipline == ApplicationDiscipline.KERUGI && blue != null && red != null && !judged
-}
+import org.mass.draw.ItemRef
 
 /** A paired device the operator can seat: approved, not revoked and connected now. */
 data class ConnectedJudge(val deviceId: String, val surname: String, val platform: String)
@@ -47,35 +30,36 @@ sealed interface CourtBoutOutcome {
 }
 
 /**
- * The operator side of the court: the bouts of the confirmed draws, the connected judges and «Начать», which fixes the
- * roster of connected devices, locks the category's draw on its first bout (`BRK-002`, `CMP-006`) and starts the bout.
- * Every later operator action goes through the same realtime dispatcher as the judges (ADR-009 §11).
+ * The operator side of the court: the court panel of I4b with the current and the next bout, the connected judges and
+ * «Начать», which fixes the roster of connected devices, locks the category's draw on its first bout (`BRK-002`,
+ * `CMP-006`) and starts the next bout. Every later operator action goes through the same realtime dispatcher as the
+ * judges (ADR-009 §11).
  */
 class CourtBouts(
     private val realtime: RealtimeHub,
     private val draws: CompetitionDrawService,
+    private val courts: CompetitionCourtsService,
     private val pairing: PairingRequests,
 ) {
     val bouts: KerugiBoutService
         get() = realtime.bouts
 
-    fun courtBouts(): List<CourtBout> = numbered(draws.board())
+    fun panel(): CourtPanel = courts.courtPanel()
 
     fun connectedJudges(): List<ConnectedJudge> = pairing.operatorRegistry().devices
         .filter { !it.revoked && it.connectionState == DeviceConnectionState.CONNECTED }
         .map { ConnectedJudge(it.deviceId, it.surname, it.platform) }
 
-    /** «Начать»: [judges] are device IDs in seat order; every one must be connected now. */
-    fun start(
-        bout: CourtBout,
-        judges: List<String>,
-        quorum: Int,
-        coincidenceWindowMillis: Long,
-        author: String,
-    ): CourtBoutOutcome {
+    /** «Начать» of the court panel: starts its next bout; [judges] are device IDs in seat order, all connected now. */
+    fun start(judges: List<String>, quorum: Int, coincidenceWindowMillis: Long, author: String): CourtBoutOutcome {
         val board = draws.board()
         val competitionId = board.competitionId ?: return CourtBoutOutcome.Rejected(NO_COMPETITION)
-        if (!bout.startable) return CourtBoutOutcome.Rejected(BoutRejection.BOUT_ALREADY_JUDGED)
+        val bout = when (val next = courts.courtPanel().next) {
+            null -> return CourtBoutOutcome.Rejected(NO_NEXT_BOUT)
+            is CourtItem.Performance -> return CourtBoutOutcome.Rejected(NOT_KERUGI)
+            is CourtItem.Bout -> next.takeIf { it.category.discipline == ApplicationDiscipline.KERUGI }
+                ?: return CourtBoutOutcome.Rejected(NOT_KERUGI)
+        }
         val connected = connectedJudges().associateBy(ConnectedJudge::deviceId)
         if (judges.any { it !in connected }) return CourtBoutOutcome.Rejected(JUDGE_NOT_CONNECTED)
         val spec = BoutStartSpec(
@@ -83,11 +67,12 @@ class CourtBouts(
             bracketId = bout.bracketId,
             categoryId = bout.category.id,
             categoryTitle = bout.category.title,
+            courtNumber = bout.court,
             boutNumber = bout.number,
-            round = bout.round,
-            index = bout.index,
-            blue = corner(checkNotNull(bout.blue)),
-            red = corner(checkNotNull(bout.red)),
+            round = bout.ref.round,
+            index = bout.ref.index,
+            blue = corner(bout.blue),
+            red = corner(bout.red),
             judges = judges.map { RosterJudge(it, connected.getValue(it).surname) },
             quorum = quorum,
             coincidenceWindowMillis = coincidenceWindowMillis,
@@ -114,42 +99,20 @@ class CourtBouts(
             }
         }
 
-    /**
-     * Numbers the bouts of the confirmed draws across categories round by round, byes unnumbered (ADR-008 §6). This is the
-     * single-court numbering of the pilot desktop; the court panel of I4b part 2 replaces it with the competition-wide one.
-     */
-    private fun numbered(board: DrawBoard): List<CourtBout> {
-        val drawn = board.categories
-            .filter { it.status == CategoryStatus.CONFIRMED || it.status == CategoryStatus.STARTED }
-            .mapNotNull { state ->
-                val confirmed = state.confirmed ?: return@mapNotNull null
-                Triple(state.category, confirmed.ownership.bracketId, Bouts.of(confirmed.draw))
-            }
-        val rounds = drawn.maxOfOrNull { (_, _, bouts) -> bouts.maxOfOrNull(Bout::round) ?: 0 } ?: 0
-        var number = 0
-        return (1..rounds).flatMap { round ->
-            drawn.flatMap { (category, bracketId, categoryBouts) ->
-                val entries = category.entries.associateBy { it.drawKey }
-                categoryBouts.filter { it.round == round }.sortedBy(Bout::index).map { bout ->
-                    CourtBout(
-                        number = ++number,
-                        category = category,
-                        bracketId = bracketId,
-                        round = bout.round,
-                        index = bout.index,
-                        blue = (bout.first as? BoutSide.Entry)?.let { entries[it.key] },
-                        red = (bout.second as? BoutSide.Entry)?.let { entries[it.key] },
-                        judged = bouts.completed(bracketId, bout.round, bout.index),
-                    )
-                }
-            }
-        }
-    }
-
     companion object {
         const val NO_COMPETITION = "no_competition"
         const val NOT_CONFIRMED = "not_confirmed"
         const val JUDGE_NOT_CONNECTED = "judge_not_connected"
+        const val NO_NEXT_BOUT = "no_next_bout"
+        const val NOT_KERUGI = "not_kerugi"
+
+        /** The court panel's view of the bouts: the current one (unless cancelled) and the decided ones. */
+        fun progress(bouts: KerugiBoutService): CourtProgress = CourtProgress(
+            current = bouts.current()?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf),
+            judged = bouts.bouts().filter { it.state == SessionState.COMPLETED }.map(::refOf).toSet(),
+        )
+
+        private fun refOf(bout: KerugiBout) = ItemRef(bout.started.categoryId, bout.started.round, bout.started.index)
 
         /** «Иванов И. И. (Москва)», as in the organiser's protocols; a pair joins its athletes with a slash. */
         fun label(entry: CategoryEntry): String = entry.athletes.joinToString(" / ") { athlete ->

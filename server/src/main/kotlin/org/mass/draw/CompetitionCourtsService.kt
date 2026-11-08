@@ -68,6 +68,8 @@ data class CourtsBoard(
 class CompetitionCourtsService(
     private val draws: CompetitionDrawService,
     private val peerId: PeerId,
+    /** The bout in progress and the decided bouts (I2a); read on every panel. */
+    private val progress: () -> CourtProgress = { CourtProgress.None },
 ) {
     /** Changes with every accepted draw or court command; the desktop re-reads the boards on a new revision. */
     val revision: StateFlow<Long>
@@ -176,14 +178,17 @@ class CompetitionCourtsService(
     private fun panel(board: CourtsBoard): CourtPanel {
         val competitionId = board.competitionId ?: return CourtPanel.Empty
         val court = board.localCourt
-        val queue = board.categoriesOf(court).flatMap { state -> items(board, state, court) }.sortedBy { it.number }
+        val progress = progress()
+        val items = board.categoriesOf(court).flatMap { state -> items(board, state, court) }.sortedBy { it.number }
+        val current = items.firstOrNull { it.ref == progress.current }
+        val queue = items.filter { it.ref != progress.current && it.ref !in progress.judged }
         val picked = draws.journal().map { it.event }
             .filterIsInstance<DrawEvent.NextBoutSelected>()
             .lastOrNull { it.competitionId == competitionId && it.court == court }
             ?.let { event -> queue.firstOrNull { it.ref == ItemRef(event.categoryId, event.round, event.index) } }
         return CourtPanel(
             court = court,
-            current = null,
+            current = current,
             next = picked ?: queue.firstOrNull(),
             nextSelected = picked != null,
             queue = queue,

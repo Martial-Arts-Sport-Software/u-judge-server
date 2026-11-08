@@ -23,7 +23,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-/** The court this desktop judges; I4b part 2 supplies the real court identity and number. */
+/** The court identity of this desktop in the journal; the court number of each bout comes from the court panel. */
 data class BoutCourt(val courtId: CourtId, val number: Int) {
     companion object {
         /** The single court of a pilot desktop, stable for the peer across restarts. */
@@ -287,7 +287,7 @@ class KerugiBoutService(
         val payload = KerugiBoutStartedPayload(
             categoryId = spec.categoryId,
             categoryTitle = spec.categoryTitle,
-            courtNumber = court.number,
+            courtNumber = spec.courtNumber,
             boutNumber = spec.boutNumber,
             round = spec.round,
             index = spec.index,

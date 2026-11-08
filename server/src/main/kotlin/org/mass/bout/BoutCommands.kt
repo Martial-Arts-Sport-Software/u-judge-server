@@ -45,6 +45,7 @@ data class BoutStartSpec(
     val blue: BoutCorner,
     val red: BoutCorner,
     val judges: List<RosterJudge>,
+    val courtNumber: Int = 1,
     val quorum: Int = 2,
     val coincidenceWindowMillis: Long = 1_000,
 )
