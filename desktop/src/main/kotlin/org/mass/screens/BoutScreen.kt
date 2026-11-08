@@ -72,6 +72,8 @@ import org.mass.domain.KerugiCompetitor
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.SessionState
 import org.mass.enums.Colors
+import org.mass.enums.Routes
+import org.mass.ui.button.clickWithTransition
 import org.mass.locale.Localization
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
@@ -363,7 +365,15 @@ object BoutScreen : Screen {
             CourtPanelComponent(panel, onPick, Modifier.fillMaxWidth().height(260.dp), enabled = enabled, onStart = onStart.takeIf { startable })
         }
         if (panel.next == null) Hint(Localization.getString("bout_select_empty"))
-        if (panel.next is CourtItem.Performance) Hint(Localization.getString("i5_bout_next_is_performance"))
+        if (panel.next is CourtItem.Performance) {
+            Hint(Localization.getString("i5_bout_next_is_performance"))
+            ButtonComponent(
+                Localization.getString("i5_bout_open_performance"),
+                ButtonStyles.Secondary,
+                onclick = { clickWithTransition(Routes.PERFORMANCE) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (panel.next is CourtItem.Bout) {
             PanelTitle(Localization.getString("i5_bout_discipline_title"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

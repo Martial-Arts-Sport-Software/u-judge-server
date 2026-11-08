@@ -15,6 +15,7 @@ import org.mass.domain.TechnicalScoring
 import org.mass.performance.PerformanceCommand
 import org.mass.performance.PerformanceStartSpec
 import org.mass.performance.TechnicalPerformance
+import org.mass.performance.TechnicalPerformanceService
 import org.mass.applications.CategoryEntry
 import org.mass.domain.CompetitionId
 import org.mass.domain.EventId
@@ -61,6 +62,9 @@ class CourtBouts(
 ) {
     val bouts: KerugiBoutService
         get() = realtime.bouts
+
+    val performances: TechnicalPerformanceService
+        get() = realtime.performances
 
     fun panel(): CourtPanel = courts.courtPanel()
 

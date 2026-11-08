@@ -32,6 +32,7 @@ import org.mass.State.density
 import org.mass.State.navController
 import org.mass.enums.Routes
 import org.mass.screens.BoutScreen
+import org.mass.screens.PerformanceScreen
 import org.mass.screens.BracketsSetupScreen
 import org.mass.screens.CourtsScreen
 import org.mass.screens.DevicesConnectionScreen
@@ -106,6 +107,9 @@ fun App() {
                                 }
                                 animatedComposable(Routes.BOUT) {
                                     BoutScreen.Load()
+                                }
+                                animatedComposable(Routes.PERFORMANCE) {
+                                    PerformanceScreen.Load()
                                 }
                             }
                         }
