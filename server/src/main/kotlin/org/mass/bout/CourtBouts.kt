@@ -233,10 +233,12 @@ class CourtBouts(
                         ?.let { ItemRef(it.started.categoryId, it.started.round, it.started.index) }
                 else -> bout?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf)
             }
-            val judged = progress(hub.bouts).judged + hub.performances.performances()
+            val bouts = progress(hub.bouts)
+            val performed = hub.performances.performances()
                 .filter { it.state == SessionState.COMPLETED }
                 .map { ItemRef(it.started.categoryId, it.started.round, it.started.index) }
-            return CourtProgress(current, judged)
+            // Bout decisions move winners on in the bracket (ADR-010 §6); a performance has no bracket to move along.
+            return bouts.copy(current = current, judged = bouts.judged + performed)
         }
 
         /**
