@@ -33,3 +33,22 @@ jobs:
         run: git diff --check HEAD^ HEAD
       - name: Build and test
         run: ./gradlew build
+      - name: Fault-injection load test (seven phones, drops, partition, restart)
+        run: |
+          ./gradlew :server:faultTest
+          grep -ho 'fault-load[^&<]*' server/build/test-results/faultTest/*.xml
+      - name: Smoke-test the standalone server distribution
+        run: |
+          ./gradlew :server:installDist
+          SERVER_OPTS="-DuJudge.postgres.installationDirectory=$PWD/server/build/postgres-bundle" \
+            server/build/install/server/bin/server --smoke-test --data-directory="$RUNNER_TEMP/ujudge-data"
+
+  secrets:
+    name: Secrets check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Scan tracked files and the full history
+        run: scripts/check-secrets.sh
