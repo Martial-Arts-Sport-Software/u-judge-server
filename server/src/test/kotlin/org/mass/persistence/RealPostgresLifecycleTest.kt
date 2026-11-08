@@ -338,6 +338,10 @@ class RealPostgresLifecycleTest {
             assertIs<BoutOutcome.Applied>(first.bouts.dispatch(BoutOrigin.Judge("android-1"), tanbonTap(KerugiCompetitor.RED, TanbonArea.HEAD, 100)))
             assertIs<BoutOutcome.Applied>(first.bouts.dispatch(BoutOrigin.Judge("android-1"), tanbonTap(null, TanbonArea.CROSS, 200)))
             clock = clock.plusSeconds(5)
+            // «Стоп периода» on round 1, «Продолжить» from the break, «Стоп периода» on round 2 (ADR-010 §2).
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.EndPeriod(EventId.new(), tanbon)))
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.ChangeState(EventId.new(), tanbon, BoutStateAction.RESUME)))
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.EndPeriod(EventId.new(), tanbon)))
             assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.CompleteBout(EventId.new(), tanbon)))
 
             val spec = PerformanceStartSpec(

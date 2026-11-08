@@ -125,6 +125,7 @@ class TanbonBoutServiceTest {
         assertEquals(BoutDiscipline.TANBON, restored.discipline)
         assertEquals(1, restored.score().blue)
         assertEquals(2, restored.score().red)
+        fixture.finishRegularTime(sessionId)
         assertIs<BoutOutcome.Applied>(fixture.operator(BoutCommand.CompleteBout(fixture.id(), sessionId)))
         assertEquals(KerugiCompetitor.RED, fixture.service.current()!!.result!!.winner)
         assertEquals(Instant.parse("2026-11-08T10:00:00Z"), fixture.clock)
