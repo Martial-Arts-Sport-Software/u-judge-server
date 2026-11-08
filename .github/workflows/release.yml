@@ -111,7 +111,9 @@ jobs:
           # An operator runs the app as a standard user: an ephemeral local account with a random password does the same.
           $plain = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ }) + 'aA1!'
           net user ujudge-smoke $plain /add | Out-Null
-          $credential = New-Object System.Management.Automation.PSCredential('ujudge-smoke', (ConvertTo-SecureString $plain -AsPlainText -Force))
+          if ($LASTEXITCODE -ne 0) { throw "net user exited with $LASTEXITCODE" }
+          $account = "$env:COMPUTERNAME\ujudge-smoke"
+          $credential = New-Object System.Management.Automation.PSCredential($account, (ConvertTo-SecureString $plain -AsPlainText -Force))
           $work = 'C:\ujudge-smoke'
           New-Item -ItemType Directory -Force $work | Out-Null
           icacls $work /grant 'ujudge-smoke:(OI)(CI)F' | Out-Null
