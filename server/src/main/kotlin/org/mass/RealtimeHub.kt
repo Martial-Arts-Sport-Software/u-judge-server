@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.mass.bout.BoutChange
+import org.mass.bout.BoutDiscipline
+import org.mass.bout.TanbonArea
 import org.mass.bout.BoutCommand
 import org.mass.bout.BoutEventJournal
 import org.mass.bout.BoutOrigin
@@ -51,6 +53,24 @@ data class KerugiScoreCommandMessage(
     val deviceId: String,
     val competitor: KerugiCompetitor,
     val area: KerugiScoringArea,
+)
+
+/** ADR-011 §3: [competitor] is null exactly for `CROSS`. */
+@Serializable
+data class TanbonScoreCommandMessage(
+    val type: String,
+    val eventId: String,
+    val sequence: Long,
+    val clientTimestamp: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val competitor: KerugiCompetitor?,
+    val area: TanbonArea,
 )
 
 /** `judge_attention_command` and `judge_ready_command` share the envelope (ADR-009 §7, ADR-010 §9). */
@@ -189,6 +209,16 @@ class RealtimeHub(val bouts: KerugiBoutService) {
                     message.competitor, message.area,
                 )
             }
+            "tanbon_score_command" -> judgeCommand(connection, eventId) {
+                val message = Json.decodeFromString<TanbonScoreCommandMessage>(text)
+                require(message.type == type)
+                require((message.area == TanbonArea.CROSS) == (message.competitor == null))
+                BoutCommand.SubmitTanbonScore(
+                    EventId(message.eventId), message.sequence.also { require(it >= 0) }, Instant.parse(message.clientTimestamp),
+                    context(message.competitionId, message.peerId, message.courtId, message.bracketId, message.sessionId, message.judgeId, message.deviceId),
+                    message.competitor, message.area,
+                )
+            }
             "judge_attention_command" -> judgeCommand(connection, eventId) {
                 val message = Json.decodeFromString<JudgeAttentionCommandMessage>(text)
                 require(message.type == type)
@@ -304,7 +334,10 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         }
         if (BoutChange.SCORE in outcome.changes) {
             val message = realtimeJson.encodeToString(
-                KerugiScoreUpdatedMessage("kerugi_score_updated", bout.sessionId.value, outcome.sequence, scoreView(bout)),
+                KerugiScoreUpdatedMessage(
+                    if (bout.discipline == BoutDiscipline.TANBON) "tanbon_score_updated" else "kerugi_score_updated",
+                    bout.sessionId.value, outcome.sequence, scoreView(bout),
+                ),
             )
             subscribers.forEach { it.send(message) }
         }
@@ -314,7 +347,7 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         val started = bout.started
         return SessionView(
             sessionId = bout.sessionId.value,
-            discipline = "kerugi",
+            discipline = bout.discipline.code,
             competitionId = bout.competitionId.value,
             peerId = bout.peerId.value,
             courtId = bout.courtId.value,

@@ -50,6 +50,7 @@ data class BoutStartSpec(
     val coincidenceWindowMillis: Long = 1_000,
     /** Durations by the category's age class (ADR-010 §1). */
     val timing: BoutTiming = BoutTiming(),
+    val discipline: BoutDiscipline = BoutDiscipline.KERUGI,
 )
 
 enum class BoutStateAction { START, PAUSE, RESUME }
@@ -74,6 +75,16 @@ sealed interface BoutCommand {
         override val context: JudgeContext,
         val competitor: KerugiCompetitor,
         val area: KerugiScoringArea,
+    ) : FromJudge
+
+    /** A Tanbon tap (ADR-011 §3); [competitor] is null exactly for `CROSS`. */
+    data class SubmitTanbonScore(
+        override val eventId: EventId,
+        override val sequence: Long,
+        override val clientTimestamp: Instant,
+        override val context: JudgeContext,
+        val competitor: KerugiCompetitor?,
+        val area: TanbonArea,
     ) : FromJudge
 
     data class SignalAttention(
@@ -139,6 +150,9 @@ object BoutRejection {
     const val JUDGE_NOT_ASSIGNED = "judge_not_assigned"
     const val INVALID_CLIENT_TIMESTAMP = "invalid_client_timestamp"
     const val JOURNAL_UNAVAILABLE = "journal_unavailable"
+
+    /** A command of one discipline for a session of another (`TAN-005`, ADR-011). */
+    const val DISCIPLINE_MISMATCH = "discipline_mismatch"
 
     const val BOUT_IN_PROGRESS = "bout_in_progress"
     const val BOUT_ALREADY_JUDGED = "bout_already_judged"

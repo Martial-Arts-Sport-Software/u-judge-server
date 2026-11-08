@@ -417,6 +417,17 @@ object Localization {
             "freestyle-group-presentation-criteria-2" to "Power, speed, energy blast (kehup)",
             "freestyle-group-presentation-criteria-3" to "Balance, falling techniques (nakpok)",
             "freestyle-group-presentation-criteria-4" to "Music, choreography",
+
+            // I5: Tanbon and technical performances (ADR-011)
+            "i5_bout_discipline_title" to "Discipline",
+            "i5_bout_discipline_kerugi" to "Kerugi",
+            "i5_bout_discipline_tanbon" to "Tanbon",
+            "i5_bout_discipline_choose" to "fixed by the first bout of the category",
+            "i5_bout_discipline_fixed" to "fixed for this category",
+            "i5_bout_next_is_performance" to "The next item is a performance: start it on the «Performance» screen",
+            "i5_bout_tanbon_hint" to "Tanbon: points come from the judges only (head 2, body 1); CROSS is recorded without points",
+            "i5_bout_cross" to "CROSS",
+            "i5_bout_status_audit_only" to "audit only, no points",
         ),
 
         "ru" to mapOf(
@@ -828,6 +839,17 @@ object Localization {
             "freestyle-group-presentation-criteria-2" to "Сила, скорость, выражение энергии (кихап)",
             "freestyle-group-presentation-criteria-3" to "Баланс, техники страховки",
             "freestyle-group-presentation-criteria-4" to "Музыка, хореография",
+
+            // I5: Tanbon и технические выступления (ADR-011)
+            "i5_bout_discipline_title" to "Дисциплина",
+            "i5_bout_discipline_kerugi" to "Kerugi",
+            "i5_bout_discipline_tanbon" to "Tanbon",
+            "i5_bout_discipline_choose" to "закрепится первым боем категории",
+            "i5_bout_discipline_fixed" to "закреплена для категории",
+            "i5_bout_next_is_performance" to "Следующее — выступление: начните его на экране «Выступление»",
+            "i5_bout_tanbon_hint" to "Tanbon: баллы ставят только судьи (голова 2, туловище 1); CROSS фиксируется без баллов",
+            "i5_bout_cross" to "CROSS",
+            "i5_bout_status_audit_only" to "аудит, без баллов",
         )
     )
     fun getString(key: String): String {

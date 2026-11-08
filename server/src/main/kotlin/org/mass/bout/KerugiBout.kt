@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import org.mass.domain.BracketId
 import org.mass.domain.CompetitionId
 import org.mass.domain.CourtId
+import org.mass.domain.DomainEvent
 import org.mass.domain.EventId
 import org.mass.domain.JudgeId
 import org.mass.domain.KerugiCompetitor
@@ -42,7 +43,7 @@ data class BoutResult(val winner: KerugiCompetitor, val reason: String)
 data class BoutAttention(val eventId: EventId, val seat: Int?, val clientTimestamp: Instant, val receivedAt: Instant)
 
 /** Why an input did or did not count (`KER-009`); the operator sees it in the bout history. */
-enum class BoutEntryStatus { COUNTED, NO_QUORUM, OUTSIDE_RUNNING_PERIOD, CORRECTED, RESET, APPLIED, RECORDED }
+enum class BoutEntryStatus { COUNTED, NO_QUORUM, OUTSIDE_RUNNING_PERIOD, CORRECTED, RESET, APPLIED, RECORDED, AUDIT_ONLY }
 
 /** One journaled input of the bout in journal order. */
 data class BoutHistoryEntry(
@@ -66,8 +67,15 @@ data class BoutHistoryEntry(
  * The projection is a pure function of the events, so a restart gives the same score.
  */
 class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
-    private val startEvent = events.first().also { require(it.event.type == KerugiBoutEvents.BOUT_STARTED) }.event
+    private val startEvent = events.first().also { require(it.event.type in KerugiBoutEvents.STARTS) }.event
     val started: KerugiBoutStartedPayload = Json.decodeFromString(startEvent.payload)
+
+    /** Kerugi or Tanbon, fixed by the start event (ADR-011 §3). */
+    val discipline: BoutDiscipline =
+        if (startEvent.type == KerugiBoutEvents.TANBON_BOUT_STARTED) BoutDiscipline.TANBON else BoutDiscipline.KERUGI
+
+    /** The journal sequence of the start: the latest started session of the court is its current one. */
+    val startSequence: Long = events.first().sequence
     val sessionId: SessionId = startEvent.sessionId
     val competitionId: CompetitionId = startEvent.competitionId
     val peerId: PeerId = startEvent.peerId
@@ -165,6 +173,16 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                     candidates += KerugiScoreCandidate(event.eventId, event.judgeId, payload.competitor, payload.area, tappedAt)
                     latestTap = latestTap?.let { maxOf(it, tappedAt) } ?: tappedAt
                 }
+                KerugiBoutEvents.TANBON_SCORE_CANDIDATE -> {
+                    val payload = Json.decodeFromString<TanbonScoreCandidatePayload>(event.payload)
+                    val area = payload.area.scoring
+                    // CROSS is journaled for audit only and never reaches the scoring engine (`TAN-004`).
+                    if (area != null && payload.competitor != null) {
+                        candidates += KerugiScoreCandidate(
+                            event.eventId, event.judgeId, payload.competitor, area, Instant.parse(payload.clientTimestamp),
+                        )
+                    }
+                }
                 KerugiBoutEvents.OPERATOR_ACTION -> {
                     val payload = Json.decodeFromString<BoutOperatorActionPayload>(event.payload)
                     actions += KerugiOperatorAction(event.eventId, payload.type, payload.competitor, payload.points)
@@ -235,7 +253,7 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
     fun effectiveScoreEventIds(): List<EventId> {
         val corrected = corrections.map { it.targetEventId }.toSet()
         return events.map { it.event }
-            .filter { it.type == KerugiBoutEvents.SCORE_CANDIDATE || it.type == KerugiBoutEvents.OPERATOR_ACTION }
+            .filter { it.type == KerugiBoutEvents.SCORE_CANDIDATE || it.type == KerugiBoutEvents.OPERATOR_ACTION || it.isTanbonScore() }
             .map { it.eventId }
             .filter { it !in corrected && it !in resetTargets }
     }
@@ -247,6 +265,8 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
             val seat = seatOfJudge(event.judgeId.value)?.number
             val (competitor, detail) = when (event.type) {
                 KerugiBoutEvents.SCORE_CANDIDATE -> Json.decodeFromString<BoutScoreCandidatePayload>(event.payload)
+                    .let { it.competitor to it.area.name }
+                KerugiBoutEvents.TANBON_SCORE_CANDIDATE -> Json.decodeFromString<TanbonScoreCandidatePayload>(event.payload)
                     .let { it.competitor to it.area.name }
                 KerugiBoutEvents.OPERATOR_ACTION -> Json.decodeFromString<BoutOperatorActionPayload>(event.payload)
                     .let { it.competitor to "${it.type.name}:${it.points}" }
@@ -262,7 +282,8 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
             val status = when {
                 event.eventId in resetTargets -> BoutEntryStatus.RESET
                 event.eventId in corrected -> BoutEntryStatus.CORRECTED
-                event.type == KerugiBoutEvents.SCORE_CANDIDATE -> when {
+                event.type == KerugiBoutEvents.TANBON_SCORE_CANDIDATE && !event.isTanbonScore() -> BoutEntryStatus.AUDIT_ONLY
+                event.type == KerugiBoutEvents.SCORE_CANDIDATE || event.type == KerugiBoutEvents.TANBON_SCORE_CANDIDATE -> when {
                     event.eventId in outsideRunningPeriod -> BoutEntryStatus.OUTSIDE_RUNNING_PERIOD
                     windows[event.eventId] == KerugiWindowDecision.SCORE_AWARDED -> BoutEntryStatus.COUNTED
                     else -> BoutEntryStatus.NO_QUORUM
@@ -273,6 +294,10 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
             BoutHistoryEntry(event.eventId, event.type, event.occurredAt, event.author, seat, competitor, detail, status)
         }
     }
+
+    /** A Tanbon `HEAD` or `BODY` candidate; `CROSS` is not a score. */
+    private fun DomainEvent.isTanbonScore() = type == KerugiBoutEvents.TANBON_SCORE_CANDIDATE &&
+        Json.decodeFromString<TanbonScoreCandidatePayload>(payload).area != TanbonArea.CROSS
 
     companion object {
         fun start(event: SequencedDomainEvent): KerugiBout = KerugiBout(listOf(event))

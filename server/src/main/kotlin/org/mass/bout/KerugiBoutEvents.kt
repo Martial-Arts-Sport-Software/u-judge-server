@@ -33,10 +33,17 @@ object KerugiBoutEvents {
     /** The server stopped the clock on restore at the last saved time (ADR-010 §3). */
     const val CLOCK_STOPPED = "kerugi_clock_stopped"
 
+    /** A Tanbon bout (ADR-011 §3): the Kerugi pipeline with its own start and candidate events. */
+    const val TANBON_BOUT_STARTED = "tanbon_bout_started"
+    const val TANBON_SCORE_CANDIDATE = "tanbon_score_candidate"
+
+    val STARTS = setOf(BOUT_STARTED, TANBON_BOUT_STARTED)
+
     val ALL = setOf(
         BOUT_STARTED, SESSION_STARTED, SESSION_PAUSED, SESSION_RESUMED, SESSION_COMPLETED, SESSION_CANCELLED,
         SCORE_CANDIDATE, OPERATOR_ACTION, SCORE_CORRECTION, BOUT_RESET, DISQUALIFICATION_CONFIRMED, JUDGE_ATTENTION,
         PERIOD_ENDED, CLOCK_ADJUSTED, CLOCK_SAVED, CLOCK_STOPPED, JUDGE_READY,
+        TANBON_BOUT_STARTED, TANBON_SCORE_CANDIDATE,
     )
 
     const val JUDGE_SOURCE = "judge_device"
@@ -45,6 +52,12 @@ object KerugiBoutEvents {
     /** Events the server journals by itself: the timer expiry, the checkpoints and the restore stop. */
     const val SERVER_SOURCE = "server"
 }
+
+/** The bout disciplines of one pipeline; [code] is the snapshot's `discipline` (ADR-009 §3, ADR-011 §3). */
+enum class BoutDiscipline(val code: String) { KERUGI("kerugi"), TANBON("tanbon") }
+
+/** A Tanbon area: `HEAD` and `BODY` score as in Kerugi, `CROSS` is audit-only (`TAN-004`). */
+enum class TanbonArea(val scoring: KerugiScoringArea?) { HEAD(KerugiScoringArea.HEAD), BODY(KerugiScoringArea.BODY), CROSS(null) }
 
 @Serializable
 data class BoutAthlete(val fullName: String, val city: String)
@@ -80,6 +93,15 @@ data class KerugiBoutStartedPayload(
 data class BoutScoreCandidatePayload(
     val competitor: KerugiCompetitor,
     val area: KerugiScoringArea,
+    val clientTimestamp: String,
+    val sequence: Long,
+)
+
+/** A raw Tanbon tap; [competitor] is null exactly for `CROSS`. */
+@Serializable
+data class TanbonScoreCandidatePayload(
+    val competitor: KerugiCompetitor?,
+    val area: TanbonArea,
     val clientTimestamp: String,
     val sequence: Long,
 )

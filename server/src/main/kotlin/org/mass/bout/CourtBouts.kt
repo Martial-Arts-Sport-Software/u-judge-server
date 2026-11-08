@@ -64,8 +64,21 @@ class CourtBouts(
         .filter { !it.revoked && it.connectionState == DeviceConnectionState.CONNECTED }
         .map { ConnectedJudge(it.deviceId, it.surname, it.platform) }
 
-    /** «Начать» of the court panel: starts its next bout; [judges] are device IDs in seat order, all connected now. */
-    fun start(judges: List<String>, quorum: Int, coincidenceWindowMillis: Long, author: String): CourtBoutOutcome {
+    /** The discipline the first started bout of [categoryId] fixed (ADR-011 §3), or null before its first bout. */
+    fun disciplineOf(categoryId: String): BoutDiscipline? =
+        bouts.bouts().firstOrNull { it.started.categoryId == categoryId }?.discipline
+
+    /**
+     * «Начать» of the court panel: starts its next bout; [judges] are device IDs in seat order, all connected now. Tanbon
+     * bouts are bouts of a weight category whose first bout the operator started as Tanbon (ADR-011 §3).
+     */
+    fun start(
+        judges: List<String>,
+        quorum: Int,
+        coincidenceWindowMillis: Long,
+        author: String,
+        discipline: BoutDiscipline = BoutDiscipline.KERUGI,
+    ): CourtBoutOutcome {
         val board = draws.board()
         val competitionId = board.competitionId ?: return CourtBoutOutcome.Rejected(NO_COMPETITION)
         val bout = when (val next = courts.courtPanel().next) {
@@ -73,6 +86,9 @@ class CourtBouts(
             is CourtItem.Performance -> return CourtBoutOutcome.Rejected(NOT_KERUGI)
             is CourtItem.Bout -> next.takeIf { it.category.discipline == ApplicationDiscipline.KERUGI }
                 ?: return CourtBoutOutcome.Rejected(NOT_KERUGI)
+        }
+        disciplineOf(bout.category.id)?.takeIf { it != discipline }?.let {
+            return CourtBoutOutcome.Rejected(BoutRejection.DISCIPLINE_MISMATCH)
         }
         val connected = connectedJudges().associateBy(ConnectedJudge::deviceId)
         if (judges.any { it !in connected }) return CourtBoutOutcome.Rejected(JUDGE_NOT_CONNECTED)
@@ -91,6 +107,7 @@ class CourtBouts(
             quorum = quorum,
             coincidenceWindowMillis = coincidenceWindowMillis,
             timing = BoutTiming.of(bout.category.section.ageClass),
+            discipline = discipline,
         )
         bouts.startRejection(spec)?.let { return CourtBoutOutcome.Rejected(it) }
         if (board.category(bout.category.id)?.status == CategoryStatus.CONFIRMED) {

@@ -47,6 +47,7 @@ import org.mass.DeviceConnectionState
 import org.mass.Server
 import org.mass.State
 import org.mass.bout.BoutCommand
+import org.mass.bout.BoutDiscipline
 import org.mass.bout.BoutEntryStatus
 import org.mass.bout.BoutHistoryEntry
 import org.mass.bout.BoutStateAction
@@ -136,6 +137,11 @@ object BoutScreen : Screen {
         var seats by remember { mutableStateOf(listOf<String>()) }
         var quorum by remember { mutableStateOf("2") }
         var window by remember { mutableStateOf("1000") }
+        val nextCategory = (panel.next as? CourtItem.Bout)?.category?.id
+        // The first bout of a category fixes its discipline (ADR-011 §3); before it the operator picks Kerugi or Tanbon.
+        val fixedDiscipline = remember(court, boutRevision, nextCategory) { nextCategory?.let { court?.disciplineOf(it) } }
+        var chosenDiscipline by remember { mutableStateOf(BoutDiscipline.KERUGI) }
+        val discipline = fixedDiscipline ?: chosenDiscipline
 
         fun act(block: CourtBouts.() -> CourtBoutOutcome) {
             val target = court ?: return
@@ -187,11 +193,14 @@ object BoutScreen : Screen {
                             onQuorum = { quorum = it },
                             window = window,
                             onWindow = { window = it },
+                            discipline = discipline,
+                            disciplineFixed = fixedDiscipline != null,
+                            onDiscipline = { chosenDiscipline = it },
                             enabled = !busy && court != null,
                             onStart = {
                                 act {
                                     start(seats.filter { it in connected.map(ConnectedJudge::deviceId) }, quorum.toIntOrNull() ?: 0,
-                                        window.toLongOrNull() ?: 0, State.judgeSurname)
+                                        window.toLongOrNull() ?: 0, State.judgeSurname, discipline)
                                 }
                             },
                         )
@@ -342,6 +351,9 @@ object BoutScreen : Screen {
         onQuorum: (String) -> Unit,
         window: String,
         onWindow: (String) -> Unit,
+        discipline: BoutDiscipline,
+        disciplineFixed: Boolean,
+        onDiscipline: (BoutDiscipline) -> Unit,
         enabled: Boolean,
         onStart: () -> Unit,
     ) {
@@ -351,6 +363,22 @@ object BoutScreen : Screen {
             CourtPanelComponent(panel, onPick, Modifier.fillMaxWidth().height(260.dp), enabled = enabled, onStart = onStart.takeIf { startable })
         }
         if (panel.next == null) Hint(Localization.getString("bout_select_empty"))
+        if (panel.next is CourtItem.Performance) Hint(Localization.getString("i5_bout_next_is_performance"))
+        if (panel.next is CourtItem.Bout) {
+            PanelTitle(Localization.getString("i5_bout_discipline_title"))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BoutDiscipline.entries.forEach { option ->
+                    Box(Modifier.weight(1f)) {
+                        SelectableRow(
+                            text = Localization.getString("i5_bout_discipline_${option.code}"),
+                            detail = Localization.getString(if (disciplineFixed) "i5_bout_discipline_fixed" else "i5_bout_discipline_choose"),
+                            selected = option == discipline,
+                            onClick = { if (!disciplineFixed) onDiscipline(option) },
+                        )
+                    }
+                }
+            }
+        }
         PanelTitle(Localization.getString("bout_judges_title"))
         if (connected.isEmpty()) {
             Hint(Localization.getString("bout_judges_empty"))
@@ -420,7 +448,8 @@ object BoutScreen : Screen {
         val now = rememberNow()
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                Localization.getString("bout_number").replace("%d", bout.started.boutNumber.toString()) + " · " + bout.started.categoryTitle,
+                Localization.getString("bout_number").replace("%d", bout.started.boutNumber.toString()) + " · " +
+                    Localization.getString("i5_bout_discipline_${bout.discipline.code}") + " · " + bout.started.categoryTitle,
                 color = Color.White,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
@@ -469,14 +498,15 @@ object BoutScreen : Screen {
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     val scoring = enabled && (bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Tanbon has no throws, spins or Gamjeom (ADR-011 §3): its score comes from the judges only.
+                    if (bout.discipline == BoutDiscipline.KERUGI) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         (1..3).forEach { points ->
                             SmallButton(Localization.getString("bout_throw").replace("%d", points.toString()), scoring, Modifier.weight(1f)) {
                                 onAction(KerugiOperatorActionType.THROW, side, points)
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (bout.discipline == BoutDiscipline.KERUGI) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         SmallButton(Localization.getString("bout_spin"), scoring, Modifier.weight(1f)) {
                             onAction(KerugiOperatorActionType.SPIN_BONUS, side, 1)
                         }
@@ -487,6 +517,7 @@ object BoutScreen : Screen {
                 }
             }
         }
+        if (bout.discipline == BoutDiscipline.TANBON) Hint(Localization.getString("i5_bout_tanbon_hint"))
         score.warnings.forEach { warning ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -538,7 +569,10 @@ object BoutScreen : Screen {
     private fun History(bout: KerugiBout, enabled: Boolean, onUndo: (BoutHistoryEntry) -> Unit) {
         PanelTitle(Localization.getString("bout_history_title"))
         val entries = remember(bout) {
-            bout.history().filter { it.type == KerugiBoutEvents.SCORE_CANDIDATE || it.type == KerugiBoutEvents.OPERATOR_ACTION }.reversed()
+            bout.history().filter {
+                it.type == KerugiBoutEvents.SCORE_CANDIDATE || it.type == KerugiBoutEvents.TANBON_SCORE_CANDIDATE ||
+                    it.type == KerugiBoutEvents.OPERATOR_ACTION
+            }.reversed()
         }
         if (entries.isEmpty()) {
             Hint(Localization.getString("bout_history_empty"))
@@ -703,6 +737,9 @@ object BoutScreen : Screen {
             KerugiBoutEvents.SCORE_CANDIDATE -> Localization.getString("bout_entry_kerugi_score_candidate")
                 .replaceFirst("%s", entry.seat?.toString().orEmpty())
                 .replaceFirst("%s", "$side ${entry.detail}")
+            KerugiBoutEvents.TANBON_SCORE_CANDIDATE -> Localization.getString("bout_entry_kerugi_score_candidate")
+                .replaceFirst("%s", entry.seat?.toString().orEmpty())
+                .replaceFirst("%s", if (entry.competitor == null) Localization.getString("i5_bout_cross") else "$side ${entry.detail}")
             KerugiBoutEvents.OPERATOR_ACTION -> Localization.getString("bout_entry_kerugi_operator_action")
                 .replace("%s", "$side ${actionLabel(entry.detail)}")
             else -> Localization.getString("bout_entry_other").replace("%s", entry.detail)
@@ -727,6 +764,7 @@ object BoutScreen : Screen {
             BoutEntryStatus.RESET -> "bout_status_reset"
             BoutEntryStatus.APPLIED -> "bout_status_applied"
             BoutEntryStatus.RECORDED -> "bout_status_recorded"
+            BoutEntryStatus.AUDIT_ONLY -> "i5_bout_status_audit_only"
         },
     )
 
