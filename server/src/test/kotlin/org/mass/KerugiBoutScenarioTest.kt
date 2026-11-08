@@ -150,6 +150,48 @@ class KerugiBoutScenarioTest {
     }
 
     @Test
+    fun `judges move to the next bout on the same socket and a stale tap is refused`() = testApplication {
+        val hub = start()
+        val judges = (1..3).map { judge("android-$it").connect().also { judge -> judge.resync() } }
+        val first = assertIs<BoutOutcome.Applied>(hub.operator("Оператор", BoutCommand.StartBout(id(), spec()))).sessionId
+        judges.forEach { it.push("session_snapshot") }
+        hub.operator("Оператор", BoutCommand.ChangeState(id(), first, BoutStateAction.START))
+        judges.forEach { it.push("session_state_updated") }
+        val stale = judges[0].tap("BLUE", "HEAD", clock)
+        hub.operator("Оператор", BoutCommand.AwardAction(id(), first, KerugiOperatorActionType.THROW, KerugiCompetitor.BLUE, 1))
+        hub.operator("Оператор", BoutCommand.EndPeriod(id(), first))
+        hub.operator("Оператор", BoutCommand.ChangeState(id(), first, BoutStateAction.RESUME))
+        hub.operator("Оператор", BoutCommand.EndPeriod(id(), first))
+        hub.operator("Оператор", BoutCommand.CompleteBout(id(), first))
+        judges.forEach { judge ->
+            judge.push("kerugi_score_updated")
+            repeat(3) { judge.push("session_state_updated") }
+            assertEquals("completed", judge.push("session_state_updated").string("state"))
+        }
+
+        // «Начать» of the next bout: every judge gets the new session on the socket it already has (ADR-010 §7).
+        val next = spec().copy(boutNumber = 8, index = 1, judges = listOf(3, 1).map { RosterJudge("android-$it", "Судья$it") })
+        val second = assertIs<BoutOutcome.Applied>(hub.operator("Оператор", BoutCommand.StartBout(id(), next))).sessionId
+        val snapshots = judges.map { it.push("session_snapshot").getValue("session").jsonObject }
+        snapshots.forEach { assertEquals(second.value, it.string("sessionId")) }
+        assertEquals(8, snapshots[0].getValue("boutNumber").jsonPrimitive.int)
+        assertEquals(2, snapshots[0].getValue("seat").jsonObject.getValue("number").jsonPrimitive.int)
+        assertNull(snapshots[1]["seat"] as? JsonObject)
+        assertEquals(1, snapshots[2].getValue("seat").jsonObject.getValue("number").jsonPrimitive.int)
+        assertEquals(timer("round", 1, remaining = 120_000, running = false), snapshots[0].getValue("timer"))
+
+        // A tap built from the old snapshot is refused; the unseated judge has no seat to tap from.
+        assertEquals("session_closed", judges[0].command(stale).string("code"))
+        hub.operator("Оператор", BoutCommand.ChangeState(id(), second, BoutStateAction.START))
+        judges.forEach { assertEquals("running", it.push("session_state_updated").string("state")) }
+        assertEquals("command_ack", judges[0].command(judges[0].tap("RED", "HEAD", clock)).string("type"))
+        val foreign = JsonObject(scoreCommandFor(snapshots[0], id().value, clock) + ("deviceId" to JsonPrimitive("android-2")))
+        assertEquals("judge_not_assigned", judges[1].command(foreign).string("code"))
+        assertEquals(first, hub.bouts.bout(first)!!.sessionId)
+        assertEquals("BLUE", hub.bouts.bout(first)!!.result!!.winner.name)
+    }
+
+    @Test
     fun `a device without a seat, an unsubscribed socket and malformed or forbidden messages change nothing`() = testApplication {
         val hub = start()
         val seated = judge("android-1").connect()

@@ -154,6 +154,7 @@ class CourtBoutsTest {
         assertEquals(champion, restarted.results.getValue("kerugi-a").champion)
         assertEquals(CategoryProgress.COMPLETED, restarted.progress(restarted.draws.category("kerugi-a")!!))
         assertNull(courtOf(null).bouts.panel().next)
+        assertEquals(DrawOutcome.Rejected(DrawRejection.STARTED), courtOf(null).draws.shuffle("kerugi-a"))
     }
 
     /** Starts the next bout, runs both rounds with one throw for [winner] and fixes the result by the final score. */
