@@ -57,7 +57,7 @@ Pilot не считается production-ready до отдельного hardeni
   площадки с подключёнными судьями (server-часть I2a) и продвижение победителя по сетке (server-часть I2b) подтверждены
   тестами.
 - [ ] Gate G5: server-часть I5 (Tanbon, технические выступления, нормативные векторы) подтверждена тестами; client, emulator и
-  экспертное подтверждение векторов открыты.
+  заключение эксперта-судьи по векторам и чтению tie-break (решение 08.11.2026) открыты.
 - [ ] Gate G6: не готов.
 - [ ] Gate G7: не готов.
 - [ ] Gate G8: не готов.
@@ -246,14 +246,14 @@ desktop отложен до полного регресса этапа 7 (реш
 
 #### Доказательства I5 (server)
 
-Server issue [#136](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/136) поверх I2a #135, client
+Server issue [#136](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/136) поверх I2b #138 (I2a #135), client
 issue [u-judge-client#125](https://github.com/Martial-Arts-Sport-Software/u-judge-client/issues/125), контракт
 [ADR-011](adr/ADR-011-tanbon-technical-contract.md). Сценарий доказан acceptance tests на production `module()` и JDBC journal:
 три `JudgeSimulator` судят бой Tanbon (`TanbonBoutScenarioTest`) и выступление Hosinsool с повтором, конфликтом, потерянным
-ACK, `Send` после disconnect, restart и отказами (`TechnicalPerformanceScenarioTest`); старт выступления и боя Tanbon с панели
-площадки, места категории и restart (`CourtBoutsTest`); restart PostgreSQL 18.6 (`RealPostgresLifecycleTest`). Нормативные
+ACK, `Send` после disconnect, restart и отказами (`TechnicalPerformanceScenarioTest`); категории Tanbon из листа «Танбон» заявок (`ApplicationTemplateV1ReaderTest`), старт выступления и боя
+Tanbon с панели площадки, места категории и restart (`CourtBoutsTest`); restart PostgreSQL 18.6 (`RealPostgresLifecycleTest`). Нормативные
 векторы `technical_test_vectors` общие с client. Строка I5 и gate G5 остаются открытыми: client PR, прогон судей на emulator и
-подтверждение векторов судьёй-экспертом. Ручной прогон desktop отложен до полного регресса этапа 7 (решение 08.11.2026).
+заключение эксперта-судьи по нормативным векторам и чтению tie-break и округления (решение 08.11.2026). Ручной прогон desktop отложен до полного регресса этапа 7 (решение 08.11.2026).
 
 | Requirement | Статус | Доказательство |
 |-------------|--------|----------------|
@@ -261,22 +261,22 @@ ACK, `Send` после disconnect, restart и отказами (`TechnicalPerfor
 | `TAN-002` | Implemented | `HEAD` даёт `2` выбранному участнику при кворуме (`TanbonBoutServiceTest`, `TanbonBoutScenarioTest`) |
 | `TAN-003` | Implemented | `BODY` даёт `1` выбранному участнику при кворуме (`TanbonBoutServiceTest`, `TanbonBoutScenarioTest`) |
 | `TAN-004` | Implemented | `tanbon_score_command` с `CROSS` и `competitor: null` получает ACK, хранится со статусом «аудит», не меняет счёт, не корректируется и не сбрасывается (`TanbonBoutServiceTest`, `TanbonBoutScenarioTest`, `RealPostgresLifecycleTest`) |
-| `TAN-005` | Partial | Команды Kerugi, Tanbon и технических выступлений к сессии другой дисциплины - `discipline_mismatch`; категория закрепляется за дисциплиной первого боя (`TanbonBoutServiceTest`, `TechnicalPerformanceScenarioTest`, `CourtBoutsTest`); экран desktop без ручного прогона (этап 7) |
+| `TAN-005` | Partial | Команды Kerugi, Tanbon и технических выступлений к сессии другой дисциплины - `discipline_mismatch`; дисциплина боя берётся из листа заявки «Весовая категория» или «Танбон» (`TanbonBoutServiceTest`, `TechnicalPerformanceScenarioTest`, `CourtBoutsTest`, `ApplicationTemplateV1ReaderTest`); экран desktop без ручного прогона (этап 7) |
 | `TEC-001` | Implemented | Семь дисциплин по листам заявок и оружию, наборы критериев по ADR-011 §4 (`CourtBoutsTest`, `TechnicalScoringTest`) |
 | `TEC-002` | Partial | Server отклоняет критерий вне `0.1..1.0`, в том числе `0.0` (`TechnicalScoringTest`, `TechnicalPerformanceScenarioTest`); UI - client PR |
 | `TEC-003` | Implemented | Hosinsool и Pair: 4 критерия техники для «Младшие юноши»/«Юноши», 6 для старших, максимум `4.0`/`6.0` (`TechnicalScoringTest`, `CourtBoutsTest`) |
 | `TEC-004` | Implemented | Презентация - 4 критерия, максимум `4.0` (`TechnicalScoringTest`) |
 | `TEC-005` | Implemented | Group и четыре weapon-дисциплины - 6 критериев техники, максимум `6.0` (`TechnicalScoringTest`) |
 | `TEC-006` | Implemented | Штраф `−0.3` и бонус `+0.2` за два предмета - отдельные события с основанием и автором, снятие - компенсирующее событие (`TechnicalPerformanceServiceTest`) |
-| `TEC-007` | Partial | Итог судьи и выступления в целых десятых по нормативным векторам и property tests (`TechnicalScoringTest`); server проверяет локальный итог client (`total_mismatch`); совпадение на client - client PR |
+| `TEC-007` | Partial | Итог судьи и выступления в целых десятых по нормативным векторам и property tests (`TechnicalScoringTest`); server проверяет локальный итог client (`total_mismatch`); совпадение на client - client PR. Ожидает заключения эксперта-судьи (ADR-011 §8). |
 | `TEC-008` | Implemented | Одна оценка на место: повтор того же события - тот же ACK, изменённый - `event_id_conflict`, вторая оценка - `score_already_sent`, также после restart (`TechnicalPerformanceServiceTest`, `TechnicalPerformanceScenarioTest`, `RealPostgresLifecycleTest`) |
 | `TEC-009` | Implemented | Журнал хранит векторы критериев, вычет и итог судьи; итог выступления пересчитывается из них (`TechnicalPerformanceServiceTest`) |
 | `TEC-010` | Implemented | Число судей (1-7) и формула фиксируются в `technical_performance_started` и snapshot до первой оценки (`TechnicalPerformanceServiceTest`, `ContractFixturesTest`) |
-| `TEC-011` | Implemented | По умолчанию без min и max, среднее остальных; при пяти оценках делитель 3 (`TechnicalScoringTest`) |
+| `TEC-011` | Partial | По умолчанию без min и max, среднее остальных; при пяти оценках делитель 3 (`TechnicalScoringTest`). Ожидает заключения эксперта-судьи (ADR-011 §8). |
 | `TEC-012` | Implemented | Делитель в результате и событии завершения для 1-7 судей и неполного состава (`TechnicalScoringTest`, `TechnicalPerformanceServiceTest`) |
-| `TEC-013` | Implemented | Места по итогу, затем по технике (Hosinsool) или презентации, затем по сумме этой части; полное равенство помечается для голосования бригады (`TechnicalScoringTest`, `CourtBoutsTest`) |
+| `TEC-013` | Partial | Места по итогу, затем по технике (Hosinsool) или презентации, затем по сумме этой части; полное равенство помечается для голосования бригады (`TechnicalScoringTest`, `CourtBoutsTest`). Ожидает заключения эксперта-судьи (ADR-011 §8). |
 | `TEC-014` | Partial | Завершение без оценки места требует причины и достаточного числа оценок, недостающие места записываются (`TechnicalPerformanceServiceTest`); экран мест на desktop без ручного прогона (этап 7) |
-| `NFR-011` | Implemented | Нормативные примеры и граничные случаи для всех семи технических дисциплин, Kerugi и Tanbon (`TechnicalScoringTest`, `KerugiScoringTest`, `TanbonBoutServiceTest`); подтверждение векторов экспертом - gate G5 |
+| `NFR-011` | Partial | Нормативные примеры и граничные случаи для всех семи технических дисциплин, Kerugi и Tanbon (`TechnicalScoringTest`, `KerugiScoringTest`, `TanbonBoutServiceTest`); подтверждение векторов экспертом - gate G5. Ожидает заключения эксперта-судьи (ADR-011 §8). |
 
 Технические задачи, обязательные внутри инкрементов:
 
@@ -558,9 +558,10 @@ Kerugi работает end-to-end на реальных Android/iPhone клие
 
 ### Накопленное server-only доказательство
 
-Tanbon на pipeline боя, технические выступления, нормативные векторы и contract fixtures
+Лист «Танбон» в заявках, Tanbon на pipeline боя, технические выступления, нормативные векторы и contract fixtures
 ([ADR-011](adr/ADR-011-tanbon-technical-contract.md)); статусы требований - в «Доказательства I5 (server)». Открыто:
-client, прогон на emulator, подтверждение векторов экспертом, ручной прогон desktop (этап 7).
+client, прогон на emulator, заключение эксперта-судьи по векторам и чтению tie-break (решение 08.11.2026), ручной прогон
+desktop (этап 7).
 
 ## 10. Этап 6: отчётность, backup и локализация
 

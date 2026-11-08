@@ -5,8 +5,9 @@
 - Increment: I5 «Остальные дисциплины» (`docs/ROADMAP.md`)
 - Requirements: `TAN-001`-`TAN-005`, `TEC-001`-`TEC-014`, `NFR-011`; client `CLI-021`, `CLI-031`, `CLI-042`, `CLI-044`,
   `CLI-045`, `CLI-048`-`CLI-053`
-- Additive to: [ADR-009](ADR-009-kerugi-bout-contract.md) (every rule of it holds unless this ADR names an addition);
-  numbering and the court panel of [ADR-008](ADR-008-courts-numbering-protocols.md) §6, §9
+- Additive to: [ADR-009](ADR-009-kerugi-bout-contract.md) (every rule of it holds unless this ADR names an addition) and
+  [ADR-010](ADR-010-kerugi-timer-advancement.md) (the bout timer); numbering and the court panel of
+  [ADR-008](ADR-008-courts-numbering-protocols.md) §6, §9; the Tanbon sheet amends [ADR-005](ADR-005-application-import.md)
 
 ## Context
 
@@ -33,17 +34,19 @@ discipline; `cursor` is the journal sequence of the latest session event of eith
 
 ### 3. Tanbon
 
-- **Source.** Tanbon bouts are bouts of «Весовая категория» brackets. At «Начать» the operator chooses Kerugi (default) or
-  Tanbon. The first started bout of a category fixes its discipline: a later bout of that category with the other one is
-  rejected with `discipline_mismatch` on the desktop.
+- **Source (owner decision of 08.11.2026).** Tanbon categories come from the separate sheet «Танбон» of the applications,
+  laid out like «Весовая категория» (one athlete per row, weight `до|свыше N кг`, the same field rules and error report; ADR-005
+  amendment). They are drawn as brackets like Kerugi and are Tanbon from the start: «Начать» starts a bout of a «Танбон»
+  category as Tanbon and a bout of a «Весовая категория» category as Kerugi. The operator does not choose the discipline.
 - **Pipeline.** The bout aggregate of ADR-009 with roster (2-3 seats), quorum, coincidence window, seat hold, states,
-  `clientTimestamp` windows, the running-period rule, corrections, the reset, the result by final score and
-  `judge_attention_command` (`TAN-001`). Journal events: `tanbon_bout_started` (payload as `kerugi_bout_started`) and
+  `clientTimestamp` windows, the running-period rule, corrections, the reset, the result, `judge_attention_command`
+  (`TAN-001`) and the timer, rounds, golden round and advancement of ADR-010, with the same `session.timer`. Journal events: `tanbon_bout_started` (payload as `kerugi_bout_started`) and
   `tanbon_score_candidate`; all other events are the shared session and bout events.
 - **Scoring.** `HEAD = 2`, `BODY = 1` (`TAN-002`, `TAN-003`). `CROSS` is journaled, acknowledged and shown in the
   history as audit-only; it never changes `score`, cannot be corrected and is not compensated by a reset (`TAN-004`).
-- **Operator.** Tanbon defines only `HEAD`, `BODY` and `CROSS`; throws, spin bonuses, Gamjeom and the disqualification are
-  Kerugi rules and are rejected with `discipline_mismatch` for a Tanbon bout (open question below).
+- **Operator (owner decision of 08.11.2026).** Tanbon in the pilot has only `HEAD = 2`, `BODY = 1` and the audit-only
+  `CROSS`: throws, spin bonuses, Gamjeom and the disqualification are Kerugi rules and are rejected with
+  `discipline_mismatch` for a Tanbon bout.
 - **Snapshot.** ADR-009 §3 unchanged with `"discipline": "tanbon"`; `score.gamjeom` is `0`/`0`, `warnings` is empty and
   `disqualified` is `null`.
 - **Command.** `tanbon_score_command` is the ADR-009 §6 envelope and audit context with `competitor` and `area`:
@@ -205,8 +208,12 @@ the same total (`TEC-007`).
    same formula (technique for Hosinsool, presentation for the others), then `K2`, the plain sum of those parts over all
    judges. Entries equal in `F`, `K1` and `K2` share the place and are marked for the panel vote, which is not automated.
 
-The normative vectors are the fixture `technical_test_vectors`; the server and the client test against the same file. Gate
-G5 still needs their confirmation by an expert judge.
+The normative vectors are the fixture `technical_test_vectors`; the server and the client test against the same file.
+
+**Expert review (owner decision of 08.11.2026).** The reading of FHR §4.2.9, §4.3.8, §4.4.8 and §4.5.8 above (the tie-break
+keys `K1` and `K2`, the half-up rounding of the aggregate to `0.1`) and the normative vectors are reviewed by an expert judge.
+Until the expert's conclusion gate G5 stays open and the requirements that rest on this reading stay `Partial`; a correction
+changes the vectors first, then both implementations.
 
 ### 9. Completion (`TEC-014`)
 
@@ -228,7 +235,7 @@ A Send that arrives after completion is `session_closed`.
 
 Pushed to every subscribed socket when the score object of the current performance changes: a Send or the completion
 (adjustments change the result only, which judges see at completion). `session_state_updated` follows every operator
-transition with `result: null`.
+transition with `result: null` and without the `timer` of ADR-010, which exists only for bouts.
 
 ### 11. Dispatcher
 
@@ -247,12 +254,11 @@ message). `metadata_response` gains the two capabilities. The client syncs them 
 
 ## Consequences
 
-- Tanbon needs no application sheet; the operator's choice at the first bout of a category is journaled with it.
+- The applications template gains the optional sheet «Танбон»; files without it stay valid.
 - The client keeps one decoder per session shape and must not assume Kerugi fields in every snapshot.
 - Equal sums rely on integer tenths on both sides; a `Float` total can no longer reach the wire.
 
 ## Open questions
 
-- Whether Tanbon has penalties or other operator points (for now none; the rule owner decides).
-- Expert confirmation of the normative vectors and of the tie-break reading of FHR §4.2.9, §4.3.8 (gate G5).
+- The expert judge's conclusion on the normative vectors and the tie-break and rounding reading (gate G5).
 - Per-category result protocols and exports (I6).

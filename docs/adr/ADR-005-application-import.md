@@ -80,3 +80,12 @@ The accompanying «Требования к заполнению заявок» (
 ## Open questions
 
 - A real anonymised filled application for the acceptance of `IMP-001`.
+
+## Amendment of 08.11.2026: the Tanbon sheet
+
+Owner decision for I5 ([ADR-011](ADR-011-tanbon-technical-contract.md) §3): a file of `df-template-v1` may have a sixth
+sheet `Танбон`, laid out like `Весовая категория` (the same headers, one athlete per row, weight `до N кг` / `свыше N кг`).
+Its rows follow every field rule of decision 3 and report errors with file, sheet, row, column, value and reason; its
+categories are discipline `TANBON` (discipline + age group + sex + weight) and are drawn as brackets like Kerugi. The sheet
+is optional: files with only the five original sheets stay valid, any other extra sheet is still rejected. The reader
+version stays `df-template-v1`, since every earlier file reads the same. Evidence: `ApplicationTemplateV1ReaderTest`.
