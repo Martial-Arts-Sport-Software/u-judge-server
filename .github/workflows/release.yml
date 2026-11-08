@@ -1,65 +1,153 @@
 name: Build Installers
 
+# Manual only. Builds the installers on clean GitHub runners, installs each one, runs the headless `--smoke-test`
+# (bundled server + managed PostgreSQL, health over pinned TLS, stop) twice against one data directory and uninstalls.
+# The installers and smoke reports are kept as workflow artifacts; nothing is released or published.
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   macos:
+    name: macOS DMG
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: Build macOS installer (.dmg)
-        run: ./gradlew packageDistributionForCurrentOS
+        run: ./gradlew :desktop:packageDistributionForCurrentOS
+
+      - name: Install, smoke-test and uninstall the DMG
+        run: |
+          set -euo pipefail
+          sw_vers
+          dmg=$(ls desktop/build/compose/binaries/main/dmg/*.dmg)
+          ls -l "$dmg"
+          mount="$RUNNER_TEMP/ujudge-dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
+          cp -R "$mount/UJudgeServer.app" /Applications/
+          hdiutil detach "$mount"
+          app=/Applications/UJudgeServer.app/Contents/MacOS/UJudgeServer
+          data="$RUNNER_TEMP/ujudge-data"
+          mkdir -p smoke
+          for run in 1 2; do
+            "$app" --smoke-test --data-directory="$data" --report="smoke/macos-run-$run.txt"
+          done
+          test "$(grep '^peerId=' smoke/macos-run-1.txt)" = "$(grep '^peerId=' smoke/macos-run-2.txt)"
+          cp -R "$data/logs" smoke/macos-logs
+          rm -rf /Applications/UJudgeServer.app "$data"
+          test ! -e /Applications/UJudgeServer.app
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
           path: desktop/build/compose/binaries/main/dmg/*.dmg
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-smoke
+          path: smoke/
+          if-no-files-found: ignore
 
   windows:
+    name: Windows MSI
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: Build Windows installer (.msi)
-        run: gradlew.bat packageDistributionForCurrentOS
+        run: ./gradlew.bat :desktop:packageDistributionForCurrentOS
+
+      - name: Install, smoke-test and uninstall the MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [System.Environment]::OSVersion.VersionString
+          $msi = (Get-ChildItem desktop/build/compose/binaries/main/msi/*.msi | Select-Object -First 1).FullName
+          Get-Item $msi | Format-List Name, Length
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          $install = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /l*v `"$PWD\smoke\windows-install.log`"" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "msiexec /i exited with $($install.ExitCode)" }
+          $exe = Get-ChildItem -Path $env:ProgramFiles, $env:LOCALAPPDATA -Filter UJudgeServer.exe -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -eq $exe) { throw "UJudgeServer.exe was not installed" }
+          "Installed: $($exe.FullName)"
+          $data = "$env:RUNNER_TEMP\ujudge-data"
+          foreach ($run in 1, 2) {
+            $report = "$PWD\smoke\windows-run-$run.txt"
+            $check = Start-Process $exe.FullName -ArgumentList "--smoke-test --data-directory=`"$data`" --report=`"$report`"" -Wait -PassThru
+            if (Test-Path $report) { Get-Content $report }
+            if ($check.ExitCode -ne 0) { throw "Smoke test run $run exited with $($check.ExitCode)" }
+          }
+          $peer1 = Select-String -Path smoke\windows-run-1.txt -Pattern '^peerId='
+          $peer2 = Select-String -Path smoke\windows-run-2.txt -Pattern '^peerId='
+          if ($peer1.Line -ne $peer2.Line) { throw "The peer ID changed between runs" }
+          Copy-Item -Recurse "$data\logs" smoke\windows-logs
+          $uninstall = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "msiexec /x exited with $($uninstall.ExitCode)" }
+          if (Test-Path $exe.FullName) { throw "UJudgeServer.exe is still installed" }
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-msi
           path: desktop/build/compose/binaries/main/msi/*.msi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-smoke
+          path: smoke/
+          if-no-files-found: ignore
 
   linux:
+    name: Linux DEB
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: Build Linux installer (.deb)
-        run: ./gradlew packageDistributionForCurrentOS
+        run: ./gradlew :desktop:packageDistributionForCurrentOS
+
+      - name: Install, smoke-test and uninstall the DEB
+        run: |
+          set -euo pipefail
+          deb=$(ls desktop/build/compose/binaries/main/deb/*.deb)
+          package=$(dpkg-deb -f "$deb" Package)
+          sudo apt-get install -y "./$deb"
+          app=$(dpkg -L "$package" | grep '/bin/UJudgeServer$')
+          data="$RUNNER_TEMP/ujudge-data"
+          mkdir -p smoke
+          for run in 1 2; do
+            "$app" --smoke-test --data-directory="$data" --report="smoke/linux-run-$run.txt"
+          done
+          test "$(grep '^peerId=' smoke/linux-run-1.txt)" = "$(grep '^peerId=' smoke/linux-run-2.txt)"
+          cp -R "$data/logs" smoke/linux-logs
+          sudo dpkg -r "$package"
+          test ! -e "$app"
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-deb
           path: desktop/build/compose/binaries/main/deb/*.deb
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-smoke
+          path: smoke/
+          if-no-files-found: ignore
