@@ -4,7 +4,17 @@ import org.mass.DeviceConnectionState
 import org.mass.PairingRequests
 import org.mass.RealtimeHub
 import org.mass.SessionView
+import org.mass.applications.AgeClass
+import org.mass.applications.ApplicationCategory
 import org.mass.applications.ApplicationDiscipline
+import org.mass.applications.Weapon
+import org.mass.domain.AggregationFormula
+import org.mass.domain.TechnicalDiscipline
+import org.mass.domain.TechnicalPlace
+import org.mass.domain.TechnicalScoring
+import org.mass.performance.PerformanceCommand
+import org.mass.performance.PerformanceStartSpec
+import org.mass.performance.TechnicalPerformance
 import org.mass.applications.CategoryEntry
 import org.mass.domain.CompetitionId
 import org.mass.domain.EventId
@@ -110,6 +120,7 @@ class CourtBouts(
             discipline = discipline,
         )
         bouts.startRejection(spec)?.let { return CourtBoutOutcome.Rejected(it) }
+        if (realtime.courtBusy()) return CourtBoutOutcome.Rejected(BoutRejection.BOUT_IN_PROGRESS)
         if (board.category(bout.category.id)?.status == CategoryStatus.CONFIRMED) {
             when (val locked = draws.start(bout.category.id)) {
                 DrawOutcome.Done -> Unit
@@ -120,9 +131,60 @@ class CourtBouts(
         return command(author, BoutCommand.StartBout(EventId.new(), spec))
     }
 
+    /**
+     * «Начать» for a performance of the court panel (ADR-011 §5): [judges] are 1-7 connected device IDs in seat order and
+     * [formula] the aggregation fixed for the performance. Locks the category's draw on its first performance.
+     */
+    fun startPerformance(judges: List<String>, formula: AggregationFormula, author: String): CourtBoutOutcome {
+        val board = draws.board()
+        val competitionId = board.competitionId ?: return CourtBoutOutcome.Rejected(NO_COMPETITION)
+        val item = courts.courtPanel().next as? CourtItem.Performance ?: return CourtBoutOutcome.Rejected(NOT_PERFORMANCE)
+        val discipline = technicalDiscipline(item.category) ?: return CourtBoutOutcome.Rejected(NOT_PERFORMANCE)
+        val connected = connectedJudges().associateBy(ConnectedJudge::deviceId)
+        if (judges.any { it !in connected }) return CourtBoutOutcome.Rejected(JUDGE_NOT_CONNECTED)
+        if (realtime.courtBusy()) return CourtBoutOutcome.Rejected(BoutRejection.BOUT_IN_PROGRESS)
+        val spec = PerformanceStartSpec(
+            competitionId = CompetitionId(competitionId),
+            bracketId = item.bracketId,
+            categoryId = item.category.id,
+            categoryTitle = item.category.title,
+            performanceNumber = item.number,
+            round = item.ref.round,
+            index = item.ref.index,
+            entry = corner(item.entry),
+            discipline = discipline,
+            techniqueCriteria = discipline.techniqueCriteria(younger = item.category.section.ageClass in YOUNGER_CLASSES),
+            judges = judges.map { RosterJudge(it, connected.getValue(it).surname) },
+            courtNumber = item.court,
+            formula = formula,
+        )
+        realtime.performances.startRejection(spec)?.let { return CourtBoutOutcome.Rejected(it) }
+        if (board.category(item.category.id)?.status == CategoryStatus.CONFIRMED) {
+            when (val locked = draws.start(item.category.id)) {
+                DrawOutcome.Done -> Unit
+                is DrawOutcome.Failed -> return CourtBoutOutcome.Failed(locked.diagnostic)
+                is DrawOutcome.Rejected -> return CourtBoutOutcome.Rejected(NOT_CONFIRMED)
+            }
+        }
+        return performanceCommand(author, PerformanceCommand.Start(EventId.new(), spec))
+    }
+
+    /** Any other operator action on the current performance. */
+    fun performanceCommand(author: String, command: PerformanceCommand.FromOperator): CourtBoutOutcome =
+        outcomeOf(realtime.performanceOperator(author, command))
+
+    /** Results of the category's completed performances by place (ADR-011 §8, `TEC-013`). */
+    fun standings(categoryId: String): List<TechnicalPlace<TechnicalPerformance>> = TechnicalScoring.rank(
+        realtime.performances.performances()
+            .filter { it.started.categoryId == categoryId }
+            .mapNotNull { performance -> performance.result()?.let { performance to it } },
+    )
+
     /** Any other operator action on the current bout. */
-    fun command(author: String, command: BoutCommand.FromOperator): CourtBoutOutcome =
-        when (val outcome = realtime.operator(author, command)) {
+    fun command(author: String, command: BoutCommand.FromOperator): CourtBoutOutcome = outcomeOf(realtime.operator(author, command))
+
+    private fun outcomeOf(outcome: BoutOutcome): CourtBoutOutcome =
+        when (outcome) {
             is BoutOutcome.Applied -> CourtBoutOutcome.Done(outcome)
             is BoutOutcome.Rejected -> if (outcome.code == BoutRejection.JOURNAL_UNAVAILABLE) {
                 CourtBoutOutcome.Failed(outcome.code)
@@ -137,6 +199,41 @@ class CourtBouts(
         const val JUDGE_NOT_CONNECTED = "judge_not_connected"
         const val NO_NEXT_BOUT = "no_next_bout"
         const val NOT_KERUGI = "not_kerugi"
+        const val NOT_PERFORMANCE = "not_performance"
+
+        /** «Младшие юноши» and «Юноши» perform 4 technical rounds in Hosinsool and Pair (FHR §4.2.5, `TEC-003`). */
+        private val YOUNGER_CLASSES = setOf(AgeClass.YOUNGER, AgeClass.YOUTH)
+
+        /** The technical discipline of a category by its application sheet and weapon (ADR-011 §4). */
+        fun technicalDiscipline(category: ApplicationCategory): TechnicalDiscipline? = when (category.discipline) {
+            ApplicationDiscipline.KERUGI -> null
+            ApplicationDiscipline.SELF_DEFENSE -> TechnicalDiscipline.HOSINSOOL
+            ApplicationDiscipline.STAGED_PAIR -> TechnicalDiscipline.PAIR_FREESTYLE
+            ApplicationDiscipline.STAGED_GROUP -> TechnicalDiscipline.GROUP_FREESTYLE
+            ApplicationDiscipline.FREE_FORM -> when (category.weapon) {
+                Weapon.SWORD -> TechnicalDiscipline.SWORD
+                Weapon.STAFF -> TechnicalDiscipline.POLE
+                Weapon.DOUBLE_NUNCHAKU -> TechnicalDiscipline.PAIRED_NUNCHAKU
+                Weapon.FANS -> TechnicalDiscipline.PAIRED_FANS
+                null -> null
+            }
+        }
+
+        /** The court panel's view of both kinds of sessions: the current one (unless cancelled) and the decided ones. */
+        fun progress(hub: RealtimeHub): CourtProgress {
+            val bout = hub.bouts.current()
+            val performance = hub.performances.current()
+            val current = when {
+                performance != null && (bout == null || bout.startSequence < performance.startSequence) ->
+                    performance.takeIf { it.state != SessionState.CANCELLED }
+                        ?.let { ItemRef(it.started.categoryId, it.started.round, it.started.index) }
+                else -> bout?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf)
+            }
+            val judged = progress(hub.bouts).judged + hub.performances.performances()
+                .filter { it.state == SessionState.COMPLETED }
+                .map { ItemRef(it.started.categoryId, it.started.round, it.started.index) }
+            return CourtProgress(current, judged)
+        }
 
         /**
          * The court panel's view of the bouts: the current one (unless cancelled), the decided ones and their results, which

@@ -8,6 +8,7 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -77,6 +78,41 @@ class JudgeSimulator(private val client: HttpClient, private val credential: Str
         }
     }
 
+    /** A `tanbon_score_command` built from the current snapshot; [competitor] is null for `CROSS` (ADR-011 §3). */
+    fun tanbon(competitor: String?, area: String, at: Instant, eventId: String = UUID.randomUUID().toString()): JsonObject =
+        JsonObject(tap(competitor ?: "BLUE", area, at, eventId) + ("type" to JsonPrimitive("tanbon_score_command")) +
+            ("competitor" to (competitor?.let(::JsonPrimitive) ?: JsonNull)))
+
+    /** A `technical_score_send_command` of the seat from the current snapshot (ADR-011 §7), with the local total. */
+    fun technical(
+        technique: List<Int>,
+        presentation: List<Int>,
+        deduction: Int,
+        at: Instant,
+        eventId: String = UUID.randomUUID().toString(),
+        total: Int = maxOf(0, technique.sum() + presentation.sum() - deduction),
+    ): JsonObject {
+        val current = requireNotNull(session) { "No session to judge" }
+        val seat = current.getValue("seat").jsonObject
+        return buildJsonObject {
+            put("type", "technical_score_send_command")
+            put("eventId", eventId)
+            put("sequence", sequence++)
+            put("clientTimestamp", at.toString())
+            listOf("competitionId", "peerId", "courtId", "bracketId", "sessionId").forEach { put(it, current.string(it)) }
+            put("judgeId", seat.string("judgeId"))
+            put("deviceId", seat.string("deviceId"))
+            put("discipline", current.string("discipline"))
+            put("techniqueTenths", JsonArray(technique.map(::JsonPrimitive)))
+            put("presentationTenths", JsonArray(presentation.map(::JsonPrimitive)))
+            put("deductionTenths", deduction)
+            put("totalTenths", total)
+        }
+    }
+
+    /** Sends a frame without waiting for its reply, as a phone does just before it loses the connection. */
+    suspend fun fire(command: JsonObject) = send(command.toString())
+
     /** Sends a command and returns its reply (`command_ack` or `command_rejected`), keeping pushes for later. */
     suspend fun command(command: JsonObject): JsonObject {
         send(command.toString())
@@ -108,7 +144,7 @@ class JudgeSimulator(private val client: HttpClient, private val credential: Str
                 session = session?.let { JsonObject(it + ("state" to message.getValue("state")) + ("result" to message.getValue("result"))) }
                 cursor = messageCursor
             }
-            "kerugi_score_updated" -> if (cursor == null || messageCursor > cursor!!) {
+            "kerugi_score_updated", "tanbon_score_updated", "technical_score_updated" -> if (cursor == null || messageCursor > cursor!!) {
                 session = session?.let { JsonObject(it + ("score" to message.getValue("score"))) }
                 cursor = messageCursor
             }

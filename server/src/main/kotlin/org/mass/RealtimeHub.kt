@@ -4,7 +4,14 @@ import kotlinx.coroutines.channels.SendChannel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 import org.mass.bout.BoutChange
+import org.mass.bout.BoutRejection
+import org.mass.domain.JudgeVector
+import org.mass.performance.PerformanceCommand
+import org.mass.performance.TechnicalPerformance
+import org.mass.performance.TechnicalPerformanceService
 import org.mass.bout.BoutDiscipline
 import org.mass.bout.TanbonArea
 import org.mass.bout.BoutCommand
@@ -159,10 +166,10 @@ data class SessionView(
 )
 
 @Serializable
-data class SessionSnapshotMessage(val type: String, val cursor: Long, val session: SessionView?)
+data class SessionSnapshotMessage(val type: String, val cursor: Long, val session: JsonElement?)
 
 @Serializable
-data class ResyncResponseMessage(val type: String, val requestId: String, val cursor: Long, val session: SessionView?)
+data class ResyncResponseMessage(val type: String, val requestId: String, val cursor: Long, val session: JsonElement?)
 
 @Serializable
 data class SessionStateUpdatedMessage(
@@ -181,6 +188,77 @@ data class KerugiTimerUpdatedMessage(val type: String, val sessionId: String, va
 @Serializable
 data class KerugiScoreUpdatedMessage(val type: String, val sessionId: String, val cursor: Long, val score: ScoreView)
 
+/** ADR-011 §7: one judge's final vector in tenths with the client's local total. */
+@Serializable
+data class TechnicalScoreSendCommandMessage(
+    val type: String,
+    val eventId: String,
+    val sequence: Long,
+    val clientTimestamp: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val bracketId: String,
+    val sessionId: String,
+    val judgeId: String,
+    val deviceId: String,
+    val discipline: String,
+    val techniqueTenths: List<Int>,
+    val presentationTenths: List<Int>,
+    val deductionTenths: Int,
+    val totalTenths: Int,
+)
+
+@Serializable
+data class TechnicalSettingsView(val judgeCount: Int, val formula: String)
+
+@Serializable
+data class TechnicalCriteriaView(val technique: Int, val presentation: Int, val deductionStepTenths: Int)
+
+@Serializable
+data class TechnicalSentView(
+    val eventId: String,
+    val techniqueTenths: List<Int>,
+    val presentationTenths: List<Int>,
+    val deductionTenths: Int,
+    val totalTenths: Int,
+)
+
+@Serializable
+data class TechnicalResultView(val totalTenths: Int, val aggregateTenths: Int, val adjustmentTenths: Int, val divisor: Int, val formula: String)
+
+@Serializable
+data class TechnicalScoreView(val submittedSeats: List<Int>, val result: TechnicalResultView?)
+
+/** The technical session body of ADR-011 §6; `result` is always null, the result is `score.result`. */
+@Serializable
+data class TechnicalSessionView(
+    val sessionId: String,
+    val discipline: String,
+    val competitionId: String,
+    val peerId: String,
+    val courtId: String,
+    val courtNumber: Int,
+    val bracketId: String,
+    val categoryTitle: String,
+    val performanceNumber: Int,
+    val state: String,
+    val entry: SideView,
+    val settings: TechnicalSettingsView,
+    val criteria: TechnicalCriteriaView,
+    val seat: SeatView?,
+    val sent: TechnicalSentView?,
+    val score: TechnicalScoreView,
+    val result: ResultView?,
+)
+
+/** `session_state_updated` of a technical session: the bout timer of ADR-010 does not exist there, `result` is null. */
+@Serializable
+data class TechnicalStateUpdatedMessage(val type: String, val sessionId: String, val cursor: Long, val state: String, val result: ResultView?)
+
+@Serializable
+data class TechnicalScoreUpdatedMessage(val type: String, val sessionId: String, val cursor: Long, val score: TechnicalScoreView)
+
 /** One authenticated socket: frames are queued in order and written by the socket's own writer. */
 class RealtimeConnection(val deviceId: String, private val outbound: SendChannel<String>) {
     fun send(text: String) {
@@ -189,11 +267,15 @@ class RealtimeConnection(val deviceId: String, private val outbound: SendChannel
 }
 
 /**
- * The single realtime dispatcher of ADR-009 §11. A judge device may score, signal attention and resync; operator commands
- * come from the desktop process. Every command is applied by [bouts] before its reply, and pushes go only to sockets that
- * resynced, in journal order, after the reply that caused them.
+ * The single realtime dispatcher of ADR-009 §11 and ADR-011 §11. A judge device may score bouts, send its final vector of a
+ * technical performance, signal attention and resync; operator commands come from the desktop process. Every command is
+ * applied by [bouts] or [performances] before its reply, and pushes go only to sockets that resynced, in journal order,
+ * after the reply that caused them. The court's current session is the latest started bout or performance.
  */
-class RealtimeHub(val bouts: KerugiBoutService) {
+class RealtimeHub(
+    val bouts: KerugiBoutService,
+    val performances: TechnicalPerformanceService = TechnicalPerformanceService(BoutEventJournal.InMemory(), bouts.peerId, bouts.court),
+) {
     private val lock = Any()
     private val subscribers = linkedSetOf<RealtimeConnection>()
 
@@ -217,6 +299,17 @@ class RealtimeHub(val bouts: KerugiBoutService) {
                     EventId(message.eventId), message.sequence.also { require(it >= 0) }, Instant.parse(message.clientTimestamp),
                     context(message.competitionId, message.peerId, message.courtId, message.bracketId, message.sessionId, message.judgeId, message.deviceId),
                     message.competitor, message.area,
+                )
+            }
+            "technical_score_send_command" -> technicalCommand(connection, eventId) {
+                val message = Json.decodeFromString<TechnicalScoreSendCommandMessage>(text)
+                require(message.type == type)
+                PerformanceCommand.SendScore(
+                    EventId(message.eventId), message.sequence.also { require(it >= 0) }, Instant.parse(message.clientTimestamp),
+                    context(message.competitionId, message.peerId, message.courtId, message.bracketId, message.sessionId, message.judgeId, message.deviceId),
+                    message.discipline,
+                    JudgeVector(message.techniqueTenths, message.presentationTenths, message.deductionTenths),
+                    message.totalTenths,
                 )
             }
             "judge_attention_command" -> judgeCommand(connection, eventId) {
@@ -243,6 +336,7 @@ class RealtimeHub(val bouts: KerugiBoutService) {
 
     /** An operator command from the desktop, published to the subscribed devices like a judge command. */
     fun operator(author: String, command: BoutCommand.FromOperator): BoutOutcome = synchronized(lock) {
+        if (command is BoutCommand.StartBout && performanceOpen()) return@synchronized BoutOutcome.Rejected(BoutRejection.BOUT_IN_PROGRESS)
         bouts.dispatch(BoutOrigin.Operator(author), command).also(::publish)
     }
 
@@ -250,6 +344,27 @@ class RealtimeHub(val bouts: KerugiBoutService) {
     fun tick() = synchronized(lock) {
         bouts.tick()?.let(::publish)
     }
+
+    /** An operator command of a technical performance from the desktop (ADR-011 §11). */
+    fun performanceOperator(author: String, command: PerformanceCommand.FromOperator): BoutOutcome = synchronized(lock) {
+        if (command is PerformanceCommand.Start && boutOpen()) return@synchronized BoutOutcome.Rejected(BoutRejection.BOUT_IN_PROGRESS)
+        performances.dispatch(BoutOrigin.Operator(author), command).also(::publishPerformance)
+    }
+
+    /** A bout or a performance of the court is neither completed nor cancelled: nothing else can start (ADR-011 §2). */
+    fun courtBusy(): Boolean = synchronized(lock) { boutOpen() || performanceOpen() }
+
+    /** The cursor of the latest session event of either kind. */
+    val cursor: Long
+        get() = maxOf(bouts.cursor, performances.cursor)
+
+    private fun boutOpen() = bouts.current()?.closed == false
+
+    private fun performanceOpen() = performances.current()?.closed == false
+
+    /** The current performance when it started after the current bout, else null. */
+    private fun currentPerformance(): TechnicalPerformance? = performances.current()
+        ?.takeIf { performance -> bouts.current()?.let { it.startSequence < performance.startSequence } ?: true }
 
     fun leave(connection: RealtimeConnection) = synchronized(lock) {
         subscribers -= connection
@@ -259,7 +374,36 @@ class RealtimeHub(val bouts: KerugiBoutService) {
      * The snapshot body a device receives (ADR-009 §3); `seat` is the device's own seat. A null [deviceId] is the read-only
      * view of the spectator window (ADR-010 §8), the same as a connected device without a seat.
      */
-    fun session(deviceId: String?): SessionView? = bouts.current()?.let { view(it, deviceId) }
+    fun session(deviceId: String?): SessionView? = bouts.current()?.takeIf { currentPerformance() == null }?.let { view(it, deviceId) }
+
+    /**
+     * The snapshot body a device receives (ADR-009 §3, ADR-011 §6): the current bout or performance, whichever started
+     * last; `seat` is the device's own seat.
+     */
+    fun snapshotBody(deviceId: String?): JsonElement? =
+        currentPerformance()?.let { realtimeJson.encodeToJsonElement(view(it, deviceId)) }
+            ?: bouts.current()?.let { realtimeJson.encodeToJsonElement(view(it, deviceId)) }
+
+    private inline fun technicalCommand(connection: RealtimeConnection, eventId: String?, decode: () -> PerformanceCommand.SendScore) {
+        val command = try {
+            decode()
+        } catch (_: Exception) {
+            return reject(connection, "invalid_command", eventId)
+        }
+        val outcome = when {
+            bouts.knows(command.eventId) -> BoutOutcome.Rejected(BoutRejection.EVENT_ID_CONFLICT)
+            bouts.bout(command.context.sessionId) != null -> BoutOutcome.Rejected(BoutRejection.DISCIPLINE_MISMATCH)
+            else -> performances.dispatch(BoutOrigin.Judge(connection.deviceId), command)
+        }
+        when (outcome) {
+            is BoutOutcome.Applied -> {
+                ServerLog.commandAcknowledged(connection.deviceId, outcome.eventId.value)
+                connection.send(realtimeJson.encodeToString(RealtimeCommandAcknowledgement("command_ack", outcome.eventId.value)))
+                publishPerformance(outcome)
+            }
+            is BoutOutcome.Rejected -> reject(connection, outcome.code, eventId)
+        }
+    }
 
     private inline fun judgeCommand(connection: RealtimeConnection, eventId: String?, decode: () -> BoutCommand.FromJudge) {
         val command = try {
@@ -267,7 +411,12 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         } catch (_: Exception) {
             return reject(connection, "invalid_command", eventId)
         }
-        when (val outcome = bouts.dispatch(BoutOrigin.Judge(connection.deviceId), command)) {
+        val outcome = when {
+            performances.knows(command.eventId) -> BoutOutcome.Rejected(BoutRejection.EVENT_ID_CONFLICT)
+            performances.performance(command.context.sessionId) != null -> BoutOutcome.Rejected(BoutRejection.DISCIPLINE_MISMATCH)
+            else -> bouts.dispatch(BoutOrigin.Judge(connection.deviceId), command)
+        }
+        when (outcome) {
             is BoutOutcome.Applied -> {
                 ServerLog.commandAcknowledged(connection.deviceId, outcome.eventId.value)
                 connection.send(realtimeJson.encodeToString(RealtimeCommandAcknowledgement("command_ack", outcome.eventId.value)))
@@ -290,7 +439,7 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         }
         connection.send(
             realtimeJson.encodeToString(
-                ResyncResponseMessage("resync_response", request.requestId, bouts.cursor, session(connection.deviceId)),
+                ResyncResponseMessage("resync_response", request.requestId, cursor, snapshotBody(connection.deviceId)),
             ),
         )
         subscribers += connection
@@ -312,7 +461,9 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         if (BoutChange.NEW_SESSION in outcome.changes) {
             subscribers.forEach { connection ->
                 connection.send(
-                    realtimeJson.encodeToString(SessionSnapshotMessage("session_snapshot", bouts.cursor, view(bout, connection.deviceId))),
+                    realtimeJson.encodeToString(
+                        SessionSnapshotMessage("session_snapshot", cursor, realtimeJson.encodeToJsonElement(view(bout, connection.deviceId))),
+                    ),
                 )
             }
             return
@@ -342,6 +493,66 @@ class RealtimeHub(val bouts: KerugiBoutService) {
             subscribers.forEach { it.send(message) }
         }
     }
+
+    private fun publishPerformance(outcome: BoutOutcome) {
+        if (outcome !is BoutOutcome.Applied || !outcome.isNew) return
+        val performance = performances.performance(outcome.sessionId) ?: return
+        if (BoutChange.NEW_SESSION in outcome.changes) {
+            subscribers.forEach { connection ->
+                connection.send(
+                    realtimeJson.encodeToString(
+                        SessionSnapshotMessage("session_snapshot", cursor, realtimeJson.encodeToJsonElement(view(performance, connection.deviceId))),
+                    ),
+                )
+            }
+            return
+        }
+        if (BoutChange.STATE in outcome.changes) {
+            val message = realtimeJson.encodeToString(
+                TechnicalStateUpdatedMessage("session_state_updated", performance.sessionId.value, outcome.sequence, performance.state.name.lowercase(), null),
+            )
+            subscribers.forEach { it.send(message) }
+        }
+        if (BoutChange.SCORE in outcome.changes) {
+            val message = realtimeJson.encodeToString(
+                TechnicalScoreUpdatedMessage("technical_score_updated", performance.sessionId.value, outcome.sequence, scoreView(performance)),
+            )
+            subscribers.forEach { it.send(message) }
+        }
+    }
+
+    private fun view(performance: TechnicalPerformance, deviceId: String?): TechnicalSessionView {
+        val started = performance.started
+        val seat = deviceId?.let(performance::seatOf)
+        return TechnicalSessionView(
+            sessionId = performance.sessionId.value,
+            discipline = performance.discipline.code,
+            competitionId = performance.competitionId.value,
+            peerId = performance.peerId.value,
+            courtId = performance.courtId.value,
+            courtNumber = started.courtNumber,
+            bracketId = performance.bracketId.value,
+            categoryTitle = started.categoryTitle,
+            performanceNumber = started.performanceNumber,
+            state = performance.state.name.lowercase(),
+            entry = SideView(started.entry.entryId, started.entry.label, started.entry.athletes.map { AthleteView(it.fullName, it.city) }),
+            settings = TechnicalSettingsView(started.seats.size, performance.formula.code),
+            criteria = TechnicalCriteriaView(started.techniqueCriteria, started.presentationCriteria, JudgeVector.DEDUCTION_STEP),
+            seat = seat?.let { SeatView(it.number, it.judgeId, it.deviceId) },
+            sent = seat?.let { performance.sends[it.number] }?.let {
+                TechnicalSentView(it.eventId.value, it.vector.technique, it.vector.presentation, it.vector.deductionTenths, it.totalTenths)
+            },
+            score = scoreView(performance),
+            result = null,
+        )
+    }
+
+    private fun scoreView(performance: TechnicalPerformance) = TechnicalScoreView(
+        submittedSeats = performance.submittedSeats(),
+        result = performance.result()?.let {
+            TechnicalResultView(it.totalTenths, it.aggregateTenths, it.adjustmentTenths, it.divisor, it.formula.code)
+        },
+    )
 
     private fun view(bout: KerugiBout, deviceId: String?): SessionView {
         val started = bout.started

@@ -22,6 +22,7 @@ import org.mass.applications.CompetitionApplicationsService
 import org.mass.bout.CourtBouts
 import org.mass.bout.JdbcBoutEventJournal
 import org.mass.bout.KerugiBoutService
+import org.mass.performance.TechnicalPerformanceService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.domain.PeerId
 import org.mass.draw.CompetitionCourtsService
@@ -234,12 +235,14 @@ class ServerRuntime(
             return failStartup("Competition draw could not be restored: ${exception.message}")
         }
         competitionCourts = CompetitionCourtsService(checkNotNull(competitionDraws), peerId) {
-            realtime?.bouts?.let(CourtBouts::progress) ?: CourtProgress.None
+            realtime?.let { CourtBouts.progress(it) } ?: CourtProgress.None
         }
         val hub = try {
-            RealtimeHub(KerugiBoutService(JdbcBoutEventJournal(store), peerId))
+            // Bouts and technical performances share the court's session journal (ADR-011 §2).
+            val sessions = JdbcBoutEventJournal(store)
+            RealtimeHub(KerugiBoutService(sessions, peerId), TechnicalPerformanceService(sessions, peerId))
         } catch (exception: Exception) {
-            return failStartup("Kerugi bouts could not be restored: ${exception.message}")
+            return failStartup("Bouts and performances could not be restored: ${exception.message}")
         }.also { realtime = it }
         courtBouts = CourtBouts(hub, checkNotNull(competitionDraws), checkNotNull(competitionCourts), pairing)
 
