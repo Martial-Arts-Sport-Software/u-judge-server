@@ -11,13 +11,28 @@ import java.time.LocalDate
 /** How the athletes of one sheet form an entry: one athlete, a pair numbered in a merged cell, or a group team. */
 enum class EntryKind { SINGLE, PAIR, GROUP }
 
-/** The five application sheets (ADR-005); the sheet name is the template's exact spelling. */
-enum class ApplicationDiscipline(val sheetName: String, val entryKind: EntryKind, val hasWeight: Boolean = false) {
+/**
+ * The application sheets (ADR-005); the sheet name is the template's exact spelling. [optional] sheets may be missing from
+ * a file: the Tanbon sheet (ADR-005 amendment of 08.11.2026, ADR-011 §3) came after the five original ones, so files
+ * without it stay valid. [isBout] disciplines are judged in bouts of a bracket, the others in performances.
+ */
+enum class ApplicationDiscipline(
+    val sheetName: String,
+    val entryKind: EntryKind,
+    val hasWeight: Boolean = false,
+    val optional: Boolean = false,
+) {
     KERUGI("Весовая категория", EntryKind.SINGLE, hasWeight = true),
     SELF_DEFENSE("Приёмы самообороны", EntryKind.PAIR),
     STAGED_PAIR("Поединок постановочный - пара", EntryKind.PAIR),
     FREE_FORM("Комплекс свободный", EntryKind.SINGLE),
     STAGED_GROUP("Поединок постановочный - группа", EntryKind.GROUP),
+
+    /** Laid out like «Весовая категория»: one athlete per row with a weight. */
+    TANBON("Танбон", EntryKind.SINGLE, hasWeight = true, optional = true);
+
+    val isBout: Boolean
+        get() = this == KERUGI || this == TANBON
 }
 
 /** Weapon sections of «Комплекс свободный» (FHR 2024 §1.1). */

@@ -186,7 +186,7 @@ class CourtBoutsTest {
         approve("android-2", "Судья2").let(pairing::connected)
 
         assertEquals(
-            CourtBoutOutcome.Rejected(CourtBouts.NOT_KERUGI),
+            CourtBoutOutcome.Rejected(CourtBouts.NOT_BOUT),
             court.bouts.start(listOf("android-1", "android-2"), 2, 1_000, "Оператор"),
         )
         assertNull(court.bouts.bouts.current())
@@ -200,7 +200,7 @@ class CourtBoutsTest {
         val first = assertIs<CourtItem.Performance>(court.bouts.panel().next)
         assertEquals(1, first.number)
 
-        assertEquals(CourtBoutOutcome.Rejected(CourtBouts.NOT_KERUGI), court.bouts.start(judges.take(2), 2, 1_000, "Оператор"))
+        assertEquals(CourtBoutOutcome.Rejected(CourtBouts.NOT_BOUT), court.bouts.start(judges.take(2), 2, 1_000, "Оператор"))
         assertEquals(
             CourtBoutOutcome.Rejected(BoutRejection.INVALID_SETTINGS),
             court.bouts.startPerformance(judges.take(2), AggregationFormula.TRIMMED_MEAN, "Оператор"),
@@ -235,21 +235,25 @@ class CourtBoutsTest {
     }
 
     @Test
-    fun `the first bout of a weight category fixes Kerugi or Tanbon for the category`() {
-        val court = court(category(List(4) { "Тренер $it" }, id = "weights"))
+    fun `a category of the Tanbon sheet starts Tanbon bouts and a weight category Kerugi bouts`() {
+        val court = court(
+            category(List(2) { "Тренер $it" }, id = "tanbon", discipline = ApplicationDiscipline.TANBON),
+            category(List(2) { "Тренер $it" }, id = "weights", weight = "до 36 кг"),
+        )
         (1..2).map { approve("android-$it", "Судья$it") }.forEach(pairing::connected)
         val judges = listOf("android-1", "android-2")
-        assertNull(court.bouts.disciplineOf("weights"))
-        assertIs<CourtBoutOutcome.Done>(court.bouts.start(judges, 2, 1_000, "Оператор", BoutDiscipline.TANBON))
-        assertEquals(BoutDiscipline.TANBON, court.bouts.bouts.current()!!.discipline)
-        assertEquals(BoutDiscipline.TANBON, court.bouts.disciplineOf("weights"))
-        court.bouts.command("Оператор", BoutCommand.CancelBout(EventId.new(), court.bouts.bouts.current()!!.sessionId, "Проверка"))
+        assertEquals(BoutDiscipline.TANBON, CourtBouts.boutDiscipline(court.bouts.panel().next!!.category))
+        assertIs<CourtBoutOutcome.Done>(court.bouts.start(judges, 2, 1_000, "Оператор"))
+        val tanbon = court.bouts.bouts.current()!!
+        assertEquals(BoutDiscipline.TANBON, tanbon.discipline)
+        assertEquals("tanbon", tanbon.started.categoryId)
+        court.bouts.command("Оператор", BoutCommand.CancelBout(EventId.new(), tanbon.sessionId, "Проверка"))
 
-        assertEquals(
-            CourtBoutOutcome.Rejected(BoutRejection.DISCIPLINE_MISMATCH),
-            court.bouts.start(judges, 2, 1_000, "Оператор", BoutDiscipline.KERUGI),
-        )
-        assertIs<CourtBoutOutcome.Done>(court.bouts.start(judges, 2, 1_000, "Оператор", BoutDiscipline.TANBON))
+        val weights = court.bouts.panel().queue.single { it.category.id == "weights" }
+        assertEquals(DrawOutcome.Done, court.courts.selectNextBout(weights.ref))
+        assertIs<CourtBoutOutcome.Done>(court.bouts.start(judges, 2, 1_000, "Оператор"))
+        assertEquals(BoutDiscipline.KERUGI, court.bouts.bouts.current()!!.discipline)
+        assertNull(CourtBouts.boutDiscipline(category(listOf("Тренер"), discipline = ApplicationDiscipline.SELF_DEFENSE)))
     }
 
     /** Begins the current performance, lets each judge send a vector with the given total and completes it. */

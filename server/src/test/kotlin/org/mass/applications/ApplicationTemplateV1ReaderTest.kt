@@ -245,11 +245,38 @@ class ApplicationTemplateV1ReaderTest {
 
         assertEquals(
             listOf(
-                "Лишний лист: в заявке 5 листов по дисциплинам шаблона",
+                "Лишний лист: в заявке только листы дисциплин шаблона",
                 "Нет листа «Комплекс свободный» из шаблона",
             ),
             reasons,
         )
+    }
+
+    @Test
+    fun `the Tanbon sheet is read like the weight-category sheet and stays optional`() {
+        val bytes = ApplicationWorkbookFixture()
+            .sheet(ApplicationDiscipline.TANBON) {
+                section("2013-2011 г.р. Юноши")
+                athlete(AthleteRow(fullName = "Иванов Иван Иванович", weight = "до 45 кг"))
+                athlete(AthleteRow(fullName = "Петров Пётр Петрович", weight = "45 кг"))
+            }
+            .bytes()
+
+        val result = reader.read("tanbon.xlsx", bytes, competitionDate)
+
+        val entry = result.entries.single()
+        assertEquals(ApplicationDiscipline.TANBON, entry.discipline)
+        assertEquals("до 45 кг", entry.weight)
+        val error = result.errors.single()
+        assertEquals("Танбон", error.sheet)
+        assertEquals(5, error.row)
+        assertEquals("D (Весовая категория)", error.column)
+        assertEquals("45 кг", error.value)
+
+        // The federation templates have no Tanbon sheet and stay valid (ADR-005 amendment of 08.11.2026).
+        val template = XSSFWorkbook(resource("template-12-14.xlsx").inputStream())
+        assertEquals(-1, template.getSheetIndex("Танбон"))
+        assertEquals(emptyList(), reader.read("template-12-14.xlsx", resource("template-12-14.xlsx"), competitionDate).errors)
     }
 
     @Test

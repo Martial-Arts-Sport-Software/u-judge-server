@@ -79,7 +79,7 @@ object Draw {
         val keys = category.entries.map { it.drawKey }
         val groups = groups(category, method)
         return when {
-            category.discipline != ApplicationDiscipline.KERUGI ->
+            !category.discipline.isBout ->
                 CategoryDraw(DrawFormat.PERFORMANCE_ORDER, performanceOrder(keys, groups, random))
             keys.size == 1 -> CategoryDraw(DrawFormat.NO_BOUTS, keys)
             keys.size == 2 || system == DrawSystem.SINGLE_ELIMINATION ->

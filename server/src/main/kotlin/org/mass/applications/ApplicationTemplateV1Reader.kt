@@ -57,12 +57,12 @@ class ApplicationTemplateV1Reader {
         fun read(): FileReadResult {
             val sheetNames = (0 until workbook.numberOfSheets).map(workbook::getSheetName)
             sheetNames.filter { name -> ApplicationDiscipline.entries.none { it.sheetName.sameAs(name) } }.forEach {
-                errors += ApplicationError(file.name, sheet = it, reason = "Лишний лист: в заявке 5 листов по дисциплинам шаблона")
+                errors += ApplicationError(file.name, sheet = it, reason = "Лишний лист: в заявке только листы дисциплин шаблона")
             }
             ApplicationDiscipline.entries.forEach { discipline ->
                 val name = sheetNames.firstOrNull { discipline.sheetName.sameAs(it) }
                 if (name == null) {
-                    errors += ApplicationError(file.name, reason = "Нет листа «${discipline.sheetName}» из шаблона")
+                    if (!discipline.optional) errors += ApplicationError(file.name, reason = "Нет листа «${discipline.sheetName}» из шаблона")
                 } else {
                     SheetReader(this, discipline, workbook.getSheet(name)).read()
                 }

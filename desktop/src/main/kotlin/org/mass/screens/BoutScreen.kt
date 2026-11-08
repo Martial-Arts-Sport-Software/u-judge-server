@@ -139,11 +139,6 @@ object BoutScreen : Screen {
         var seats by remember { mutableStateOf(listOf<String>()) }
         var quorum by remember { mutableStateOf("2") }
         var window by remember { mutableStateOf("1000") }
-        val nextCategory = (panel.next as? CourtItem.Bout)?.category?.id
-        // The first bout of a category fixes its discipline (ADR-011 §3); before it the operator picks Kerugi or Tanbon.
-        val fixedDiscipline = remember(court, boutRevision, nextCategory) { nextCategory?.let { court?.disciplineOf(it) } }
-        var chosenDiscipline by remember { mutableStateOf(BoutDiscipline.KERUGI) }
-        val discipline = fixedDiscipline ?: chosenDiscipline
 
         fun act(block: CourtBouts.() -> CourtBoutOutcome) {
             val target = court ?: return
@@ -195,14 +190,11 @@ object BoutScreen : Screen {
                             onQuorum = { quorum = it },
                             window = window,
                             onWindow = { window = it },
-                            discipline = discipline,
-                            disciplineFixed = fixedDiscipline != null,
-                            onDiscipline = { chosenDiscipline = it },
                             enabled = !busy && court != null,
                             onStart = {
                                 act {
                                     start(seats.filter { it in connected.map(ConnectedJudge::deviceId) }, quorum.toIntOrNull() ?: 0,
-                                        window.toLongOrNull() ?: 0, State.judgeSurname, discipline)
+                                        window.toLongOrNull() ?: 0, State.judgeSurname)
                                 }
                             },
                         )
@@ -353,9 +345,6 @@ object BoutScreen : Screen {
         onQuorum: (String) -> Unit,
         window: String,
         onWindow: (String) -> Unit,
-        discipline: BoutDiscipline,
-        disciplineFixed: Boolean,
-        onDiscipline: (BoutDiscipline) -> Unit,
         enabled: Boolean,
         onStart: () -> Unit,
     ) {
@@ -374,20 +363,12 @@ object BoutScreen : Screen {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (panel.next is CourtItem.Bout) {
-            PanelTitle(Localization.getString("i5_bout_discipline_title"))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BoutDiscipline.entries.forEach { option ->
-                    Box(Modifier.weight(1f)) {
-                        SelectableRow(
-                            text = Localization.getString("i5_bout_discipline_${option.code}"),
-                            detail = Localization.getString(if (disciplineFixed) "i5_bout_discipline_fixed" else "i5_bout_discipline_choose"),
-                            selected = option == discipline,
-                            onClick = { if (!disciplineFixed) onDiscipline(option) },
-                        )
-                    }
-                }
-            }
+        // The discipline comes from the category's application sheet: «Весовая категория» or «Танбон» (ADR-011 §3).
+        (panel.next as? CourtItem.Bout)?.let { CourtBouts.boutDiscipline(it.category) }?.let { discipline ->
+            Hint(
+                Localization.getString("i5_bout_discipline_next")
+                    .replace("%s", Localization.getString("i5_bout_discipline_${discipline.code}")),
+            )
         }
         PanelTitle(Localization.getString("bout_judges_title"))
         if (connected.isEmpty()) {

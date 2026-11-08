@@ -78,32 +78,19 @@ class CourtBouts(
         .filter { !it.revoked && it.connectionState == DeviceConnectionState.CONNECTED }
         .map { ConnectedJudge(it.deviceId, it.surname, it.platform) }
 
-    /** The discipline the first started bout of [categoryId] fixed (ADR-011 §3), or null before its first bout. */
-    fun disciplineOf(categoryId: String): BoutDiscipline? =
-        bouts.bouts().firstOrNull { it.started.categoryId == categoryId }?.discipline
-
     /**
-     * «Начать» of the court panel: starts its next bout; [judges] are device IDs in seat order, all connected now. Tanbon
-     * bouts are bouts of a weight category whose first bout the operator started as Tanbon (ADR-011 §3).
+     * «Начать» of the court panel: starts its next bout; [judges] are device IDs in seat order, all connected now. A bout of
+     * a «Танбон» category is a Tanbon bout, of a «Весовая категория» one a Kerugi bout (ADR-011 §3).
      */
-    fun start(
-        judges: List<String>,
-        quorum: Int,
-        coincidenceWindowMillis: Long,
-        author: String,
-        discipline: BoutDiscipline = BoutDiscipline.KERUGI,
-    ): CourtBoutOutcome {
+    fun start(judges: List<String>, quorum: Int, coincidenceWindowMillis: Long, author: String): CourtBoutOutcome {
         val board = draws.board()
         val competitionId = board.competitionId ?: return CourtBoutOutcome.Rejected(NO_COMPETITION)
         val bout = when (val next = courts.courtPanel().next) {
             null -> return CourtBoutOutcome.Rejected(NO_NEXT_BOUT)
-            is CourtItem.Performance -> return CourtBoutOutcome.Rejected(NOT_KERUGI)
-            is CourtItem.Bout -> next.takeIf { it.category.discipline == ApplicationDiscipline.KERUGI }
-                ?: return CourtBoutOutcome.Rejected(NOT_KERUGI)
+            is CourtItem.Performance -> return CourtBoutOutcome.Rejected(NOT_BOUT)
+            is CourtItem.Bout -> next
         }
-        disciplineOf(bout.category.id)?.takeIf { it != discipline }?.let {
-            return CourtBoutOutcome.Rejected(BoutRejection.DISCIPLINE_MISMATCH)
-        }
+        val discipline = boutDiscipline(bout.category) ?: return CourtBoutOutcome.Rejected(NOT_BOUT)
         val connected = connectedJudges().associateBy(ConnectedJudge::deviceId)
         if (judges.any { it !in connected }) return CourtBoutOutcome.Rejected(JUDGE_NOT_CONNECTED)
         val spec = BoutStartSpec(
@@ -202,7 +189,14 @@ class CourtBouts(
         const val NOT_CONFIRMED = "not_confirmed"
         const val JUDGE_NOT_CONNECTED = "judge_not_connected"
         const val NO_NEXT_BOUT = "no_next_bout"
-        const val NOT_KERUGI = "not_kerugi"
+        const val NOT_BOUT = "not_bout"
+
+        /** The bout discipline of a category by its application sheet (ADR-011 §3). */
+        fun boutDiscipline(category: ApplicationCategory): BoutDiscipline? = when (category.discipline) {
+            ApplicationDiscipline.KERUGI -> BoutDiscipline.KERUGI
+            ApplicationDiscipline.TANBON -> BoutDiscipline.TANBON
+            else -> null
+        }
         const val NOT_PERFORMANCE = "not_performance"
 
         /** «Младшие юноши» and «Юноши» perform 4 technical rounds in Hosinsool and Pair (FHR §4.2.5, `TEC-003`). */
@@ -210,7 +204,7 @@ class CourtBouts(
 
         /** The technical discipline of a category by its application sheet and weapon (ADR-011 §4). */
         fun technicalDiscipline(category: ApplicationCategory): TechnicalDiscipline? = when (category.discipline) {
-            ApplicationDiscipline.KERUGI -> null
+            ApplicationDiscipline.KERUGI, ApplicationDiscipline.TANBON -> null
             ApplicationDiscipline.SELF_DEFENSE -> TechnicalDiscipline.HOSINSOOL
             ApplicationDiscipline.STAGED_PAIR -> TechnicalDiscipline.PAIR_FREESTYLE
             ApplicationDiscipline.STAGED_GROUP -> TechnicalDiscipline.GROUP_FREESTYLE
