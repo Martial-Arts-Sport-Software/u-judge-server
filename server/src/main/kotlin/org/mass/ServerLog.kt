@@ -21,6 +21,12 @@ object ServerLog {
     internal fun mdnsFailed(address: String, diagnostic: String) = logger.atWarn().setMessage("mdns_publish_failed")
         .addKeyValue("address", address).addKeyValue("diagnostic", diagnostic).log()
 
+    internal fun backupFailed(diagnostic: String) = logger.atError().setMessage("backup_failed")
+        .addKeyValue("diagnostic", diagnostic).log()
+
+    internal fun journalRestored(database: String, events: Int) = logger.atInfo().setMessage("journal_restored")
+        .addKeyValue("database", database).addKeyValue("events", events).log()
+
     internal fun runtimeStopped() = logger.atInfo().setMessage("runtime_stopped").log()
 
     internal fun deviceRegistryChanged(change: String, deviceId: String) = logger.atInfo().setMessage("device_registry_changed")

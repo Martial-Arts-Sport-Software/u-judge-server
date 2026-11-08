@@ -5,6 +5,12 @@ import org.mass.bout.BoutCommand
 import org.mass.bout.BoutOutcome
 import org.mass.bout.BoutStateAction
 import org.mass.domain.EventId
+import org.mass.domain.KerugiCompetitor
+import org.mass.domain.KerugiOperatorActionType
+import org.mass.domain.SessionState
+import org.mass.persistence.BackupInspection
+import org.mass.persistence.JournalBackup
+import org.mass.persistence.JournalBackups
 import java.time.Instant
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -119,6 +125,55 @@ class ServerRuntimeTest {
     }
 
     @Test
+    fun `backs up after a completed bout and restores the backup on a clean peer into a new database`() {
+        val source = runtime(freePort())
+        val running = assertIs<ServerRuntimeState.Running>(source.start())
+        val hub = requireNotNull(source.realtime)
+        val sessionId = (hub.operator("Оператор", BoutCommand.StartBout(EventId.new(), testBoutSpec(listOf("device-1", "device-2")))) as BoutOutcome.Applied).sessionId
+        listOf(
+            BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START),
+            BoutCommand.AwardAction(EventId.new(), sessionId, KerugiOperatorActionType.THROW, KerugiCompetitor.RED, 2),
+            BoutCommand.EndPeriod(EventId.new(), sessionId),
+            BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.RESUME),
+            BoutCommand.EndPeriod(EventId.new(), sessionId),
+            BoutCommand.CompleteBout(EventId.new(), sessionId),
+        ).forEach { assertIs<BoutOutcome.Applied>(hub.operator("Оператор", it), it.toString()) }
+        val result = hub.bouts.bout(sessionId)!!.result
+
+        // `BAK-002`: the completed bout is in a separate copy without any operator action.
+        val backups = requireNotNull(source.backups)
+        val automatic = awaitValue { backups.list().firstOrNull { it.header?.reason == JournalBackups.AFTER_SESSION } }
+        assertEquals(running.peerId.value, automatic.header!!.peerId)
+        assertEquals(automatic.path, backups.status.value.lastPath)
+        val copy = root.resolve("usb/competition.jsonl").also { backups.copy(automatic.path, it) }
+        source.stop()
+
+        // A clean computer: its own cluster and peer until the restore.
+        val clean = runtime(freePort(), data = "clean-computer")
+        val fresh = assertIs<ServerRuntimeState.Running>(clean.start())
+        assertTrue(fresh.peerId != running.peerId)
+        assertEquals(RestoreOutcome.Rejected(JournalBackup.UNREADABLE), clean.restore(root.resolve("usb/missing.jsonl")))
+        Files.writeString(root.resolve("usb/broken.jsonl"), Files.readString(copy).replace("THROW", "SPIN_BONUS"))
+        assertEquals(RestoreOutcome.Rejected(JournalBackup.CHECKSUM_MISMATCH), clean.restore(root.resolve("usb/broken.jsonl")))
+        assertEquals(fresh.peerId, assertIs<ServerRuntimeState.Running>(clean.state.value).peerId)
+
+        val restored = assertIs<RestoreOutcome.Restored>(clean.restore(copy))
+        assertEquals(automatic.header!!.events, restored.events)
+        assertEquals(automatic.header!!.sha256, restored.sha256)
+        assertEquals(JournalBackups.BEFORE_RESTORE, JournalBackup.inspect(restored.safetyBackup).let { assertIs<BackupInspection.Valid>(it).backup.header.reason })
+        val after = assertIs<ServerRuntimeState.Running>(clean.state.value)
+        assertEquals(running.peerId, after.peerId)
+        assertEquals(result, clean.realtime!!.bouts.bout(sessionId)!!.result)
+        assertEquals(SessionState.COMPLETED, clean.realtime!!.bouts.bout(sessionId)!!.state)
+
+        // The restored database stays active after a restart.
+        clean.stop()
+        assertEquals(running.peerId, assertIs<ServerRuntimeState.Running>(clean.start()).peerId)
+        assertEquals(result, clean.realtime!!.bouts.bout(sessionId)!!.result)
+        assertEquals(restored.database, Files.readString(root.resolve("clean-computer/database")))
+    }
+
+    @Test
     fun `reports a PostgreSQL failure while running`() {
         val runtime = runtime(freePort())
         assertIs<ServerRuntimeState.Running>(runtime.start())
@@ -159,11 +214,11 @@ class ServerRuntimeTest {
         assertTrue(Files.isExecutable(postgres))
     }
 
-    private fun runtime(port: Int): ServerRuntime {
+    private fun runtime(port: Int, data: String = "application-data"): ServerRuntime {
         val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
         assumeTrue(!installationDirectory.isNullOrBlank(), "Requires the PostgreSQL bundle prepared by Gradle")
         return ServerRuntime(
-            ServerRuntimeConfiguration(Path.of(installationDirectory), root.resolve("application-data"), port, "JudgeServer-test"),
+            ServerRuntimeConfiguration(Path.of(installationDirectory), root.resolve(data), port, "JudgeServer-test"),
             supervisionInterval = java.time.Duration.ofMillis(100),
         ).also(runtimes::add)
     }
@@ -230,6 +285,15 @@ class ServerRuntimeTest {
             Thread.sleep(50)
         }
         error("Runtime stayed ${runtime.state.value}")
+    }
+
+    private fun <T : Any> awaitValue(read: () -> T?): T {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline) {
+            read()?.let { return it }
+            Thread.sleep(50)
+        }
+        error("The value did not appear in time")
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
