@@ -38,6 +38,7 @@ import java.security.SecureRandom
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
+import kotlin.system.exitProcess
 
 /** Metadata a mobile client uses to validate a server before pairing. */
 @Serializable
@@ -676,7 +677,8 @@ fun Application.module(
 /** Client messages above this length are rejected before decoding (ADR-004). */
 const val MAX_REALTIME_MESSAGE_LENGTH = 4_096
 
-fun main() {
+fun main(args: Array<String>) {
+    ServerSmokeCheck.options(args)?.let { exitProcess(ServerSmokeCheck.run(it)) }
     ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
     when (val state = Server.start()) {
         is ServerRuntimeState.Running -> println(
