@@ -7,6 +7,7 @@ import org.mass.bout.BoutOutcome
 import org.mass.bout.BoutStateAction
 import org.mass.bout.JdbcBoutEventJournal
 import org.mass.bout.JudgeContext
+import org.mass.bout.KerugiBoutEvents
 import org.mass.bout.KerugiBoutService
 import org.mass.domain.EventId
 import org.mass.domain.JudgeId
@@ -218,7 +219,7 @@ class RealPostgresLifecycleTest {
                 platform = PostgresPlatform.current(),
             ),
         )
-        val clock = Instant.parse("2026-11-08T10:00:00Z")
+        var clock = Instant.parse("2026-11-08T10:00:00Z")
         fun bouts(): KerugiBoutService {
             val dataSource = requireNotNull(runtime.dataSource)
             return KerugiBoutService(JdbcBoutEventJournal(JdbcDomainEventStore(dataSource)), LocalPeerIdentity.loadOrCreate(dataSource), now = { clock })
@@ -240,23 +241,41 @@ class RealPostgresLifecycleTest {
             val firstTap = tap("android-1", 100)
             assertIs<BoutOutcome.Applied>(first.dispatch(BoutOrigin.Judge("android-1"), firstTap))
             assertIs<BoutOutcome.Applied>(first.dispatch(BoutOrigin.Judge("android-2"), tap("android-2", 400)))
+            clock = clock.plusSeconds(12)
             first.dispatch(operator, BoutCommand.AwardAction(EventId.new(), started.sessionId, KerugiOperatorActionType.GAMJEOM, KerugiCompetitor.BLUE, 1))
+            // The timer saves the running clock 5 s after the latest event (ADR-010 §3).
+            clock = clock.plusSeconds(6)
+            assertEquals(KerugiBoutEvents.CLOCK_SAVED, first.tick()?.let { saved -> first.current()!!.events.last { it.sequence == saved.sequence }.event.type })
             val before = requireNotNull(first.current())
 
+            clock = clock.plusSeconds(40)
             assertEquals(PostgresState.Stopped, runtime.stop())
             assertIs<PostgresState.Running>(runtime.start())
             val restarted = bouts()
 
             val after = requireNotNull(restarted.current())
             assertEquals(started.sessionId, after.sessionId)
-            assertEquals(SessionState.RUNNING, after.state)
+            assertEquals(SessionState.PAUSED, after.state)
             assertEquals(before.score(), after.score())
             assertEquals(2, after.score().blue)
             assertEquals(1, after.score().red)
             assertEquals(before.started.seats, after.started.seats)
-            assertEquals(before.lastSequence, restarted.cursor)
+            // The clock stands at the saved checkpoint, 18 s into round 1, not at the wall time of the restart.
+            assertEquals(120_000L - 18_000, after.clock.remainingMillis)
+            assertEquals(false, after.clock.running)
+            assertEquals(KerugiBoutEvents.CLOCK_STOPPED, after.events.last().event.type)
+            assertEquals(after.lastSequence, restarted.cursor)
             assertEquals(false, assertIs<BoutOutcome.Applied>(restarted.dispatch(BoutOrigin.Judge("android-1"), firstTap)).isNew)
-            assertEquals(before.events.size, requireNotNull(restarted.current()).events.size)
+            assertEquals(before.events.size + 1, requireNotNull(restarted.current()).events.size)
+
+            // A second restart of a stopped clock appends nothing; the operator resumes from the saved time.
+            assertEquals(PostgresState.Stopped, runtime.stop())
+            assertIs<PostgresState.Running>(runtime.start())
+            val again = bouts()
+            assertEquals(after.events.size, again.current()!!.events.size)
+            assertIs<BoutOutcome.Applied>(again.dispatch(operator, BoutCommand.ChangeState(EventId.new(), started.sessionId, BoutStateAction.RESUME)))
+            assertEquals(Instant.parse("2026-11-08T10:00:58Z"), again.current()!!.clock.runningSince)
+            assertEquals(102_000L, again.current()!!.clock.remainingMillis)
         } finally {
             runtime.stop()
             root.toFile().deleteRecursively()

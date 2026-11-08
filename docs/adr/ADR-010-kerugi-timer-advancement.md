@@ -57,8 +57,8 @@ exist only when the score is tied when round 2 ends. One clock counts down the c
   last period; `prepared` before «Бой»; `completed` and `cancelled` as in ADR-009. The state names do not change, so an
   ADR-009 client enables scoring only while a round runs.
 - **Scoring time.** A judge candidate counts only when its `clientTimestamp` lies inside an interval in which a round
-  clock ran, clipped at the deadline; a candidate in a break or after the time is journaled and audited as «вне времени
-  боя» (`KER-009`). Operator throws, spins, Gamjeom and corrections stay allowed while `running` or `paused`.
+  clock ran, clipped at the deadline, both ends included; a candidate in a break or after the time is journaled and
+  audited as «вне времени боя» (`KER-009`). Operator throws, spins, Gamjeom and corrections stay allowed while `running` or `paused`.
 
 ### 3. Restart
 
@@ -67,7 +67,8 @@ The clock is never derived from the wall time after a restart (roadmap I2b decis
 - While a clock runs the server journals `kerugi_clock_saved` (empty payload) whenever 5 s passed since the latest event
   of the bout. Judge taps and operator actions save the time as well, so a busy bout writes fewer checkpoints.
 - When the service is rebuilt and the current bout has a running clock, it journals `kerugi_clock_stopped` with
-  `reason: "server_restart"` and `stoppedAt` = the `occurredAt` of the latest event of the bout. The clock stands at that
+  `reason: "server_restart"` and `stoppedAt` = the latest time saved with the bout: the `occurredAt` of its events or the
+  `clientTimestamp` of a candidate, whichever is later. The clock stands at that
   saved time (at most 5 s behind the moment of the crash), a running round becomes `paused`, and the operator resumes it or
   corrects the time with «Время». A break restored this way ends; «Продолжить» starts the next round.
 

@@ -87,6 +87,9 @@ class CourtBoutsTest {
         val sessionId = bout.sessionId
         court.bouts.command("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START))
         court.bouts.command("Оператор", BoutCommand.AwardAction(EventId.new(), sessionId, KerugiOperatorActionType.THROW, KerugiCompetitor.RED, 2))
+        court.bouts.command("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
+        court.bouts.command("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.RESUME))
+        court.bouts.command("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
         assertIs<CourtBoutOutcome.Done>(court.bouts.command("Оператор", BoutCommand.CompleteBout(EventId.new(), sessionId)))
         val decided = court.bouts.panel()
         assertEquals(1, decided.current!!.number)

@@ -80,7 +80,8 @@ class ServerRuntimeTest {
         realtime(port, credential).use { socket ->
             assertEquals("resync_response", socket.request(RESYNC_REQUEST)["type"])
             val session = Json.parseToJsonElement(socket.lastText).jsonObject.getValue("session").jsonObject
-            assertEquals("running", session.string("state"))
+            // ADR-010 §3: after the restart the clock stands still until the operator resumes it.
+            assertEquals("paused", session.string("state"))
             assertEquals("1", session.getValue("seat").jsonObject.getValue("number").jsonPrimitive.content)
             assertEquals("2", session.getValue("score").jsonObject.getValue("blue").jsonPrimitive.content)
             assertEquals("command_ack", socket.request(command)["type"])

@@ -76,6 +76,7 @@ class CourtBouts(
             judges = judges.map { RosterJudge(it, connected.getValue(it).surname) },
             quorum = quorum,
             coincidenceWindowMillis = coincidenceWindowMillis,
+            timing = BoutTiming.of(bout.category.section.ageClass),
         )
         bouts.startRejection(spec)?.let { return CourtBoutOutcome.Rejected(it) }
         if (board.category(bout.category.id)?.status == CategoryStatus.CONFIRMED) {

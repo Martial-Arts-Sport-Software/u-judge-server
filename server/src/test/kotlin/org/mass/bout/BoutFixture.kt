@@ -34,6 +34,7 @@ class BoutFixture(
         quorum: Int = 2,
         windowMillis: Long = 1_000,
         index: Int = 0,
+        timing: BoutTiming = BoutTiming.of(org.mass.applications.AgeClass.YOUTH),
     ) = BoutStartSpec(
         competitionId = competitionId,
         bracketId = bracketId,
@@ -47,6 +48,7 @@ class BoutFixture(
         judges = judges.mapIndexed { number, device -> RosterJudge(device, "Судья${number + 1}") },
         quorum = quorum,
         coincidenceWindowMillis = windowMillis,
+        timing = timing,
     )
 
     /** Starts the bout and, unless [running] is false, the session. */
@@ -59,6 +61,17 @@ class BoutFixture(
     fun operator(command: BoutCommand) = service.dispatch(operator, command)
 
     fun state(sessionId: SessionId, action: BoutStateAction) = operator(BoutCommand.ChangeState(id(), sessionId, action))
+
+    fun tick() = service.tick()
+
+    fun endPeriod(sessionId: SessionId) = operator(BoutCommand.EndPeriod(id(), sessionId))
+
+    /** «Стоп периода» on round 1, «Продолжить» from the break and «Стоп периода» on round 2 (ADR-010 §2). */
+    fun finishRegularTime(sessionId: SessionId) {
+        assertIs<BoutOutcome.Applied>(endPeriod(sessionId))
+        assertIs<BoutOutcome.Applied>(state(sessionId, BoutStateAction.RESUME))
+        assertIs<BoutOutcome.Applied>(endPeriod(sessionId))
+    }
 
     fun context(device: String, bout: KerugiBout = requireNotNull(service.current())) = JudgeContext(
         competitionId = bout.competitionId,

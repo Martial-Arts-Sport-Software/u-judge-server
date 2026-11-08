@@ -104,6 +104,18 @@ data class ScoreView(
 @Serializable
 data class ResultView(val winner: KerugiCompetitor, val reason: String)
 
+/** The bout clock of ADR-010 §5: [remainingMillis] is the time left at [runningSince] while running, else exact. */
+@Serializable
+data class TimerView(
+    val period: String,
+    val round: Int,
+    val goldenRound: Boolean,
+    val durationMillis: Long,
+    val remainingMillis: Long,
+    val running: Boolean,
+    val runningSince: String?,
+)
+
 @Serializable
 data class SessionView(
     val sessionId: String,
@@ -122,6 +134,7 @@ data class SessionView(
     val seat: SeatView?,
     val score: ScoreView,
     val result: ResultView?,
+    val timer: TimerView,
 )
 
 @Serializable
@@ -137,7 +150,12 @@ data class SessionStateUpdatedMessage(
     val cursor: Long,
     val state: String,
     val result: ResultView?,
+    /** The timer after the transition (ADR-010 §5), so one event causes one push. */
+    val timer: TimerView,
 )
+
+@Serializable
+data class KerugiTimerUpdatedMessage(val type: String, val sessionId: String, val cursor: Long, val timer: TimerView)
 
 @Serializable
 data class KerugiScoreUpdatedMessage(val type: String, val sessionId: String, val cursor: Long, val score: ScoreView)
@@ -189,12 +207,20 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         bouts.dispatch(BoutOrigin.Operator(author), command).also(::publish)
     }
 
+    /** The server timer of ADR-010 §2: a period that reached its deadline ends and is published like an operator command. */
+    fun tick() = synchronized(lock) {
+        bouts.tick()?.let(::publish)
+    }
+
     fun leave(connection: RealtimeConnection) = synchronized(lock) {
         subscribers -= connection
     }
 
-    /** The snapshot body a device receives (ADR-009 §3); `seat` is the device's own seat. */
-    fun session(deviceId: String): SessionView? = bouts.current()?.let { view(it, deviceId) }
+    /**
+     * The snapshot body a device receives (ADR-009 §3); `seat` is the device's own seat. A null [deviceId] is the read-only
+     * view of the spectator window (ADR-010 §8), the same as a connected device without a seat.
+     */
+    fun session(deviceId: String?): SessionView? = bouts.current()?.let { view(it, deviceId) }
 
     private inline fun judgeCommand(connection: RealtimeConnection, eventId: String?, decode: () -> BoutCommand.FromJudge) {
         val command = try {
@@ -252,7 +278,13 @@ class RealtimeHub(val bouts: KerugiBoutService) {
                 SessionStateUpdatedMessage(
                     "session_state_updated", bout.sessionId.value, outcome.sequence, bout.state.name.lowercase(),
                     bout.result?.let { ResultView(it.winner, it.reason) },
+                    timerView(bout),
                 ),
+            )
+            subscribers.forEach { it.send(message) }
+        } else if (BoutChange.TIMER in outcome.changes) {
+            val message = realtimeJson.encodeToString(
+                KerugiTimerUpdatedMessage("kerugi_timer_updated", bout.sessionId.value, outcome.sequence, timerView(bout)),
             )
             subscribers.forEach { it.send(message) }
         }
@@ -264,7 +296,7 @@ class RealtimeHub(val bouts: KerugiBoutService) {
         }
     }
 
-    private fun view(bout: KerugiBout, deviceId: String): SessionView {
+    private fun view(bout: KerugiBout, deviceId: String?): SessionView {
         val started = bout.started
         return SessionView(
             sessionId = bout.sessionId.value,
@@ -280,9 +312,23 @@ class RealtimeHub(val bouts: KerugiBoutService) {
             blue = SideView(started.blue.entryId, started.blue.label, started.blue.athletes.map { AthleteView(it.fullName, it.city) }),
             red = SideView(started.red.entryId, started.red.label, started.red.athletes.map { AthleteView(it.fullName, it.city) }),
             settings = SettingsView(started.seats.size, started.quorum, started.coincidenceWindowMillis),
-            seat = bout.seatOf(deviceId)?.let { SeatView(it.number, it.judgeId, it.deviceId) },
+            seat = deviceId?.let(bout::seatOf)?.let { SeatView(it.number, it.judgeId, it.deviceId) },
             score = scoreView(bout),
             result = bout.result?.let { ResultView(it.winner, it.reason) },
+            timer = timerView(bout),
+        )
+    }
+
+    private fun timerView(bout: KerugiBout): TimerView {
+        val timer = bout.clock.timer()
+        return TimerView(
+            period = timer.period.name.lowercase(),
+            round = timer.round,
+            goldenRound = timer.golden,
+            durationMillis = timer.durationMillis,
+            remainingMillis = timer.remainingMillis,
+            running = timer.runningSince != null,
+            runningSince = timer.runningSince?.toString(),
         )
     }
 

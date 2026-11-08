@@ -42,6 +42,7 @@ class KerugiBoutService(
     val court: BoutCourt = BoutCourt.single(peerId),
     private val now: () -> Instant = Instant::now,
     private val clientTimestampTolerance: Duration = Duration.ofSeconds(5),
+    private val checkpointInterval: Duration = Duration.ofSeconds(5),
 ) {
     private val bouts = linkedMapOf<SessionId, KerugiBout>()
     private val eventsById = mutableMapOf<EventId, SequencedDomainEvent>()
@@ -58,6 +59,60 @@ class KerugiBoutService(
 
     init {
         journal.events().sortedBy(SequencedDomainEvent::sequence).forEach(::project)
+        restoreClock()
+    }
+
+    /**
+     * After a restart the clock is never derived from the wall time (ADR-010 §3): a running clock of the current bout stops
+     * at the latest saved event of the bout, and the operator resumes or corrects it.
+     */
+    private fun restoreClock() {
+        val bout = current()?.takeIf { !it.closed && it.clock.running } ?: return
+        val payload = Json.encodeToString(BoutClockStoppedPayload(RESTORE_REASON, bout.lastEventAt.toString()))
+        append(serverEvent(bout, KerugiBoutEvents.CLOCK_STOPPED, payload, now(), author = RESTORE_REASON))
+    }
+
+    /**
+     * The server timer, called a few times per second: journals the end of a period at its exact deadline, and a checkpoint
+     * of the running clock when [checkpointInterval] passed since the bout's latest event (ADR-010 §2-§3).
+     */
+    @Synchronized
+    fun tick(): BoutOutcome.Applied? {
+        val bout = current()?.takeIf { !it.closed } ?: return null
+        val deadline = bout.clock.deadline ?: return null
+        val now = now()
+        val event = when {
+            !deadline.isAfter(now) -> serverEvent(
+                bout,
+                KerugiBoutEvents.PERIOD_ENDED,
+                Json.encodeToString(BoutPeriodEndedPayload(bout.clock.period.name.lowercase(), bout.clock.round)),
+                deadline,
+                author = TIMER_AUTHOR,
+            )
+            Duration.between(bout.lastEventAt, now) >= checkpointInterval ->
+                serverEvent(bout, KerugiBoutEvents.CLOCK_SAVED, "{}", now, author = TIMER_AUTHOR)
+            else -> return null
+        }
+        return try {
+            append(event)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun append(event: DomainEvent): BoutOutcome.Applied {
+        val before = bouts[event.sessionId]
+        val sequenced = journal.append(event)
+        project(sequenced)
+        mutableRevision.value++
+        val after = bouts.getValue(event.sessionId)
+        val changes = buildSet {
+            if (before == null) add(BoutChange.NEW_SESSION)
+            if (before != null && before.state != after.state) add(BoutChange.STATE)
+            if (before != null && before.clock.timer() != after.clock.timer()) add(BoutChange.TIMER)
+            if (before != null && before.score() != after.score()) add(BoutChange.SCORE)
+        }
+        return BoutOutcome.Applied(event.eventId, event.sessionId, sequenced.sequence, isNew = true, changes = changes)
     }
 
     @Synchronized
@@ -94,21 +149,11 @@ class KerugiBoutService(
         }
         if (rejection != null) return BoutOutcome.Rejected(rejection)
         val event = requireNotNull(eventFor(origin, command, now())) { "A validated command must build an event" }
-        val before = bouts[event.sessionId]
-        val sequenced = try {
-            journal.append(event)
+        return try {
+            append(event)
         } catch (_: Exception) {
-            return BoutOutcome.Rejected(BoutRejection.JOURNAL_UNAVAILABLE)
+            BoutOutcome.Rejected(BoutRejection.JOURNAL_UNAVAILABLE)
         }
-        project(sequenced)
-        mutableRevision.value++
-        val after = bouts.getValue(event.sessionId)
-        val changes = buildSet {
-            if (before == null) add(BoutChange.NEW_SESSION)
-            if (before != null && before.state != after.state) add(BoutChange.STATE)
-            if (before != null && before.score() != after.score()) add(BoutChange.SCORE)
-        }
-        return BoutOutcome.Applied(event.eventId, event.sessionId, sequenced.sequence, isNew = true, changes = changes)
     }
 
     /** An identical retry gets the original outcome without a second event; anything else with the same ID conflicts. */
@@ -150,27 +195,23 @@ class KerugiBoutService(
     }
 
     private fun validateOperator(command: BoutCommand.FromOperator): String? {
-        val sessionId = when (command) {
-            is BoutCommand.ChangeState -> command.sessionId
-            is BoutCommand.AwardAction -> command.sessionId
-            is BoutCommand.CorrectScore -> command.sessionId
-            is BoutCommand.ResetBout -> command.sessionId
-            is BoutCommand.ConfirmDisqualification -> command.sessionId
-            is BoutCommand.CompleteBout -> command.sessionId
-            is BoutCommand.CancelBout -> command.sessionId
-            is BoutCommand.StartBout -> error("Validated separately")
-        }
+        val sessionId = sessionOf(command)
         val bout = current()?.takeIf { it.sessionId == sessionId } ?: return BoutRejection.SESSION_NOT_CURRENT
         if (bout.closed) return BoutRejection.SESSION_CLOSED
         val scoring = bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED
         return when (command) {
-            is BoutCommand.ChangeState -> {
-                val from = when (command.action) {
-                    BoutStateAction.START -> SessionState.PREPARED
-                    BoutStateAction.PAUSE -> SessionState.RUNNING
-                    BoutStateAction.RESUME -> SessionState.PAUSED
+            is BoutCommand.ChangeState -> BoutRejection.INVALID_TRANSITION.takeIf {
+                when (command.action) {
+                    BoutStateAction.START -> bout.state != SessionState.PREPARED
+                    BoutStateAction.PAUSE -> bout.state != SessionState.RUNNING || !bout.clock.canPause
+                    BoutStateAction.RESUME -> bout.state != SessionState.PAUSED || !bout.clock.canResume
                 }
-                BoutRejection.INVALID_TRANSITION.takeIf { bout.state != from }
+            }
+            is BoutCommand.EndPeriod -> BoutRejection.INVALID_TRANSITION.takeIf { !scoring || !bout.clock.canEndPeriod }
+            is BoutCommand.AdjustClock -> when {
+                !scoring || !bout.clock.canAdjust -> BoutRejection.INVALID_TRANSITION
+                command.remainingMillis !in 1..bout.clock.durationMillis -> BoutRejection.INVALID_CLOCK
+                else -> null
             }
             is BoutCommand.CancelBout -> BoutRejection.REASON_REQUIRED.takeIf { command.reason.isBlank() }
             is BoutCommand.AwardAction -> when {
@@ -196,29 +237,46 @@ class KerugiBoutService(
                 bout.score().warnings.none { it.competitor == command.competitor } -> BoutRejection.DISQUALIFICATION_NOT_PENDING
                 else -> null
             }
-            is BoutCommand.CompleteBout -> when {
-                !scoring -> BoutRejection.INVALID_TRANSITION
-                bout.score().let { it.disqualified == null && it.blue == it.red } -> BoutRejection.SCORE_TIED
-                else -> null
-            }
+            is BoutCommand.CompleteBout -> if (!scoring) BoutRejection.INVALID_TRANSITION else completionRejection(bout, command.winner)
             is BoutCommand.StartBout -> null
         }
+    }
+
+    /**
+     * The result rules of ADR-010 §4: a confirmed disqualification at any time; the final score once round 2 ended and the
+     * golden round has not started; the golden round's first point; the operator's preference after a scoreless golden round.
+     */
+    private fun completionRejection(bout: KerugiBout, winner: KerugiCompetitor?): String? {
+        val score = bout.score()
+        val clock = bout.clock
+        val tied = score.blue == score.red
+        return when {
+            score.disqualified != null -> BoutRejection.WINNER_NOT_ALLOWED.takeIf { winner != null }
+            !clock.regularTimeOver -> BoutRejection.BOUT_NOT_FINISHED
+            clock.phase == KerugiClock.GOLDEN_ROUND && tied && clock.over -> BoutRejection.WINNER_REQUIRED.takeIf { winner == null }
+            tied -> BoutRejection.SCORE_TIED
+            else -> BoutRejection.WINNER_NOT_ALLOWED.takeIf { winner != null }
+        }
+    }
+
+    private fun sessionOf(command: BoutCommand): SessionId = when (command) {
+        is BoutCommand.FromJudge -> command.context.sessionId
+        is BoutCommand.ChangeState -> command.sessionId
+        is BoutCommand.EndPeriod -> command.sessionId
+        is BoutCommand.AdjustClock -> command.sessionId
+        is BoutCommand.AwardAction -> command.sessionId
+        is BoutCommand.CorrectScore -> command.sessionId
+        is BoutCommand.ResetBout -> command.sessionId
+        is BoutCommand.ConfirmDisqualification -> command.sessionId
+        is BoutCommand.CompleteBout -> command.sessionId
+        is BoutCommand.CancelBout -> command.sessionId
+        is BoutCommand.StartBout -> error("A start creates its session")
     }
 
     /** The event a command produces; deterministic, so an identical retry rebuilds the stored event. */
     private fun eventFor(origin: BoutOrigin, command: BoutCommand, occurredAt: Instant): DomainEvent? {
         if (command is BoutCommand.StartBout) return startEvent(origin as BoutOrigin.Operator, command, occurredAt)
-        val sessionId = when (command) {
-            is BoutCommand.FromJudge -> command.context.sessionId
-            is BoutCommand.ChangeState -> command.sessionId
-            is BoutCommand.AwardAction -> command.sessionId
-            is BoutCommand.CorrectScore -> command.sessionId
-            is BoutCommand.ResetBout -> command.sessionId
-            is BoutCommand.ConfirmDisqualification -> command.sessionId
-            is BoutCommand.CompleteBout -> command.sessionId
-            is BoutCommand.CancelBout -> command.sessionId
-            is BoutCommand.StartBout -> error("Handled above")
-        }
+        val sessionId = sessionOf(command)
         val bout = bouts[sessionId] ?: return null
         val (type, payload) = when (command) {
             is BoutCommand.SubmitScore -> KerugiBoutEvents.SCORE_CANDIDATE to Json.encodeToString(
@@ -232,6 +290,13 @@ class KerugiBoutService(
                 BoutStateAction.PAUSE -> KerugiBoutEvents.SESSION_PAUSED
                 BoutStateAction.RESUME -> KerugiBoutEvents.SESSION_RESUMED
             } to "{}"
+            // The period is the one that ended; a retry compares with the stored payload.
+            is BoutCommand.EndPeriod -> KerugiBoutEvents.PERIOD_ENDED to (
+                eventsById[command.eventId]?.event?.payload
+                    ?: Json.encodeToString(BoutPeriodEndedPayload(bout.clock.period.name.lowercase(), bout.clock.round))
+                )
+            is BoutCommand.AdjustClock ->
+                KerugiBoutEvents.CLOCK_ADJUSTED to Json.encodeToString(BoutClockAdjustedPayload(command.remainingMillis))
             is BoutCommand.AwardAction -> KerugiBoutEvents.OPERATOR_ACTION to Json.encodeToString(
                 BoutOperatorActionPayload(command.type, command.competitor, command.points),
             )
@@ -249,7 +314,7 @@ class KerugiBoutService(
                 KerugiBoutEvents.DISQUALIFICATION_CONFIRMED to Json.encodeToString(BoutDisqualificationPayload(command.competitor))
             is BoutCommand.CompleteBout -> KerugiBoutEvents.SESSION_COMPLETED to Json.encodeToString(
                 eventsById[command.eventId]?.let { Json.decodeFromString<BoutCompletedPayload>(it.event.payload) }
-                    ?: resultOf(bout),
+                    ?: resultOf(bout, command.winner),
             )
             is BoutCommand.CancelBout ->
                 KerugiBoutEvents.SESSION_CANCELLED to Json.encodeToString(BoutCancelledPayload(command.reason.trim()))
@@ -298,6 +363,7 @@ class KerugiBoutService(
             },
             quorum = spec.quorum,
             coincidenceWindowMillis = spec.coincidenceWindowMillis,
+            timing = spec.timing,
         )
         return operatorEvent(
             origin, command.eventId, spec.competitionId, spec.bracketId, sessionId, occurredAt,
@@ -314,6 +380,23 @@ class KerugiBoutService(
         occurredAt: Instant,
         type: String,
         payload: String,
+    ) = courtEvent(eventId, competitionId, bracketId, sessionId, occurredAt, type, payload, KerugiBoutEvents.OPERATOR_SOURCE, origin.author)
+
+    /** An event the server journals by itself, with a new event ID (ADR-010 §2-§3). */
+    private fun serverEvent(bout: KerugiBout, type: String, payload: String, occurredAt: Instant, author: String) = courtEvent(
+        EventId.new(), bout.competitionId, bout.bracketId, bout.sessionId, occurredAt, type, payload, KerugiBoutEvents.SERVER_SOURCE, author,
+    )
+
+    private fun courtEvent(
+        eventId: EventId,
+        competitionId: CompetitionId,
+        bracketId: BracketId,
+        sessionId: SessionId,
+        occurredAt: Instant,
+        type: String,
+        payload: String,
+        source: String,
+        author: String,
     ) = DomainEvent(
         eventId = eventId,
         competitionId = competitionId,
@@ -323,20 +406,22 @@ class KerugiBoutService(
         sessionId = sessionId,
         judgeId = JudgeId(nameUuid("operator-judge:${peerId.value}")),
         deviceId = DeviceId(nameUuid("operator-device:${peerId.value}")),
-        source = EventSource(KerugiBoutEvents.OPERATOR_SOURCE),
-        author = origin.author.trim().ifEmpty { "operator" },
+        source = EventSource(source),
+        author = author.trim().ifEmpty { "operator" },
         occurredAt = occurredAt,
         type = type,
         payload = payload,
     )
 
-    /** The result by the final score (`KER-013`); a confirmed disqualification gives the bout to the opponent. */
-    private fun resultOf(bout: KerugiBout): BoutCompletedPayload {
+    /** The result by ADR-010 §4 (`KER-013`); a confirmed disqualification gives the bout to the opponent. */
+    private fun resultOf(bout: KerugiBout, winner: KerugiCompetitor?): BoutCompletedPayload {
         val score = bout.score()
+        val reason = if (bout.clock.phase == KerugiClock.GOLDEN_ROUND) REASON_GOLDEN_ROUND else REASON_FINAL_SCORE
         return when {
             score.disqualified != null -> BoutCompletedPayload(score.disqualified.opponent(), REASON_DISQUALIFICATION)
-            score.blue > score.red -> BoutCompletedPayload(KerugiCompetitor.BLUE, REASON_FINAL_SCORE)
-            else -> BoutCompletedPayload(KerugiCompetitor.RED, REASON_FINAL_SCORE)
+            winner != null -> BoutCompletedPayload(winner, REASON_PREFERENCE)
+            score.blue > score.red -> BoutCompletedPayload(KerugiCompetitor.BLUE, reason)
+            else -> BoutCompletedPayload(KerugiCompetitor.RED, reason)
         }
     }
 
@@ -356,6 +441,11 @@ class KerugiBoutService(
     companion object {
         const val REASON_FINAL_SCORE = "final_score"
         const val REASON_DISQUALIFICATION = "disqualification"
+        const val REASON_GOLDEN_ROUND = "golden_round"
+        const val REASON_PREFERENCE = "preference"
+
+        const val TIMER_AUTHOR = "timer"
+        const val RESTORE_REASON = "server_restart"
 
         private val allowedPoints = mapOf(
             KerugiOperatorActionType.THROW to 1..3,

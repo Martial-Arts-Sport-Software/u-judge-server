@@ -48,6 +48,8 @@ data class BoutStartSpec(
     val courtNumber: Int = 1,
     val quorum: Int = 2,
     val coincidenceWindowMillis: Long = 1_000,
+    /** Durations by the category's age class (ADR-010 §1). */
+    val timing: BoutTiming = BoutTiming(),
 )
 
 enum class BoutStateAction { START, PAUSE, RESUME }
@@ -103,7 +105,18 @@ sealed interface BoutCommand {
         val competitor: KerugiCompetitor,
     ) : FromOperator
 
-    data class CompleteBout(override val eventId: EventId, val sessionId: SessionId) : FromOperator
+    /** «Стоп периода»: ends the current round or break now (ADR-010 §2). */
+    data class EndPeriod(override val eventId: EventId, val sessionId: SessionId) : FromOperator
+
+    /** «Время»: the remaining time of a stopped round, set by the technical assistant (FHR 2024 §3.3.3). */
+    data class AdjustClock(override val eventId: EventId, val sessionId: SessionId, val remainingMillis: Long) : FromOperator
+
+    /** [winner] is the operator's choice by preference after a scoreless golden round, otherwise null (ADR-010 §4). */
+    data class CompleteBout(
+        override val eventId: EventId,
+        val sessionId: SessionId,
+        val winner: KerugiCompetitor? = null,
+    ) : FromOperator
 
     data class CancelBout(override val eventId: EventId, val sessionId: SessionId, val reason: String) : FromOperator
 }
@@ -131,10 +144,14 @@ object BoutRejection {
     const val DISQUALIFICATION_NOT_PENDING = "disqualification_not_pending"
     const val DISQUALIFICATION_CONFIRMED = "disqualification_confirmed"
     const val SCORE_TIED = "score_tied"
+    const val BOUT_NOT_FINISHED = "bout_not_finished"
+    const val WINNER_REQUIRED = "winner_required"
+    const val WINNER_NOT_ALLOWED = "winner_not_allowed"
+    const val INVALID_CLOCK = "invalid_clock"
 }
 
 /** What an applied event changed, so the publisher sends only the matching pushes. */
-enum class BoutChange { NEW_SESSION, STATE, SCORE }
+enum class BoutChange { NEW_SESSION, STATE, TIMER, SCORE }
 
 sealed interface BoutOutcome {
     data class Applied(

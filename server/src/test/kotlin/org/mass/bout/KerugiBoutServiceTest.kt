@@ -217,7 +217,7 @@ class KerugiBoutServiceTest {
         val completed = assertIs<BoutOutcome.Applied>(court.operator(BoutCommand.CompleteBout(court.id(), sessionId)))
 
         val bout = requireNotNull(court.service.current())
-        assertEquals(setOf(BoutChange.STATE), completed.changes)
+        assertEquals(setOf(BoutChange.STATE, BoutChange.TIMER), completed.changes)
         assertEquals(RED, bout.score().disqualified)
         assertEquals(emptyList(), bout.score().warnings)
         assertEquals(BoutResult(BLUE, KerugiBoutService.REASON_DISQUALIFICATION), bout.result)
@@ -227,9 +227,10 @@ class KerugiBoutServiceTest {
     fun `the result follows the final score and closes the bout for judges`() {
         val court = BoutFixture()
         val sessionId = court.start()
-        assertEquals(BoutOutcome.Rejected(BoutRejection.SCORE_TIED), court.operator(BoutCommand.CompleteBout(court.id(), sessionId)))
+        assertEquals(BoutOutcome.Rejected(BoutRejection.BOUT_NOT_FINISHED), court.operator(BoutCommand.CompleteBout(court.id(), sessionId)))
         court.operator(BoutCommand.AwardAction(court.id(), sessionId, KerugiOperatorActionType.THROW, RED, 1))
         val late = court.score("android-1")
+        court.finishRegularTime(sessionId)
 
         court.operator(BoutCommand.CompleteBout(court.id(), sessionId))
 
@@ -284,7 +285,8 @@ class KerugiBoutServiceTest {
         assertEquals(sessionId, after.sessionId)
         assertEquals(before.score(), after.score())
         assertEquals(before.started.seats, after.started.seats)
-        assertEquals(SessionState.RUNNING, after.state)
+        // ADR-010 §3: the restored clock stands still and waits for the operator.
+        assertEquals(SessionState.PAUSED, after.state)
         assertEquals(court.journal.events().maxOf { it.sequence }, court.service.cursor)
         assertEquals(false, assertIs<BoutOutcome.Applied>(court.judge("android-1", tap)).isNew)
         assertNull(court.service.bout(SessionId(EventId.new().value)))
