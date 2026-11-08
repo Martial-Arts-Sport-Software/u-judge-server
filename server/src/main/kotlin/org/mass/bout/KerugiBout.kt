@@ -84,7 +84,18 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
     val state: SessionState
     val result: BoutResult?
     val attention: List<BoutAttention>
-    private val runningPeriods: List<Pair<Instant, Instant?>>
+
+    /** Seat numbers whose judge reported ready (ADR-010 §9). */
+    val ready: Set<Int>
+
+    /** The clock of the bout (ADR-010 §2). */
+    val clock: KerugiClock
+
+    /**
+     * The latest time saved with the bout: an event's `occurredAt` or a candidate's `clientTimestamp`, which may run a
+     * little ahead of the server clock. A restart stops the clock there (ADR-010 §3).
+     */
+    val lastEventAt: Instant
     private val candidates = mutableListOf<KerugiScoreCandidate>()
     private val actions = mutableListOf<KerugiOperatorAction>()
     private val corrections = mutableListOf<KerugiScoreCorrection>()
@@ -97,27 +108,52 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
         var projection = SessionProjection.initial(sessionId)
         var completed: BoutResult? = null
         var disqualified: KerugiDisqualification? = null
-        val periods = mutableListOf<Pair<Instant, Instant?>>()
+        var time = KerugiClock(started.timing)
         val signals = mutableListOf<BoutAttention>()
+        val readySeats = mutableSetOf<Int>()
+        // A tap's corrected time may run up to 5 s ahead of the server: a clock stop never cuts off a tap journaled before it.
+        var latestTap: Instant? = null
+        fun stopAt(at: Instant) = latestTap?.let { maxOf(at, it) } ?: at
+        // The score at a period end decides whether the golden round follows (ADR-010 §2).
+        val tied = {
+            val score = scoreWith(time, disqualified)
+            disqualified == null && score.blueScore == score.redScore
+        }
         events.drop(1).forEach { sequenced ->
             val event = sequenced.event
             require(event.sessionId == sessionId) { "Event does not belong to this bout" }
+            val at = event.occurredAt
             when (event.type) {
-                KerugiBoutEvents.SESSION_STARTED, KerugiBoutEvents.SESSION_RESUMED -> {
+                KerugiBoutEvents.SESSION_STARTED -> {
                     projection = projection.transitionTo(SessionState.RUNNING)
-                    periods += event.occurredAt to null
+                    time = time.start(at)
                 }
-                KerugiBoutEvents.SESSION_PAUSED, KerugiBoutEvents.SESSION_COMPLETED, KerugiBoutEvents.SESSION_CANCELLED -> {
+                KerugiBoutEvents.SESSION_RESUMED -> {
+                    projection = projection.transitionTo(SessionState.RUNNING)
+                    time = time.resume(at)
+                }
+                KerugiBoutEvents.SESSION_PAUSED -> {
+                    projection = projection.transitionTo(SessionState.PAUSED)
+                    time = time.stop(stopAt(at), tied)
+                }
+                KerugiBoutEvents.PERIOD_ENDED -> {
+                    if (projection.state == SessionState.RUNNING) projection = projection.transitionTo(SessionState.PAUSED)
+                    time = time.endPeriod(stopAt(at), tied)
+                }
+                KerugiBoutEvents.CLOCK_STOPPED -> {
+                    val stoppedAt = Instant.parse(Json.decodeFromString<BoutClockStoppedPayload>(event.payload).stoppedAt)
+                    if (projection.state == SessionState.RUNNING) projection = projection.transitionTo(SessionState.PAUSED)
+                    // A restored round stands at the saved time; a restored break ends (ADR-010 §3).
+                    time = if (time.period == BoutPeriod.BREAK) time.endPeriod(stoppedAt, tied) else time.stop(stoppedAt, tied)
+                }
+                KerugiBoutEvents.CLOCK_ADJUSTED ->
+                    time = time.adjust(Json.decodeFromString<BoutClockAdjustedPayload>(event.payload).remainingMillis)
+                KerugiBoutEvents.CLOCK_SAVED -> Unit
+                KerugiBoutEvents.SESSION_COMPLETED, KerugiBoutEvents.SESSION_CANCELLED -> {
                     projection = projection.transitionTo(
-                        when (event.type) {
-                            KerugiBoutEvents.SESSION_PAUSED -> SessionState.PAUSED
-                            KerugiBoutEvents.SESSION_COMPLETED -> SessionState.COMPLETED
-                            else -> SessionState.CANCELLED
-                        },
+                        if (event.type == KerugiBoutEvents.SESSION_COMPLETED) SessionState.COMPLETED else SessionState.CANCELLED,
                     )
-                    periods.lastOrNull()?.takeIf { it.second == null }?.let { open ->
-                        periods[periods.lastIndex] = open.first to event.occurredAt
-                    }
+                    time = time.halt(stopAt(at))
                     if (event.type == KerugiBoutEvents.SESSION_COMPLETED) {
                         val payload = Json.decodeFromString<BoutCompletedPayload>(event.payload)
                         completed = BoutResult(payload.winner, payload.reason)
@@ -125,9 +161,9 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                 }
                 KerugiBoutEvents.SCORE_CANDIDATE -> {
                     val payload = Json.decodeFromString<BoutScoreCandidatePayload>(event.payload)
-                    candidates += KerugiScoreCandidate(
-                        event.eventId, event.judgeId, payload.competitor, payload.area, Instant.parse(payload.clientTimestamp),
-                    )
+                    val tappedAt = Instant.parse(payload.clientTimestamp)
+                    candidates += KerugiScoreCandidate(event.eventId, event.judgeId, payload.competitor, payload.area, tappedAt)
+                    latestTap = latestTap?.let { maxOf(it, tappedAt) } ?: tappedAt
                 }
                 KerugiBoutEvents.OPERATOR_ACTION -> {
                     val payload = Json.decodeFromString<BoutOperatorActionPayload>(event.payload)
@@ -148,20 +184,29 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                     Instant.parse(Json.decodeFromString<BoutAttentionPayload>(event.payload).clientTimestamp),
                     event.occurredAt,
                 )
+                KerugiBoutEvents.JUDGE_READY -> seatOfJudge(event.judgeId.value)?.number?.let(readySeats::add)
                 else -> error("Unsupported Kerugi bout event ${event.type}")
             }
         }
         state = projection.state
         result = completed
         attention = signals
-        runningPeriods = periods
+        ready = readySeats
+        clock = time
+        lastEventAt = (events.map { it.event.occurredAt } + candidates.map { it.occurredAt }).max()
         disqualification = disqualified
-        outsideRunningPeriod = candidates.filterNot { inRunningPeriod(it.occurredAt) }.map { it.eventId }.toSet()
-        scoring = KerugiScoringEngine(configuration).score(
-            candidates.filter { it.eventId !in outsideRunningPeriod && it.eventId !in resetTargets },
+        outsideRunningPeriod = candidates.filterNot { time.counts(it.occurredAt) }.map { it.eventId }.toSet()
+        scoring = scoreWith(time, disqualified)
+    }
+
+    /** The scoring of the inputs so far, with candidates outside fighting time of [time] left out (`KER-009`). */
+    private fun scoreWith(time: KerugiClock, disqualified: KerugiDisqualification?): KerugiScoringResult {
+        val outside = candidates.filterNot { time.counts(it.occurredAt) }.map { it.eventId }.toSet()
+        return KerugiScoringEngine(configuration).score(
+            candidates.filter { it.eventId !in outside && it.eventId !in resetTargets },
             actions.filter { it.eventId !in resetTargets },
             corrections,
-            listOfNotNull(disqualification),
+            listOfNotNull(disqualified),
         )
     }
 
@@ -227,10 +272,6 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
             }
             BoutHistoryEntry(event.eventId, event.type, event.occurredAt, event.author, seat, competitor, detail, status)
         }
-    }
-
-    private fun inRunningPeriod(instant: Instant) = runningPeriods.any { (start, end) ->
-        !instant.isBefore(start) && (end == null || instant.isBefore(end))
     }
 
     companion object {

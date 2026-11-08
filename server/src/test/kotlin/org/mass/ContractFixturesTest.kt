@@ -21,7 +21,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.mass.applications.AgeClass
 import org.mass.bout.BoutAthlete
+import org.mass.bout.BoutTiming
 import org.mass.bout.BoutCommand
 import org.mass.bout.BoutCorner
 import org.mass.bout.BoutEventJournal
@@ -129,6 +131,10 @@ class ContractFixturesTest {
         val sessionPaths = setOf("cursor", "session.sessionId", "session.courtId", "session.seat.judgeId")
         assertMatches("session_snapshot", judge.receiveText(), generated = sessionPaths)
         second.receiveText()
+        // ADR-010 §9: «Готов» of the seated judge while the bout is prepared.
+        val ready = withValues(fixture("judge_ready_command"), generated)
+        assertEquals(ready.getValue("eventId"), Json.parseToJsonElement(judge.exchange(ready)).jsonObject.getValue("eventId"))
+        assertEquals(setOf(1), hub.bouts.current()!!.ready)
         hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START))
         judge.receiveText()
         second.receiveText()
@@ -153,6 +159,15 @@ class ContractFixturesTest {
         val invalidResync = JsonObject(fixture("resync_request") + ("cursor" to JsonPrimitive("latest")))
         assertMatches("resync_rejected", judge.exchange(invalidResync))
 
+        // ADR-010: round 1 ends into the break, the break is stopped, round 2 runs and ends, then the result.
+        hub.operator("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
+        judge.receiveText()
+        hub.operator("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
+        assertMatches("kerugi_timer_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
+        hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.RESUME))
+        judge.receiveText()
+        hub.operator("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
+        judge.receiveText()
         hub.operator("Оператор", BoutCommand.CompleteBout(EventId.new(), sessionId))
         assertMatches("session_state_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
     }
@@ -184,6 +199,7 @@ class ContractFixturesTest {
             blue = corner("blue"),
             red = corner("red"),
             judges = listOf(RosterJudge("android-contract", "Ivanov"), RosterJudge("android-2", "Petrova")),
+            timing = BoutTiming.of(AgeClass.YOUTH),
         )
     }
 

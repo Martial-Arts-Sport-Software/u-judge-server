@@ -173,7 +173,14 @@ fun BracketFullScreenComponent(
                         if (numbered) board.number(state.category.id, round, boutIndex) else null
                     }
                     if (grid) {
-                        BracketComponent(draw, state.category.entries, Modifier.fillMaxSize(), scale = BracketScale.Large, number = number)
+                        BracketComponent(
+                            draw,
+                            state.category.entries,
+                            Modifier.fillMaxSize(),
+                            scale = BracketScale.Large,
+                            number = number,
+                            progress = board.results[state.category.id].takeIf { numbered },
+                        )
                     } else {
                         BoutList(draw, state, number, Modifier.fillMaxSize().padding(16.dp))
                     }

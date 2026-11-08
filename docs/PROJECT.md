@@ -118,7 +118,8 @@ delivery proof, хранит решения pairing в журнале, а deskto
 подтверждением, показывает сетку с номерами боёв и полноэкранный просмотр; экран «Площадки и протоколы» распределяет
 категории по площадкам, нумерует бои по всем площадкам, выгружает PDF «Протокол хода соревнований» и показывает панель
 площадки со следующим боем (I4b). «Начать» открывает экран «Поединок»: бой Kerugi по баллам с составом из подключённых
-судей, действиями оператора, коррекцией, сбросом и результатом (server-часть I2a); таймер и ход сетки - I2b.
+судей, действиями оператора, коррекцией, сбросом и результатом (server-часть I2a), с таймером раундов, ходом сетки и
+окном зрителей (server-часть I2b).
 
 ### 7.1. Реализовано в server
 
@@ -135,13 +136,17 @@ delivery proof, хранит решения pairing в журнале, а deskto
 - бой Kerugi по [ADR-009](adr/ADR-009-kerugi-bout-contract.md): `KerugiBout` на едином журнале `domain_events`, один
   realtime dispatcher `RealtimeHub` для судей и оператора, snapshot и resync для устройства, `kerugi_score_command`,
   `judge_attention_command`, `session_state_updated`, `kerugi_score_updated`; экран «Поединок» на desktop;
+- время боя и ход сетки по [ADR-010](adr/ADR-010-kerugi-timer-advancement.md): таймер раундов, перерыва и golden round на
+  том же журнале, `kerugi_timer_updated`, `judge_ready_command`, продвижение победителя, «Победитель» и «завершена»,
+  окно зрителей с «Приглашаются / Готовятся»;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
 
 ### 7.2. Не реализовано в server
 
-- таймер, раунды, golden round и продвижение победителя (I2b); client-часть боя (client PR I2a);
+- прогон client-частей I2a и I2b против `./gradlew :desktop:run`, ручной регресс desktop (этап 7); сброс раунда и остальные
+  причины победы (`KER-014`);
 - physical-device evidence для WebSocket handshake, heartbeat и `heartbeat_timeout` (I3).
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
 - Нормативные длительности Kerugi, golden round policy и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum

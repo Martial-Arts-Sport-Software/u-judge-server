@@ -19,4 +19,7 @@ object State {
     var currentError by mutableStateOf("")
     var currentRoute by mutableStateOf(Routes.ENTRY.path)
 
+    /** The spectator window on the external monitor (ADR-010 §8). */
+    var spectatorOpen by mutableStateOf(false)
+
 }

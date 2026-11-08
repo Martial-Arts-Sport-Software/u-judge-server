@@ -3,6 +3,7 @@ package org.mass
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
@@ -87,9 +88,10 @@ class KerugiBoutScenarioTest {
             // A lone judge is audited, not scored.
             assertEquals("command_ack", judges[2].command(judges[2].tap("RED", "BODY", clock.plusMillis(3_000))).string("type"))
 
-            // Judge 1 drops out; the operator scores; judge 1 returns to the same seat with the current score.
+            // Judge 1 drops out; the operator scores 20 s into the round; judge 1 returns to the same seat.
             val seat = judges[0].session!!.getValue("seat")
             judges[0].close()
+            clock = clock.plusSeconds(20)
             hub.operator("Оператор", BoutCommand.AwardAction(id(), started, KerugiOperatorActionType.THROW, KerugiCompetitor.RED, 2))
             assertEquals(2, judges[1].push("kerugi_score_updated").score("red"))
             val returned = judge("android-1").connect()
@@ -97,32 +99,131 @@ class KerugiBoutScenarioTest {
             assertEquals(seat, resynced.getValue("seat"))
             assertEquals(2, resynced.getValue("score").jsonObject.getValue("red").jsonPrimitive.int)
             assertEquals("command_ack", returned.command(firstTap).string("type"))
+            clock = clock.plusSeconds(30)
         }
 
-        // Restart: a new process over the same journal gives the same bout, seats and score.
+        // Restart: a new process over the same journal gives the same bout, seats and score; the clock stands at the
+        // latest saved event (ADR-010 §3), 20 s into round 1, and waits for the operator.
         testApplication {
             val hub = start()
             assertEquals(sessionId, hub.bouts.current()?.sessionId)
             val judge = judge("android-2").connect()
             val session = judge.resync().getValue("session").jsonObject
-            assertEquals("running", session.string("state"))
+            assertEquals("paused", session.string("state"))
+            assertEquals(timer("round", 1, remaining = 100_000, running = false), session.getValue("timer"))
             assertEquals(2, session.getValue("score").jsonObject.getValue("blue").jsonPrimitive.int)
             assertEquals(2, session.getValue("score").jsonObject.getValue("red").jsonPrimitive.int)
             assertEquals("command_ack", judge("android-1").connect().command(firstTap).string("type"))
             assertEquals(2, hub.bouts.current()!!.score().blue)
 
-            assertEquals(
-                BoutOutcome.Rejected("score_tied"),
-                hub.operator("Оператор", BoutCommand.CompleteBout(id(), sessionId!!)),
-            )
+            assertEquals(BoutOutcome.Rejected("bout_not_finished"), hub.operator("Оператор", BoutCommand.CompleteBout(id(), sessionId!!)))
+            hub.operator("Оператор", BoutCommand.ChangeState(id(), sessionId!!, BoutStateAction.RESUME))
+            val resumed = judge.push("session_state_updated")
+            assertEquals("running", resumed.string("state"))
+            assertEquals(timer("round", 1, remaining = 100_000, running = true, since = clock), resumed.getValue("timer"))
+
+            // The server timer ends round 1 at its deadline; the break runs from that instant.
+            val deadline = clock.plusSeconds(100)
+            clock = deadline.plusMillis(150)
+            hub.tick()
+            val breakStarted = judge.push("session_state_updated")
+            assertEquals("paused", breakStarted.string("state"))
+            assertEquals(timer("break", 2, remaining = 60_000, duration = 60_000, running = true, since = deadline), breakStarted.getValue("timer"))
+            assertEquals("command_ack", judge.command(judge.tap("BLUE", "HEAD", clock)).string("type"))
+            assertEquals(2, hub.bouts.current()!!.score().blue)
+
+            // Round 2 after the break, a spin, the end of the round by the operator and the result by the final score.
+            hub.operator("Оператор", BoutCommand.ChangeState(id(), sessionId!!, BoutStateAction.RESUME))
+            assertEquals(timer("round", 2, remaining = 120_000, running = true, since = clock), judge.push("session_state_updated").getValue("timer"))
             hub.operator("Оператор", BoutCommand.AwardAction(id(), sessionId!!, KerugiOperatorActionType.SPIN_BONUS, KerugiCompetitor.BLUE, 1))
             assertEquals(3, judge.push("kerugi_score_updated").score("blue"))
+            clock = clock.plusSeconds(10)
+            hub.operator("Оператор", BoutCommand.EndPeriod(id(), sessionId!!))
+            assertEquals(timer("round", 2, remaining = 0, running = false), judge.push("session_state_updated").getValue("timer"))
             hub.operator("Оператор", BoutCommand.CompleteBout(id(), sessionId!!))
             val completed = judge.push("session_state_updated")
             assertEquals("completed", completed.string("state"))
             assertEquals("BLUE", completed.getValue("result").jsonObject.string("winner"))
+            assertEquals("final_score", completed.getValue("result").jsonObject.string("reason"))
             assertEquals("session_closed", judge.command(judge.tap("RED", "HEAD", clock)).string("code"))
         }
+    }
+
+    @Test
+    fun `judges move to the next bout on the same socket and a stale tap is refused`() = testApplication {
+        val hub = start()
+        val judges = (1..3).map { judge("android-$it").connect().also { judge -> judge.resync() } }
+        val first = assertIs<BoutOutcome.Applied>(hub.operator("Оператор", BoutCommand.StartBout(id(), spec()))).sessionId
+        judges.forEach { it.push("session_snapshot") }
+        hub.operator("Оператор", BoutCommand.ChangeState(id(), first, BoutStateAction.START))
+        judges.forEach { it.push("session_state_updated") }
+        val stale = judges[0].tap("BLUE", "HEAD", clock)
+        hub.operator("Оператор", BoutCommand.AwardAction(id(), first, KerugiOperatorActionType.THROW, KerugiCompetitor.BLUE, 1))
+        hub.operator("Оператор", BoutCommand.EndPeriod(id(), first))
+        hub.operator("Оператор", BoutCommand.ChangeState(id(), first, BoutStateAction.RESUME))
+        hub.operator("Оператор", BoutCommand.EndPeriod(id(), first))
+        hub.operator("Оператор", BoutCommand.CompleteBout(id(), first))
+        judges.forEach { judge ->
+            judge.push("kerugi_score_updated")
+            repeat(3) { judge.push("session_state_updated") }
+            assertEquals("completed", judge.push("session_state_updated").string("state"))
+        }
+
+        // «Начать» of the next bout: every judge gets the new session on the socket it already has (ADR-010 §7).
+        val next = spec().copy(boutNumber = 8, index = 1, judges = listOf(3, 1).map { RosterJudge("android-$it", "Судья$it") })
+        val second = assertIs<BoutOutcome.Applied>(hub.operator("Оператор", BoutCommand.StartBout(id(), next))).sessionId
+        val snapshots = judges.map { it.push("session_snapshot").getValue("session").jsonObject }
+        snapshots.forEach { assertEquals(second.value, it.string("sessionId")) }
+        assertEquals(8, snapshots[0].getValue("boutNumber").jsonPrimitive.int)
+        assertEquals(2, snapshots[0].getValue("seat").jsonObject.getValue("number").jsonPrimitive.int)
+        assertNull(snapshots[1]["seat"] as? JsonObject)
+        assertEquals(1, snapshots[2].getValue("seat").jsonObject.getValue("number").jsonPrimitive.int)
+        assertEquals(timer("round", 1, remaining = 120_000, running = false), snapshots[0].getValue("timer"))
+
+        // A tap built from the old snapshot is refused; the unseated judge has no seat to tap from.
+        assertEquals("session_closed", judges[0].command(stale).string("code"))
+        hub.operator("Оператор", BoutCommand.ChangeState(id(), second, BoutStateAction.START))
+        judges.forEach { assertEquals("running", it.push("session_state_updated").string("state")) }
+        assertEquals("command_ack", judges[0].command(judges[0].tap("RED", "HEAD", clock)).string("type"))
+        val foreign = JsonObject(scoreCommandFor(snapshots[0], id().value, clock) + ("deviceId" to JsonPrimitive("android-2")))
+        assertEquals("judge_not_assigned", judges[1].command(foreign).string("code"))
+        assertEquals(first, hub.bouts.bout(first)!!.sessionId)
+        assertEquals("BLUE", hub.bouts.bout(first)!!.result!!.winner.name)
+    }
+
+    @Test
+    fun `the judges' first point in the golden round finishes the bout for every subscriber`() = testApplication {
+        val hub = start()
+        val judges = (1..3).map { judge("android-$it").connect().also { judge -> judge.resync() } }
+        val sessionId = assertIs<BoutOutcome.Applied>(hub.operator("Оператор", BoutCommand.StartBout(id(), spec()))).sessionId
+        judges.forEach { it.push("session_snapshot") }
+        // A 0:0 tie after round 2 leads through the rest into the golden round.
+        listOf(
+            BoutCommand.ChangeState(id(), sessionId, BoutStateAction.START),
+            BoutCommand.EndPeriod(id(), sessionId),
+            BoutCommand.ChangeState(id(), sessionId, BoutStateAction.RESUME),
+            BoutCommand.EndPeriod(id(), sessionId),
+            BoutCommand.ChangeState(id(), sessionId, BoutStateAction.RESUME),
+        ).forEach { assertIs<BoutOutcome.Applied>(hub.operator("Оператор", it)) }
+        val golden = judges.map { judge -> List(5) { judge.push("session_state_updated") }.last() }
+        golden.forEach {
+            assertEquals("running", it.string("state"))
+            assertEquals(timer("round", 3, remaining = 60_000, duration = 60_000, running = true, since = clock), it.getValue("timer"))
+        }
+
+        assertEquals("command_ack", judges[0].command(judges[0].tap("RED", "BODY", clock.plusMillis(100))).string("type"))
+        assertEquals("command_ack", judges[2].command(judges[2].tap("RED", "BODY", clock.plusMillis(400))).string("type"))
+        judges.forEach { judge ->
+            assertEquals(1, judge.push("kerugi_score_updated").score("red"))
+            val finished = judge.push("session_state_updated")
+            assertEquals("completed", finished.string("state"))
+            assertEquals("RED", finished.getValue("result").jsonObject.string("winner"))
+            assertEquals("golden_round", finished.getValue("result").jsonObject.string("reason"))
+            assertEquals(false, finished.getValue("timer").jsonObject.getValue("running").jsonPrimitive.content.toBoolean())
+        }
+        val deciding = hub.bouts.current()!!.history().last { it.type == "kerugi_score_candidate" }
+        assertEquals(BoutOutcome.Rejected("session_closed"), hub.operator("Оператор", BoutCommand.CorrectScore(id(), sessionId, deciding.eventId)))
+        assertEquals("session_closed", judges[1].command(judges[1].tap("BLUE", "HEAD", clock)).string("code"))
     }
 
     @Test
@@ -193,6 +294,13 @@ class KerugiBoutScenarioTest {
     )
 
     private fun id() = EventId(UUID.randomUUID().toString())
+
+    private fun timer(period: String, round: Int, remaining: Long, running: Boolean, duration: Long = 120_000, since: Instant? = null) =
+        realtimeJson.parseToJsonElement(
+            realtimeJson.encodeToString(
+                TimerView(period, round, round == 3, duration, remaining, running, since?.toString()),
+            ),
+        )
 
     private fun JsonObject.score(side: String) = getValue("score").jsonObject.getValue(side).jsonPrimitive.int
 }

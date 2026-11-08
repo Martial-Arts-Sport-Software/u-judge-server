@@ -20,13 +20,30 @@ object KerugiBoutEvents {
     const val DISQUALIFICATION_CONFIRMED = "kerugi_disqualification_confirmed"
     const val JUDGE_ATTENTION = "judge_attention_signalled"
 
+    /** A seated judge reports ready for the bout (ADR-010 §9, client `CLI-026`). */
+    const val JUDGE_READY = "judge_ready_signalled"
+
+    /** The clock of ADR-010: a period ends by the operator or at its deadline by the server timer. */
+    const val PERIOD_ENDED = "kerugi_period_ended"
+    const val CLOCK_ADJUSTED = "kerugi_clock_adjusted"
+
+    /** A checkpoint of the running clock: the time a restart restores (ADR-010 §3). */
+    const val CLOCK_SAVED = "kerugi_clock_saved"
+
+    /** The server stopped the clock on restore at the last saved time (ADR-010 §3). */
+    const val CLOCK_STOPPED = "kerugi_clock_stopped"
+
     val ALL = setOf(
         BOUT_STARTED, SESSION_STARTED, SESSION_PAUSED, SESSION_RESUMED, SESSION_COMPLETED, SESSION_CANCELLED,
         SCORE_CANDIDATE, OPERATOR_ACTION, SCORE_CORRECTION, BOUT_RESET, DISQUALIFICATION_CONFIRMED, JUDGE_ATTENTION,
+        PERIOD_ENDED, CLOCK_ADJUSTED, CLOCK_SAVED, CLOCK_STOPPED, JUDGE_READY,
     )
 
     const val JUDGE_SOURCE = "judge_device"
     const val OPERATOR_SOURCE = "operator"
+
+    /** Events the server journals by itself: the timer expiry, the checkpoints and the restore stop. */
+    const val SERVER_SOURCE = "server"
 }
 
 @Serializable
@@ -54,6 +71,8 @@ data class KerugiBoutStartedPayload(
     val seats: List<BoutSeat>,
     val quorum: Int,
     val coincidenceWindowMillis: Long,
+    /** Durations by the age class (ADR-010 §1); I2a starts without it read as the 15+ row. */
+    val timing: BoutTiming = BoutTiming(),
 )
 
 /** A raw side-judge tap; [clientTimestamp] is the tap time corrected to the server clock, [sequence] the outbox one. */
@@ -86,3 +105,15 @@ data class BoutCompletedPayload(val winner: KerugiCompetitor, val reason: String
 
 @Serializable
 data class BoutCancelledPayload(val reason: String)
+
+/** The period that ended: `round` or `break`, and the round being fought or, for a break, the round after it. */
+@Serializable
+data class BoutPeriodEndedPayload(val period: String, val round: Int)
+
+/** The technical assistant's correction of the remaining time of a stopped round (FHR 2024 §3.3.3). */
+@Serializable
+data class BoutClockAdjustedPayload(val remainingMillis: Long)
+
+/** The restore stop: the clock stands at [stoppedAt], the time of the latest event of the bout. */
+@Serializable
+data class BoutClockStoppedPayload(val reason: String, val stoppedAt: String)

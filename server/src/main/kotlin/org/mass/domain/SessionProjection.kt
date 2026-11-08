@@ -28,7 +28,7 @@ class SessionProjection private constructor(
         private val transitions = mapOf(
             SessionState.PREPARED to setOf(SessionState.RUNNING, SessionState.CANCELLED),
             SessionState.RUNNING to setOf(SessionState.PAUSED, SessionState.COMPLETED, SessionState.CANCELLED),
-            SessionState.PAUSED to setOf(SessionState.RUNNING, SessionState.CANCELLED),
+            SessionState.PAUSED to setOf(SessionState.RUNNING, SessionState.COMPLETED, SessionState.CANCELLED),
             SessionState.COMPLETED to emptySet(),
             SessionState.CANCELLED to emptySet(),
         )

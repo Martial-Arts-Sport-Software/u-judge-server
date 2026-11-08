@@ -169,8 +169,9 @@ object BracketsSetupScreen : Screen {
         val draws = remember(runtimeState) { Server.runtime.competitionDraws }
         val courts = remember(runtimeState) { Server.runtime.competitionCourts }
         val revision by (draws?.revision ?: remember { MutableStateFlow(0L) }).collectAsState()
-        // The courts board carries the draw board, so both are read once per change and always agree.
-        val courtsBoard = remember(history, revision, courts) { courts?.board() ?: CourtsBoard.Empty }
+        val boutRevision by (Server.runtime.realtime?.bouts?.revision ?: remember { MutableStateFlow(0L) }).collectAsState()
+        // The courts board carries the draw board and the results, so all are read once per change and always agree.
+        val courtsBoard = remember(history, revision, boutRevision, courts) { courts?.board() ?: CourtsBoard.Empty }
         val board = courtsBoard.draws
         val scope = rememberCoroutineScope()
 
@@ -532,6 +533,7 @@ object BracketsSetupScreen : Screen {
                                             )
                                         },
                                         number = numberOf,
+                                        progress = courtsBoard.results[selected.id].takeIf { selectedState?.preview == null },
                                     )
                                     if (courtsBoard.preliminary && selectedState?.preview == null) {
                                         Text(

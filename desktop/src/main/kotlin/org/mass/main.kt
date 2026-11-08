@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.mass.State.currentRoute
 import org.mass.locale.Localization
+import org.mass.screens.SpectatorWindow
 
 fun main() {
     ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
@@ -34,5 +35,9 @@ private fun desktopApplication() = application {
         state = windowState,
     ) {
         App()
+    }
+    // The spectator screen for the external monitor (ADR-010 §8), opened from the bout screen.
+    if (State.spectatorOpen) {
+        SpectatorWindow(onClose = { State.spectatorOpen = false })
     }
 }

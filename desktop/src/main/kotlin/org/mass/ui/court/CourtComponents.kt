@@ -36,7 +36,6 @@ import org.mass.draw.CourtItem
 import org.mass.draw.CourtPanel
 import org.mass.draw.CourtsBoard
 import org.mass.draw.ItemRef
-import org.mass.draw.progress
 import org.mass.enums.Colors
 import org.mass.locale.Localization
 import org.mass.ui.bracket.entryLabel
@@ -199,7 +198,7 @@ private fun CategoryProgressRow(board: CourtsBoard, state: CategoryDrawState, se
     ) {
         Text(state.category.title, color = content, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ProgressBadge(state.progress, inverted = !selected)
+            ProgressBadge(board.progress(state), inverted = !selected)
             numbersText(board, state)?.let {
                 Text(it, color = content.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -207,7 +206,7 @@ private fun CategoryProgressRow(board: CourtsBoard, state: CategoryDrawState, se
     }
 }
 
-/** «свободна», «в процессе», «нет поединков» or «требует новой жеребьёвки» in the error colour. */
+/** «свободна», «в процессе», «завершена», «нет поединков» or «требует новой жеребьёвки» in the error colour. */
 @Composable
 fun ProgressBadge(progress: CategoryProgress, inverted: Boolean) {
     val (background, content) = when {
@@ -230,6 +229,7 @@ fun progressLabel(progress: CategoryProgress): String = Localization.getString(
         CategoryProgress.IN_PROGRESS -> "brackets_status_started"
         CategoryProgress.NO_BOUTS -> "brackets_status_no_bouts"
         CategoryProgress.NEEDS_REDRAW -> "brackets_status_needs_redraw"
+        CategoryProgress.COMPLETED -> "brackets_status_completed"
     },
 )
 

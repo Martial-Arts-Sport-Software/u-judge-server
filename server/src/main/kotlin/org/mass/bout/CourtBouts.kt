@@ -3,11 +3,13 @@ package org.mass.bout
 import org.mass.DeviceConnectionState
 import org.mass.PairingRequests
 import org.mass.RealtimeHub
+import org.mass.SessionView
 import org.mass.applications.ApplicationDiscipline
 import org.mass.applications.CategoryEntry
 import org.mass.domain.CompetitionId
 import org.mass.domain.EventId
 import org.mass.domain.SessionState
+import org.mass.draw.BoutDecision
 import org.mass.draw.CategoryStatus
 import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
@@ -16,6 +18,12 @@ import org.mass.draw.CourtPanel
 import org.mass.draw.CourtProgress
 import org.mass.draw.DrawOutcome
 import org.mass.draw.ItemRef
+
+/**
+ * The spectator window (ADR-010 §8): the current bout as a connected device without a seat receives it, and the call list
+ * «Приглашаются» ([invited], the next bout) and «Готовятся» ([preparing], the bout after it). Read-only.
+ */
+data class SpectatorView(val court: Int, val session: SessionView?, val invited: CourtItem?, val preparing: CourtItem?)
 
 /** A paired device the operator can seat: approved, not revoked and connected now. */
 data class ConnectedJudge(val deviceId: String, val surname: String, val platform: String)
@@ -45,6 +53,12 @@ class CourtBouts(
         get() = realtime.bouts
 
     fun panel(): CourtPanel = courts.courtPanel()
+
+    fun spectator(): SpectatorView {
+        val panel = panel()
+        val calls = listOfNotNull(panel.next) + panel.queue.filter { it.ref != panel.next?.ref }
+        return SpectatorView(panel.court, realtime.session(null), calls.getOrNull(0), calls.getOrNull(1))
+    }
 
     fun connectedJudges(): List<ConnectedJudge> = pairing.operatorRegistry().devices
         .filter { !it.revoked && it.connectionState == DeviceConnectionState.CONNECTED }
@@ -76,6 +90,7 @@ class CourtBouts(
             judges = judges.map { RosterJudge(it, connected.getValue(it).surname) },
             quorum = quorum,
             coincidenceWindowMillis = coincidenceWindowMillis,
+            timing = BoutTiming.of(bout.category.section.ageClass),
         )
         bouts.startRejection(spec)?.let { return CourtBoutOutcome.Rejected(it) }
         if (board.category(bout.category.id)?.status == CategoryStatus.CONFIRMED) {
@@ -106,11 +121,21 @@ class CourtBouts(
         const val NO_NEXT_BOUT = "no_next_bout"
         const val NOT_KERUGI = "not_kerugi"
 
-        /** The court panel's view of the bouts: the current one (unless cancelled) and the decided ones. */
-        fun progress(bouts: KerugiBoutService): CourtProgress = CourtProgress(
-            current = bouts.current()?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf),
-            judged = bouts.bouts().filter { it.state == SessionState.COMPLETED }.map(::refOf).toSet(),
-        )
+        /**
+         * The court panel's view of the bouts: the current one (unless cancelled), the decided ones and their results, which
+         * move the winners on in the bracket (ADR-010 §6, `BRK-004`, `SES-007`).
+         */
+        fun progress(bouts: KerugiBoutService): CourtProgress {
+            val completed = bouts.bouts().filter { it.state == SessionState.COMPLETED }
+            return CourtProgress(
+                current = bouts.current()?.takeIf { it.state != SessionState.CANCELLED }?.let(::refOf),
+                judged = completed.map(::refOf).toSet(),
+                decisions = completed.associate { bout ->
+                    val result = checkNotNull(bout.result)
+                    refOf(bout) to BoutDecision(result.winner, result.reason, bout.sessionId)
+                },
+            )
+        }
 
         private fun refOf(bout: KerugiBout) = ItemRef(bout.started.categoryId, bout.started.round, bout.started.index)
 

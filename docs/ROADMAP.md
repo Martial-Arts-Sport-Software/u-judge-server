@@ -54,7 +54,8 @@ Pilot не считается production-ready до отдельного hardeni
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
 - [ ] Gate G4: импорт заявок (I4a), жеребьёвка, площадки, нумерация боёв и протоколы (I4b), старт поединка с панели
-  площадки с подключёнными судьями (server-часть I2a) подтверждены тестами; продвижение победителя открыто (I2b).
+  площадки с подключёнными судьями (server-часть I2a) и продвижение победителя по сетке (server-часть I2b) подтверждены
+  тестами.
 - [ ] Gate G5: не готов.
 - [ ] Gate G6: не готов.
 - [ ] Gate G7: не готов.
@@ -214,6 +215,34 @@ restart (H2 и PostgreSQL 18.6) и отказами (`KerugiBoutScenarioTest`, `
 | `AUD-002` | Implemented | Коррекция ссылается на исходное событие, история показывает оба (`KerugiBoutServiceTest`) |
 | `DEV-008` | Partial | Snapshot передаёт номер, категорию, стороны, состояние и место судьи (`ContractFixturesTest`, `KerugiBoutScenarioTest`); отказ от hardcoded номера - client PR |
 
+#### Доказательства I2b (server)
+
+Server [#138](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/138) поверх I2a #135, issue
+[#137](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/137), контракт
+[ADR-010](adr/ADR-010-kerugi-timer-advancement.md); client
+[u-judge-client#127](https://github.com/Martial-Arts-Sport-Software/u-judge-client/pull/127). Сценарий доказан тестами на
+production `module()`, JDBC journal и `ServerRuntime`: таймер по возрасту, раунды, перерыв, golden round, окончание периода
+по server timer, повтор, отказы, restart посреди раунда (H2 и PostgreSQL 18.6), продвижение победителя до «Победитель»
+и переход судей к следующему поединку на том же сокете (`KerugiClockTest`, `KerugiBoutTimerTest`, `KerugiBoutServiceTest`,
+`BracketProgressTest`, `CourtBoutsTest`, `KerugiBoutScenarioTest`, `ContractFixturesTest`, `ServerRuntimeTest`,
+`RealPostgresLifecycleTest`). Строка I2b остаётся открытой до прогона client против `./gradlew :desktop:run`; ручной прогон
+desktop отложен до полного регресса этапа 7 (решение 08.11.2026).
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `KER-010` | Implemented | Два раунда и дополнительный раунд; 1:00/1:30/2:00 по возрастному классу категории фиксируются при «Начать», перерыв 1:00, отдых 0:30 и golden round 1:00 (`KerugiBoutTimerTest`, `KerugiClockTest`, `CourtBoutsTest`) |
+| `KER-011` | Implemented | Старт, пауза, продолжение, «Стоп периода» и «Время»; окончание периода по server timer в точный deadline; после перезапуска таймер стоит на последнем сохранённом времени, checkpoint каждые 5 с (`KerugiBoutTimerTest`, `KerugiBoutScenarioTest`, `RealPostgresLifecycleTest`) |
+| `KER-012` | Implemented | Перерыв - отдельный период со своим временем; snapshot, `session_state_updated` и `kerugi_timer_updated` передают тип периода и оставшееся время устройствам и окну зрителей; удар в перерыве только в аудите (`KerugiBoutTimerTest`, `ContractFixturesTest`, `CourtBoutsTest`) |
+| `KER-013` | Implemented | Победа по финальному счёту после второго раунда; golden round завершается сервером сразу по первому баллу (кворум судей, бросок, вращение) или Gamjeom против одного из спортсменов, коррекция решающего балла отклоняется как изменение завершённого боя; без баллов - предпочтительность; причина хранится в `session_completed` (`KerugiBoutTimerTest`, `KerugiBoutScenarioTest`) |
+| `UI-001` | Partial | Экран боя показывает бой, период, таймер, участников, счёт и Gamjeom из persisted projection (`KerugiBout`); ручной прогон - этап 7 |
+| `UI-003` | Partial | Недопустимые команды таймера отклоняются без события, повтор с тем же ID идемпотентен (`KerugiBoutTimerTest`); кнопки неактивны, пока команда выполняется; ручной прогон - этап 7 |
+| `UI-004` | Partial | Окно зрителей строится из того же read-only `SessionView`, что получает устройство без места, без изменяющих действий (`CourtBoutsTest`); ручной прогон на втором мониторе - этап 7 |
+| `UI-005` | Partial | Окно зрителей показывает площадку, категорию, бой и «Приглашаются / Готовятся» из панели площадки, обновляется по каждому событию (`CourtBoutsTest`); ручной прогон - этап 7 |
+| `SES-007` | Implemented | Результат сетки ссылается на сессию, события которой его объясняют; восстанавливается после перезапуска (`CourtBoutsTest`) |
+| `BRK-003` | Implemented | Структура сетки блокируется первым «Начать», до первого судейского события; перемешивание после результатов и перезапуска отклоняется (`CourtBoutsTest`) |
+| `BRK-004` | Implemented | Победитель выбывания занимает слот следующего раунда, бой появляется в очереди площадки со своим номером ADR-008; круговая - по победам и личной встрече; «Победитель» по финалу (`BracketProgressTest`, `CourtBoutsTest`) |
+| `CMP-008` | Implemented | «Все категории» показывает «завершена», когда решены все бои категории, также после перезапуска (`CourtBoutsTest`) |
+
 Технические задачи, обязательные внутри инкрементов:
 
 - I1: единый `domain_events` журнал вместо таблиц `V2`-`V5` с одной per-peer sequence; production wiring `ManagedPostgresRuntime` → JDBC journals → `module()`;
@@ -268,6 +297,7 @@ restart (H2 и PostgreSQL 18.6) и отказами (`KerugiBoutScenarioTest`, `
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
 | [x]    | [ADR-006](adr/ADR-006-local-tls-trust.md) | Local TLS: self-signed сертификат peer и SPKI pin на телефоне с кодом сверки |
 | [x]    | [ADR-009](adr/ADR-009-kerugi-bout-contract.md) | Realtime-контракт боя Kerugi: snapshot, resync, `kerugi_score_command`, один dispatcher |
+| [x]    | [ADR-010](adr/ADR-010-kerugi-timer-advancement.md) | Время боя Kerugi: раунды, перерыв, golden round, `kerugi_timer_updated`; продвижение победителя по сетке |
 
 ### Gate G0
 
@@ -408,15 +438,16 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 ### Накопленное server-only доказательство
 
 Domain, JDBC/H2/PostgreSQL recovery и Ktor contract tests с production `module()`; статусы требований - в «Доказательства
-I2a (server)». Общий пробел: client, таймер и раунды (I2b), physical devices (I3).
+I2a (server)» и «Доказательства I2b (server)». Общий пробел: прогон client против server и physical devices (I3).
 
 | Компонент | Подтверждено тестами | Открыто |
 |-----------|----------------------|---------|
 | `KerugiScoringEngine` | 2 или 3 боковых судьи, quorum и coincidence window (по умолчанию 2 и `1000 мс`); непересекающиеся окна одного участника; distinct configured judges; `BODY=1`/`HEAD=2`, минимальная оценка при конфликте; audit каждого окна, включая insufficient quorum | - |
-| `KerugiBout`, `KerugiBoutService` (I2a) | Один бой - одна сессия в `domain_events`: старт с составом и настройками, переходы, кандидаты, действия оператора, коррекция, сброс с причиной, дисквалификация, результат; rebuild после restart; idempotent retry | Таймер и раунды (I2b) |
+| `KerugiBout`, `KerugiBoutService` (I2a, I2b) | Один бой - одна сессия в `domain_events`: старт с составом и настройками, переходы, кандидаты, действия оператора, коррекция, сброс с причиной, дисквалификация, результат; rebuild после restart; idempotent retry; таймер, раунды, перерыв, golden round (ADR-010) | Сброс раунда (`SES-006`), остальные причины победы (`KER-014`) |
 | `RealtimeHub` (I2a) | Один dispatcher для судей и оператора; snapshot, resync, `session_state_updated`, `kerugi_score_updated` в порядке журнала; операторские команды с устройства отклоняются | Client (client PR I2a) |
 | `CourtBouts`, экран боя (I2a) | «Начать» с панели площадки, состав из подключённых устройств, блокировка жеребьёвки; desktop экран боя | Ручной прогон (этап 7) |
-| `KerugiTimerJournal`, `JdbcKerugiTimerJournal` | `START`/`PAUSE`/`RESUME`/`STOP`, отдельный `ROUND_BREAK` | Длительности по возрасту, remaining time, раунды `KER-010` и подключение к бою (I2b) |
+| `KerugiClock`, server timer (I2b) | Периоды по возрасту, окончание в точный deadline, checkpoint и пауза после restart на едином журнале; отдельный `KerugiTimerJournal` удалён | Ручной прогон (этап 7) |
+| `BracketProgress`, окно зрителей (I2b) | Продвижение победителя, «Победитель», «завершена», read-only проекция с «Приглашаются / Готовятся» | Ручной прогон на втором мониторе (этап 7) |
 
 ### Gate G3
 

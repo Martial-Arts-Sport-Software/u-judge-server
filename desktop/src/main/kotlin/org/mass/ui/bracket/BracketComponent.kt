@@ -53,6 +53,7 @@ import androidx.compose.ui.zIndex
 import org.jetbrains.compose.resources.painterResource
 import org.mass.applications.CategoryEntry
 import org.mass.draw.BoutSide
+import org.mass.draw.BracketProgress
 import org.mass.draw.Bouts
 import org.mass.draw.CategoryDraw
 import org.mass.draw.DrawFormat
@@ -94,7 +95,8 @@ data class BracketEditing(
  * the second round as in the organiser's protocols and a final «Победитель» box, or the rounds of a round robin. The upper
  * side of every pair is blue and the lower one red, also while the entry is not known yet. With [editing] the entries of
  * an elimination bracket can be dragged onto each other. [number] gives «Бой № N» of a bout by its round and index
- * (ADR-008 §6), null while the draw is not confirmed.
+ * (ADR-008 §6), null while the draw is not confirmed. [progress] holds the results: winners move on and «Победитель»
+ * shows the winner (ADR-010 §6).
  */
 @Composable
 fun BracketComponent(
@@ -104,13 +106,14 @@ fun BracketComponent(
     scale: BracketScale = BracketScale.Compact,
     editing: BracketEditing? = null,
     number: (round: Int, index: Int) -> Int? = { _, _ -> null },
+    progress: BracketProgress? = null,
 ) {
     val byKey = entries.associateBy { it.drawKey }
     val label = { key: String -> byKey[key]?.let { entryLabel(it, scale.fullNames) } ?: key }
     Box(modifier.verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(16.dp)) {
         when (draw.format) {
-            DrawFormat.ELIMINATION -> Elimination(draw, label, scale, editing, number)
-            DrawFormat.ROUND_ROBIN -> RoundRobin(draw, label, scale, number)
+            DrawFormat.ELIMINATION -> Elimination(draw, label, scale, editing, number, progress)
+            DrawFormat.ROUND_ROBIN -> RoundRobin(draw, label, scale, number, progress)
             DrawFormat.PERFORMANCE_ORDER, DrawFormat.NO_BOUTS -> Unit
         }
     }
@@ -128,8 +131,8 @@ fun entryLabel(entry: CategoryEntry, full: Boolean): String = entry.athletes.joi
 
 /**
  * Nodes are addressed by level: level 0 are the first-round slots, level `r` the winners of round `r`. A node is occupied
- * when any slot below it holds an entry; it is known before the results when only one of its children is occupied (the
- * entry passed with a bye).
+ * when any slot below it holds an entry; it is known when only one of its children is occupied (the entry passed with a
+ * bye) or when [progress] has decided the bout of its children.
  */
 @Composable
 private fun Elimination(
@@ -138,6 +141,7 @@ private fun Elimination(
     scale: BracketScale,
     editing: BracketEditing?,
     number: (round: Int, index: Int) -> Int?,
+    progress: BracketProgress?,
 ) {
     val size = draw.positions.size
     val rounds = Bouts.rounds(draw)
@@ -145,11 +149,13 @@ private fun Elimination(
     val known = mutableListOf(draw.positions)
     (1..rounds).forEach { level ->
         occupied += occupied[level - 1].chunked(2).map { (first, second) -> first || second }
+        // Bouts of a round are indexed without byes, as in [Bouts].
+        var boutIndex = 0
         known += (0 until (size shr level)).map { index ->
             val first = index * 2
             val second = first + 1
             when {
-                occupied[level - 1][first] && occupied[level - 1][second] -> null
+                occupied[level - 1][first] && occupied[level - 1][second] -> (boutIndex++).let { progress?.winner(level, it) }
                 occupied[level - 1][first] -> known[level - 1][first]
                 else -> known[level - 1][second]
             }
@@ -247,7 +253,7 @@ private fun Elimination(
                 },
             )
         }
-        WinnerBox(scale, x = column * rounds, y = centre(rounds, 0))
+        WinnerBox(scale, x = column * rounds, y = centre(rounds, 0), winner = progress?.champion?.let(label))
         // «Бой № N» above the box the winner of the bout goes to, as on the organiser's protocol.
         (1..rounds).forEach { round ->
             (0 until (size shr round)).filter { bout(round, it) }.forEachIndexed { boutIndex, index ->
@@ -316,9 +322,9 @@ private fun EntryBox(text: String, upper: Boolean, highlighted: Boolean, scale: 
     }
 }
 
-/** The final box of the mockups; the winner's name comes with the results (I2b). */
+/** The final box of the mockups: «Победитель» until the final is decided, then the winner's name (ADR-010 §6). */
 @Composable
-private fun WinnerBox(scale: BracketScale, x: Dp, y: Dp) {
+private fun WinnerBox(scale: BracketScale, x: Dp, y: Dp, winner: String?) {
     val winnerWidth = scale.boxWidth * 0.8f
     Box(
         contentAlignment = Alignment.CenterStart,
@@ -330,18 +336,29 @@ private fun WinnerBox(scale: BracketScale, x: Dp, y: Dp) {
             .padding(horizontal = 12.dp),
     ) {
         Text(
-            Localization.getString("brackets_winner"),
+            winner ?: Localization.getString("brackets_winner"),
             color = Colors.BROWN.color,
             style = if (scale.fullNames) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.semantics { contentDescription = Localization.getString("brackets_winner") + (winner?.let { ": $it" } ?: "") },
         )
     }
 }
 
-/** Round robin: every round with its pairs; places are decided by wins (ADR-007 §4). */
+/**
+ * Round robin: every round with its pairs, the winner of each decided bout marked; places are decided by wins (ADR-007 §4),
+ * the standings and «Победитель» follow the results (ADR-010 §6).
+ */
 @Composable
-private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: BracketScale, number: (round: Int, index: Int) -> Int?) {
+private fun RoundRobin(
+    draw: CategoryDraw,
+    label: (String) -> String,
+    scale: BracketScale,
+    number: (round: Int, index: Int) -> Int?,
+    progress: BracketProgress?,
+) {
     val bouts = Bouts.of(draw)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         bouts.groupBy { it.round }.forEach { (round, roundBouts) ->
@@ -363,6 +380,7 @@ private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: Bra
                             modifier = Modifier.width(72.dp),
                         )
                     }
+                    val winner = progress?.winner(bout.round, bout.index)
                     listOf(bout.first, bout.second).forEachIndexed { side, entry ->
                         val key = (entry as BoutSide.Entry).key
                         Box(
@@ -374,8 +392,8 @@ private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: Bra
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         ) {
                             Text(
-                                label(key),
-                                color = Color.White,
+                                (if (key == winner) "✓ " else "") + label(key),
+                                color = if (winner != null && key != winner) Color.White.copy(alpha = 0.6f) else Color.White,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -383,6 +401,29 @@ private fun RoundRobin(draw: CategoryDraw, label: (String) -> String, scale: Bra
                             )
                         }
                     }
+                }
+            }
+        }
+        if (progress != null && progress.decisions.isNotEmpty()) {
+            progress.standings.forEachIndexed { place, standing ->
+                Text(
+                    Localization.getString("brackets_standing")
+                        .replaceFirst("%d", (place + 1).toString())
+                        .replaceFirst("%s", label(standing.key))
+                        .replaceFirst("%d", standing.wins.toString())
+                        .replaceFirst("%d", standing.losses.toString()),
+                    color = Colors.BROWN.color,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            progress.champion?.let { champion ->
+                Box(Modifier.clip(BOX_SHAPE).background(WINNER_COLOR).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Text(
+                        Localization.getString("brackets_winner") + ": " + label(champion),
+                        color = Colors.BROWN.color,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }

@@ -1,1 +1,1 @@
-{"type":"session_state_updated","sessionId":"9c8b7a6d-5e4f-4d3c-8b2a-1f0e9d8c7b60","cursor":125,"state":"completed","result":{"winner":"BLUE","reason":"final_score"}}
+{"type":"session_state_updated","sessionId":"9c8b7a6d-5e4f-4d3c-8b2a-1f0e9d8c7b60","cursor":125,"state":"completed","result":{"winner":"BLUE","reason":"final_score"},"timer":{"period":"round","round":2,"goldenRound":false,"durationMillis":90000,"remainingMillis":0,"running":false,"runningSince":null}}

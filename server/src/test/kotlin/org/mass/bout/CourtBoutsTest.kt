@@ -15,9 +15,11 @@ import org.mass.domain.EventId
 import org.mass.domain.KerugiCompetitor
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.PeerId
+import org.mass.draw.CategoryProgress
 import org.mass.draw.CategoryStatus
 import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
+import org.mass.draw.CourtItem
 import org.mass.draw.DrawFixtures.category
 import org.mass.draw.DrawOutcome
 import org.mass.draw.DrawRejection
@@ -28,6 +30,7 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -87,6 +90,9 @@ class CourtBoutsTest {
         val sessionId = bout.sessionId
         court.bouts.command("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START))
         court.bouts.command("Оператор", BoutCommand.AwardAction(EventId.new(), sessionId, KerugiOperatorActionType.THROW, KerugiCompetitor.RED, 2))
+        court.bouts.command("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
+        court.bouts.command("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.RESUME))
+        court.bouts.command("Оператор", BoutCommand.EndPeriod(EventId.new(), sessionId))
         assertIs<CourtBoutOutcome.Done>(court.bouts.command("Оператор", BoutCommand.CompleteBout(EventId.new(), sessionId)))
         val decided = court.bouts.panel()
         assertEquals(1, decided.current!!.number)
@@ -101,6 +107,69 @@ class CourtBoutsTest {
         assertEquals(final.number, panel.current!!.number)
         assertTrue(panel.queue.none { it.number == 1 || it.number == final.number })
         assertEquals(listOf("android-2", "android-1"), restarted.bouts.bouts.current()!!.started.seats.map(BoutSeat::deviceId))
+    }
+
+    @Test
+    fun `results move the winners through the bracket to the winner, finish the category and survive a restart`() {
+        val court = court(category(List(6) { "Тренер $it" }, id = "kerugi-a"))
+        listOf("android-1", "android-2").forEach { approve(it, "Судья${it.last()}").let(pairing::connected) }
+        val numbers = court.courts.board().numbers
+        assertEquals(5, numbers.size)
+        assertEquals(2, court.bouts.panel().queue.size)
+
+        val opening = decide(court, KerugiCompetitor.RED)
+        assertEquals(60_000, opening.started.timing.roundMillis)
+        val winnerId = opening.started.red.entryId
+        val advanced = court.bouts.panel().queue.filterIsInstance<CourtItem.Bout>().single { it.ref.round == 2 && winnerId in listOf(it.blue.id, it.red.id) }
+        assertEquals(numbers.getValue(advanced.ref), advanced.number)
+        // The spectator window sees the finished bout read-only and calls the next two bouts (ADR-010 §8).
+        val spectator = court.bouts.spectator()
+        assertNull(spectator.session!!.seat)
+        assertEquals("completed", spectator.session!!.state)
+        assertEquals(opening.sessionId.value, spectator.session!!.sessionId)
+        assertEquals(court.bouts.panel().next, spectator.invited)
+        assertEquals(court.bouts.panel().queue.first { it != spectator.invited }, spectator.preparing)
+        // The draw is locked since the first «Начать», before any judge event (`BRK-003`); a result changes no structure.
+        assertEquals(DrawOutcome.Rejected(DrawRejection.STARTED), court.draws.shuffle("kerugi-a"))
+
+        while (court.bouts.panel().next != null) decide(court, KerugiCompetitor.BLUE)
+
+        val board = court.courts.board()
+        val state = board.draws.category("kerugi-a")!!
+        val results = board.results.getValue("kerugi-a")
+        assertEquals(CategoryProgress.COMPLETED, board.progress(state))
+        assertEquals(5, results.decisions.size)
+        val final = results.bouts.single { it.round == 3 }
+        val champion = assertNotNull(results.champion)
+        assertEquals(results.key(final.first), champion)
+        // Every result points at the session whose journaled events explain it (`SES-007`).
+        results.decisions.forEach { (ref, decision) ->
+            val bout = assertNotNull(court.bouts.bouts.bout(decision.sessionId))
+            assertEquals(ref, bout.started.round to bout.started.index)
+            assertEquals(KerugiBoutEvents.SESSION_COMPLETED, bout.events.last().event.type)
+            assertEquals(decision.winner, bout.result!!.winner)
+        }
+
+        val restarted = courtOf(null).courts.board()
+        assertEquals(champion, restarted.results.getValue("kerugi-a").champion)
+        assertEquals(CategoryProgress.COMPLETED, restarted.progress(restarted.draws.category("kerugi-a")!!))
+        assertNull(courtOf(null).bouts.panel().next)
+        assertEquals(DrawOutcome.Rejected(DrawRejection.STARTED), courtOf(null).draws.shuffle("kerugi-a"))
+    }
+
+    /** Starts the next bout, runs both rounds with one throw for [winner] and fixes the result by the final score. */
+    private fun decide(court: Court, winner: KerugiCompetitor): KerugiBout {
+        assertIs<CourtBoutOutcome.Done>(court.bouts.start(listOf("android-1", "android-2"), 2, 1_000, "Оператор"))
+        val sessionId = court.bouts.bouts.current()!!.sessionId
+        listOf(
+            BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START),
+            BoutCommand.AwardAction(EventId.new(), sessionId, KerugiOperatorActionType.THROW, winner, 1),
+            BoutCommand.EndPeriod(EventId.new(), sessionId),
+            BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.RESUME),
+            BoutCommand.EndPeriod(EventId.new(), sessionId),
+            BoutCommand.CompleteBout(EventId.new(), sessionId),
+        ).forEach { assertIs<CourtBoutOutcome.Done>(court.bouts.command("Оператор", it), it.toString()) }
+        return court.bouts.bouts.bout(sessionId)!!
     }
 
     @Test

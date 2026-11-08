@@ -21,7 +21,7 @@ Desktop-приложение площадки и локальный server U'Jud
 
 Read-only `GET /v1/health` возвращает typed liveness status `healthy` и не раскрывает данные pairing или credentials. Structured logging, persistence readiness и desktop diagnostics ещё не реализованы.
 
-Бой Kerugi (server-часть I2a, [ADR-009](docs/adr/ADR-009-kerugi-bout-contract.md)): «Начать» на панели площадки фиксирует состав из 2-3 подключённых устройств, кворум и окно; один realtime dispatcher принимает `kerugi_score_command` и `judge_attention_command` от судей и операторские действия с desktop, публикует snapshot, состояние и счёт подписанным устройствам; бой восстанавливается из `domain_events` после перезапуска. Client-часть, таймер и раунды (I2b) ещё не реализованы.
+Бой Kerugi (server-часть I2a, [ADR-009](docs/adr/ADR-009-kerugi-bout-contract.md)): «Начать» на панели площадки фиксирует состав из 2-3 подключённых устройств, кворум и окно; один realtime dispatcher принимает `kerugi_score_command` и `judge_attention_command` от судей и операторские действия с desktop, публикует snapshot, состояние и счёт подписанным устройствам; бой восстанавливается из `domain_events` после перезапуска. Время боя и ход сетки (server-часть I2b, [ADR-010](docs/adr/ADR-010-kerugi-timer-advancement.md)): таймер по возрасту с двумя раундами, перерывом и golden round, после перезапуска таймер стоит на последнем сохранённом времени; результат продвигает победителя по сетке, судьи получают следующий поединок на том же сокете; окно зрителей для второго монитора с «Приглашаются / Готовятся».
 
 `BracketOwnership` закрепляет сетку за единственным local peer при `IN_PROGRESS`; P2P claims и ownership transfer не входят в v1 Pilot.
 

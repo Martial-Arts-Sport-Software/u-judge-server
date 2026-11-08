@@ -3,7 +3,7 @@ package org.mass.draw
 import kotlinx.coroutines.flow.StateFlow
 import org.mass.domain.PeerId
 
-/** The progress of a category in «Все категории» (ADR-008 §11, `CMP-008`); «завершена» comes with the results (I2b). */
+/** The progress of a category in «Все категории» (ADR-008 §11, `CMP-008`). */
 enum class CategoryProgress {
     /** «свободна»: the category waits for its draw or its first bout. */
     FREE,
@@ -16,6 +16,9 @@ enum class CategoryProgress {
 
     /** «требует новой жеребьёвки»: a later import changed the entries of a confirmed draw. */
     NEEDS_REDRAW,
+
+    /** «завершена»: every bout of the category is decided (ADR-010 §6). */
+    COMPLETED,
 }
 
 val CategoryDrawState.progress: CategoryProgress
@@ -39,8 +42,18 @@ data class CourtsBoard(
     /** A bout started: the numbers of the bouts numbered then no longer change (I2a). */
     val frozen: Boolean,
     val officials: CompetitionOfficials = CompetitionOfficials(),
+    /** The results of the decided bouts by category, with the winners moved on (ADR-010 §6). */
+    val results: Map<String, BracketProgress> = emptyMap(),
 ) {
     fun number(ref: ItemRef): Int? = numbers[ref]
+
+    /** «Все категории»: a started category whose every bout is decided is «завершена». */
+    fun progress(state: CategoryDrawState): CategoryProgress =
+        if (state.status == CategoryStatus.STARTED && results[state.category.id]?.decided == true) {
+            CategoryProgress.COMPLETED
+        } else {
+            state.progress
+        }
 
     fun number(categoryId: String, round: Int, index: Int): Int? = numbers[ItemRef(categoryId, round, index)]
 
@@ -97,7 +110,13 @@ class CompetitionCourtsService(
         }
         val officials = events.map { it.event }.filterIsInstance<DrawEvent.OfficialsSet>().lastOrNull()?.officials
             ?: CompetitionOfficials()
-        return CourtsBoard(competitionId, drawBoard, plan, localCourt, numbers, preliminary, frozen != null, officials)
+        val decisions = progress().decisions
+        val results = drawBoard.categories.mapNotNull { state ->
+            val draw = state.numbered ?: return@mapNotNull null
+            val own = decisions.filterKeys { it.categoryId == state.category.id }.mapKeys { (ref, _) -> ref.round to ref.index }
+            state.category.id to BracketProgress(draw, own)
+        }.toMap()
+        return CourtsBoard(competitionId, drawBoard, plan, localCourt, numbers, preliminary, frozen != null, officials, results)
     }
 
     /** Place, chief judge and chief secretary of the protocols (`competition_officials_set`); unchanged values write nothing. */
@@ -202,10 +221,12 @@ class CompetitionCourtsService(
         val bracketId = state.confirmed?.ownership?.bracketId ?: return emptyList()
         val entries = state.category.entries.associateBy { it.drawKey }
         val categoryId = state.category.id
+        // A winner fills the slot of the next round, so a later bout joins the queue once both sides are known (ADR-010 §6).
+        val results = board.results[categoryId] ?: BracketProgress(draw, emptyMap())
         return when (draw.format) {
-            DrawFormat.ELIMINATION, DrawFormat.ROUND_ROBIN -> Bouts.of(draw).mapNotNull { bout ->
-                val blue = (bout.first as? BoutSide.Entry)?.let { entries[it.key] } ?: return@mapNotNull null
-                val red = (bout.second as? BoutSide.Entry)?.let { entries[it.key] } ?: return@mapNotNull null
+            DrawFormat.ELIMINATION, DrawFormat.ROUND_ROBIN -> results.bouts.mapNotNull { bout ->
+                val blue = results.key(bout.first)?.let(entries::get) ?: return@mapNotNull null
+                val red = results.key(bout.second)?.let(entries::get) ?: return@mapNotNull null
                 val ref = ItemRef(categoryId, bout.round, bout.index)
                 val number = board.number(ref) ?: return@mapNotNull null
                 CourtItem.Bout(ref, number, court, state.category, bracketId, blue, red)
