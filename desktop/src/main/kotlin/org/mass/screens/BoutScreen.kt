@@ -58,8 +58,14 @@ import org.mass.draw.CourtPanel
 import org.mass.draw.DrawOutcome
 import org.mass.draw.ItemRef
 import org.mass.ui.court.CourtPanelComponent
+import org.mass.bout.BoutPeriod
 import org.mass.bout.KerugiBout
 import org.mass.bout.KerugiBoutEvents
+import org.mass.bout.KerugiBoutService
+import org.mass.bout.KerugiClock
+import org.mass.ui.bout.ClockFace
+import org.mass.ui.bout.clockText
+import org.mass.ui.bout.rememberNow
 import org.mass.domain.EventId
 import org.mass.domain.KerugiCompetitor
 import org.mass.domain.KerugiOperatorActionType
@@ -75,15 +81,39 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * The operator's Kerugi bout (I2a, ADR-009): «Следующий бой» with the roster of connected judges, quorum and window, then
- * the scoreboard with throws, spins, Gamjeom, state changes, corrections, the reset and the result. Every action is a
- * journaled command of the court dispatcher, written off the UI thread; the screen only renders the projection.
+ * The operator's Kerugi bout (I2a, ADR-009, ADR-010): «Следующий бой» with the roster of connected judges, quorum and
+ * window, then the scoreboard with the clock of the period, throws, spins, Gamjeom, the clock controls, corrections, the
+ * reset and the result. Every action is a journaled command of the court dispatcher, written off the UI thread; buttons
+ * are disabled while a command is in flight (`UI-003`) and the screen only renders the projection.
  */
 object BoutScreen : Screen {
+    /** What «Завершить» would fix (ADR-010 §4), or null while the bout cannot be finished. */
+    private sealed interface Completion {
+        data class Result(val winner: KerugiCompetitor, val reason: String) : Completion
+        data object Preference : Completion
+    }
+
+    private fun completion(bout: KerugiBout): Completion? {
+        val score = bout.score()
+        val clock = bout.clock
+        val tied = score.blue == score.red
+        val leader = if (score.blue > score.red) KerugiCompetitor.BLUE else KerugiCompetitor.RED
+        return when {
+            score.disqualified != null -> Completion.Result(opponent(score.disqualified!!), KerugiBoutService.REASON_DISQUALIFICATION)
+            !clock.regularTimeOver -> null
+            clock.phase == KerugiClock.GOLDEN_ROUND && tied && clock.over -> Completion.Preference
+            tied -> null
+            clock.phase == KerugiClock.GOLDEN_ROUND -> Completion.Result(leader, KerugiBoutService.REASON_GOLDEN_ROUND)
+            else -> Completion.Result(leader, KerugiBoutService.REASON_FINAL_SCORE)
+        }
+    }
+
     private sealed interface Confirmation {
         data class Undo(val entry: BoutHistoryEntry) : Confirmation
         data object Reset : Confirmation
         data object Complete : Confirmation
+        data object Preference : Confirmation
+        data object Adjust : Confirmation
         data object Cancel : Confirmation
         data class Disqualify(val competitor: KerugiCompetitor) : Confirmation
     }
@@ -176,6 +206,13 @@ object BoutScreen : Screen {
                         )
                     }
                     message?.let { Text(it, color = Color(0xFFFFB4B4), style = MaterialTheme.typography.bodyMedium) }
+                    val spectatorKey = if (State.spectatorOpen) "bout_spectator_close" else "bout_spectator_open"
+                    ButtonComponent(
+                        Localization.getString(spectatorKey),
+                        ButtonStyles.Secondary,
+                        onclick = { State.spectatorOpen = !State.spectatorOpen },
+                        modifier = Modifier.semantics { contentDescription = Localization.getString(spectatorKey) },
+                    )
                 }
                 Spacer(Modifier.width(25.dp))
                 Column(
@@ -194,7 +231,11 @@ object BoutScreen : Screen {
                             },
                             onDisqualify = { confirmation = Confirmation.Disqualify(it) },
                             onReset = { confirmation = Confirmation.Reset },
-                            onComplete = { confirmation = Confirmation.Complete },
+                            onEndPeriod = { operator { BoutCommand.EndPeriod(it, current.sessionId) } },
+                            onAdjust = { confirmation = Confirmation.Adjust },
+                            onComplete = {
+                                confirmation = if (completion(current) == Completion.Preference) Confirmation.Preference else Confirmation.Complete
+                            },
                         )
                         History(current, enabled = !busy && !current.closed, onUndo = { confirmation = Confirmation.Undo(it) })
                     }
@@ -238,32 +279,43 @@ object BoutScreen : Screen {
             )
             Confirmation.Complete -> {
                 val score = bout?.score()
-                val winner = when {
-                    score == null -> null
-                    score.disqualified != null -> opponent(score.disqualified!!)
-                    score.blue > score.red -> KerugiCompetitor.BLUE
-                    score.red > score.blue -> KerugiCompetitor.RED
-                    else -> null
-                }
+                val result = bout?.let(::completion) as? Completion.Result
                 ConfirmDialogComponent(
                     title = Localization.getString("bout_complete_title"),
-                    text = if (winner == null || score == null) {
+                    text = if (result == null || score == null) {
                         Localization.getString("bout_complete_tied")
                     } else {
                         Localization.getString("bout_complete_text")
                             .replaceFirst("%d", score.blue.toString())
                             .replaceFirst("%d", score.red.toString())
-                            .replaceFirst("%s", sideName(winner))
+                            .replaceFirst("%s", sideName(result.winner))
+                            .replaceFirst("%s", Localization.getString("bout_reason_${result.reason}"))
                     },
                     confirmText = Localization.getString("bout_complete"),
                     cancelText = Localization.getString("bout_back"),
                     onConfirm = {
                         confirmation = null
-                        if (bout != null && winner != null) operator { BoutCommand.CompleteBout(it, bout.sessionId) }
+                        if (bout != null && result != null) operator { BoutCommand.CompleteBout(it, bout.sessionId) }
                     },
                     onCancel = { confirmation = null },
                 )
             }
+            Confirmation.Preference -> PreferenceDialog(
+                onPick = { winner ->
+                    confirmation = null
+                    if (bout != null) operator { BoutCommand.CompleteBout(it, bout.sessionId, winner) }
+                },
+                onCancel = { confirmation = null },
+            )
+            Confirmation.Adjust -> AdjustDialog(
+                durationMillis = bout?.clock?.durationMillis ?: 0,
+                remainingMillis = bout?.clock?.remainingMillis ?: 0,
+                onConfirm = { millis ->
+                    confirmation = null
+                    if (bout != null) operator { BoutCommand.AdjustClock(it, bout.sessionId, millis) }
+                },
+                onCancel = { confirmation = null },
+            )
             is Confirmation.Disqualify -> ConfirmDialogComponent(
                 title = Localization.getString("bout_disqualify_title"),
                 text = Localization.getString("bout_disqualify_text").replace("%s", sideName(pending.competitor)),
@@ -357,9 +409,13 @@ object BoutScreen : Screen {
         onAction: (KerugiOperatorActionType, KerugiCompetitor, Int) -> Unit,
         onDisqualify: (KerugiCompetitor) -> Unit,
         onReset: () -> Unit,
+        onEndPeriod: () -> Unit,
+        onAdjust: () -> Unit,
         onComplete: () -> Unit,
     ) {
         val score = bout.score()
+        val clock = bout.clock
+        val now = rememberNow()
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 Localization.getString("bout_number").replace("%d", bout.started.boutNumber.toString()) + " · " + bout.started.categoryTitle,
@@ -369,6 +425,21 @@ object BoutScreen : Screen {
                 modifier = Modifier.weight(1f),
             )
             Text(stateLabel(bout.state), color = Colors.SECONDARY.color, style = MaterialTheme.typography.titleSmall)
+        }
+        // `UI-001`: the period and the clock of the latest persisted projection; a running clock counts down locally.
+        val face = clock.timer().let { ClockFace(it.period.name.lowercase(), it.round, it.golden, it.remainingMillis, it.runningSince) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(face.periodLabel, color = Color.White, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text(
+                clockText(if (bout.closed) clock.remainingMillis else face.remainingAt(now)),
+                color = if (clock.running) Color.White else Colors.SECONDARY.color,
+                fontSize = 44.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.semantics { contentDescription = face.periodLabel },
+            )
+        }
+        if (bout.events.last().event.type == KerugiBoutEvents.CLOCK_STOPPED && !bout.closed) {
+            Text(Localization.getString("bout_clock_restored"), color = Color(0xFFFFE08A), style = MaterialTheme.typography.bodyMedium)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf(KerugiCompetitor.BLUE to bout.started.blue.label, KerugiCompetitor.RED to bout.started.red.label).forEach { (side, label) ->
@@ -439,15 +510,24 @@ object BoutScreen : Screen {
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val scoring = enabled && (bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED)
             when (bout.state) {
                 SessionState.PREPARED -> SmallButton(Localization.getString("bout_begin"), enabled, Modifier.weight(1f)) { onState(BoutStateAction.START) }
                 SessionState.RUNNING -> SmallButton(Localization.getString("bout_pause"), enabled, Modifier.weight(1f)) { onState(BoutStateAction.PAUSE) }
-                SessionState.PAUSED -> SmallButton(Localization.getString("bout_resume"), enabled, Modifier.weight(1f)) { onState(BoutStateAction.RESUME) }
+                SessionState.PAUSED -> SmallButton(
+                    Localization.getString(if (clock.period == BoutPeriod.BREAK) "bout_next_round" else "bout_resume"),
+                    enabled && clock.canResume,
+                    Modifier.weight(1f),
+                ) { onState(BoutStateAction.RESUME) }
                 else -> Spacer(Modifier.weight(1f))
             }
-            val scoring = enabled && (bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED)
+            SmallButton(Localization.getString("bout_end_period"), scoring && clock.canEndPeriod, Modifier.weight(1f), onEndPeriod)
+            SmallButton(Localization.getString("bout_adjust"), scoring && clock.canAdjust, Modifier.weight(1f), onAdjust)
             SmallButton(Localization.getString("bout_reset"), scoring, Modifier.weight(1f), onReset)
-            SmallButton(Localization.getString("bout_complete"), scoring, Modifier.weight(1f), onComplete)
+            SmallButton(Localization.getString("bout_complete"), scoring && completion(bout) != null, Modifier.weight(1f), onComplete)
+        }
+        if (scoring(bout) && completion(bout) == null && clock.regularTimeOver.not()) {
+            Hint(Localization.getString("bout_complete_not_finished"))
         }
     }
 
@@ -480,6 +560,70 @@ object BoutScreen : Screen {
                     if (entry.correctable) {
                         SmallButton(Localization.getString("bout_undo"), enabled, Modifier.width(110.dp)) { onUndo(entry) }
                     }
+                }
+            }
+        }
+    }
+
+    private fun scoring(bout: KerugiBout) = bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED
+
+    /** After a scoreless golden round the operator picks the winner by preference (FHR 2024 §4.1.13, ADR-010 §4). */
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    private fun PreferenceDialog(onPick: (KerugiCompetitor) -> Unit, onCancel: () -> Unit) {
+        Dialog(
+            onDismissRequest = onCancel,
+            properties = DialogProperties(usePlatformDefaultWidth = false, scrimColor = Color.Black.copy(alpha = 0.6f)),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.width(460.dp).clip(RoundedCornerShape(20.dp)).background(Colors.SECONDARY.color).padding(22.dp),
+            ) {
+                Text(Localization.getString("bout_preference_title"), color = Colors.BROWN.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(Localization.getString("bout_preference_text"), color = Colors.BROWN.color.copy(alpha = 0.72f), style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.align(Alignment.End)) {
+                    ButtonComponent(Localization.getString("bout_back"), ButtonStyles.Plain, Modifier.width(120.dp), onclick = onCancel)
+                    listOf(KerugiCompetitor.BLUE, KerugiCompetitor.RED).forEach { side ->
+                        ButtonComponent(sideName(side), modifier = Modifier.width(130.dp), onclick = { onPick(side) })
+                    }
+                }
+            }
+        }
+    }
+
+    /** «Время»: the technical assistant corrects the remaining time of a stopped round (FHR 2024 §3.3.3). */
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    private fun AdjustDialog(durationMillis: Long, remainingMillis: Long, onConfirm: (Long) -> Unit, onCancel: () -> Unit) {
+        var text by remember { mutableStateOf(clockText(remainingMillis)) }
+        val millis = text.trim().split(":").takeIf { it.size == 2 }?.let { (minutes, seconds) ->
+            val m = minutes.toLongOrNull()
+            val s = seconds.toLongOrNull()?.takeIf { it in 0..59 }
+            if (m == null || s == null || m < 0) null else (m * 60 + s) * 1_000
+        }?.takeIf { it in 1..durationMillis }
+        Dialog(
+            onDismissRequest = onCancel,
+            properties = DialogProperties(usePlatformDefaultWidth = false, scrimColor = Color.Black.copy(alpha = 0.6f)),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.width(460.dp).clip(RoundedCornerShape(20.dp)).background(Colors.SECONDARY.color).padding(22.dp),
+            ) {
+                Text(Localization.getString("bout_adjust_title"), color = Colors.BROWN.color, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    Localization.getString("bout_adjust_text").replace("%s", clockText(durationMillis)),
+                    color = Colors.BROWN.color.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                TextInputComponent(Localization.getString("bout_adjust_input"), text, { text = it }, Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.align(Alignment.End)) {
+                    ButtonComponent(Localization.getString("bout_back"), ButtonStyles.Plain, Modifier.width(120.dp), onclick = onCancel)
+                    ButtonComponent(
+                        Localization.getString("bout_confirm"),
+                        modifier = Modifier.width(200.dp),
+                        onclick = { millis?.let(onConfirm) },
+                        enabled = millis != null,
+                    )
                 }
             }
         }
