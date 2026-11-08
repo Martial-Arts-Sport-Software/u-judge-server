@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-31
 - Requirements: `NFR-004`, `NFR-009`, `NFR-010`, `P2P-010`
+- Amended by: [ADR-012](ADR-012-reports-backup-restore.md) (backup format, no encryption in v1 Pilot, retention until manual deletion, restore)
 
 ## Context
 

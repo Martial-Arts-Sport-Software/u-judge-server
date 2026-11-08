@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-27
 - Requirements: `IMP-001`-`IMP-003`, `IMP-005`-`IMP-008`, `BAK-001`, `SYS-003`, `AUD-001`, `SYS-007`
+- Amended by: [ADR-012](ADR-012-reports-backup-restore.md) (backup format, no encryption in v1 Pilot, retention until manual deletion, restore)
 
 ## Context
 
