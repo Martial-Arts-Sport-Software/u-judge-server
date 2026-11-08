@@ -59,6 +59,40 @@ data class CourtPlan(val courts: List<List<String>>) {
 }
 
 /**
+ * The seal and the signatures printed on the protocols (ADR-012 §5): PNG or JPEG of at most [MAX_BYTES] each, Base64 in the
+ * journal so a backup carries them; null where none is set.
+ */
+@Serializable
+data class ProtocolImages(
+    val seal: String? = null,
+    val chiefJudgeSignature: String? = null,
+    val chiefSecretarySignature: String? = null,
+) {
+    val all: List<String?>
+        get() = listOf(seal, chiefJudgeSignature, chiefSecretarySignature)
+
+    /** Every set image decodes from Base64, is PNG or JPEG and fits [MAX_BYTES]. */
+    val valid: Boolean
+        get() = all.filterNotNull().all { image -> decode(image)?.let(::isImage) == true }
+
+    companion object {
+        const val MAX_BYTES = 1_048_576
+
+        fun decode(image: String?): ByteArray? = image?.let { runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull() }
+
+        fun encode(bytes: ByteArray): String = java.util.Base64.getEncoder().encodeToString(bytes)
+
+        /** PNG or JPEG by its signature, readable as an image and not larger than [MAX_BYTES]. */
+        fun isImage(bytes: ByteArray): Boolean {
+            if (bytes.isEmpty() || bytes.size > MAX_BYTES) return false
+            val png = bytes.size > 8 && bytes.copyOfRange(0, 8).contentEquals(byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10))
+            val jpeg = bytes.size > 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()
+            return (png || jpeg) && runCatching { javax.imageio.ImageIO.read(bytes.inputStream()) != null }.getOrDefault(false)
+        }
+    }
+}
+
+/**
  * Competition settings printed on the protocols (ADR-008 §8): the place and the names of the chief judge and the chief
  * secretary. They are not part of the applications; empty until the operator enters them.
  */

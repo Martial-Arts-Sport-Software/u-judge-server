@@ -7,14 +7,14 @@ import androidx.compose.ui.unit.Density
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.CoroutineScope
 import org.mass.enums.Routes
-import java.util.Locale
 
 object State {
     var judgeSurname by mutableStateOf("")
     var navController: NavHostController? = null
     var density: Density? = null
     var coroutinesScope: CoroutineScope? = null
-    var currentLocale: String by mutableStateOf(Locale.getDefault().language)
+    /** v1 Pilot starts in Russian whatever the OS language; English is switchable on the entry screen (ADR-012 §8). */
+    var currentLocale: String by mutableStateOf("ru")
     var isAnimating by mutableStateOf(false)
     var currentError by mutableStateOf("")
     var currentRoute by mutableStateOf(Routes.ENTRY.path)

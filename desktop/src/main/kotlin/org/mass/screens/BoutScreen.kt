@@ -75,6 +75,8 @@ import org.mass.enums.Colors
 import org.mass.enums.Routes
 import org.mass.ui.button.clickWithTransition
 import org.mass.locale.Localization
+import org.mass.ui.RejectionText
+import org.mass.ui.report.HistoryText
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
 import org.mass.ui.dialog.ConfirmDialogComponent
@@ -149,7 +151,7 @@ object BoutScreen : Screen {
                     onSuccess = { result ->
                         when (result) {
                             is CourtBoutOutcome.Done -> null
-                            is CourtBoutOutcome.Rejected -> Localization.getString("bout_rejected").replace("%s", result.code)
+                            is CourtBoutOutcome.Rejected -> Localization.getString("bout_rejected").replace("%s", RejectionText.of(result.code))
                             is CourtBoutOutcome.Failed -> Localization.getString("bout_failed").replace("%s", result.diagnostic)
                         }
                     },
@@ -724,16 +726,24 @@ object BoutScreen : Screen {
 
     private fun entryText(entry: BoutHistoryEntry): String {
         val side = entry.competitor?.let(::sideName).orEmpty()
+        // The area of a tap in words: «голова», «туловище» (ADR-012 §8).
+        val area = entry.detail.takeIf { it in setOf("HEAD", "BODY") }
+            ?.let { Localization.getString("history_value_${it.lowercase()}") } ?: entry.detail
         return when (entry.type) {
             KerugiBoutEvents.SCORE_CANDIDATE -> Localization.getString("bout_entry_kerugi_score_candidate")
                 .replaceFirst("%s", entry.seat?.toString().orEmpty())
-                .replaceFirst("%s", "$side ${entry.detail}")
+                .replaceFirst("%s", "$side $area")
             KerugiBoutEvents.TANBON_SCORE_CANDIDATE -> Localization.getString("bout_entry_kerugi_score_candidate")
                 .replaceFirst("%s", entry.seat?.toString().orEmpty())
-                .replaceFirst("%s", if (entry.competitor == null) Localization.getString("i5_bout_cross") else "$side ${entry.detail}")
+                .replaceFirst("%s", if (entry.competitor == null) Localization.getString("i5_bout_cross") else "$side $area")
             KerugiBoutEvents.OPERATOR_ACTION -> Localization.getString("bout_entry_kerugi_operator_action")
                 .replace("%s", "$side ${actionLabel(entry.detail)}")
-            else -> Localization.getString("bout_entry_other").replace("%s", entry.detail)
+            KerugiBoutEvents.SESSION_COMPLETED -> listOf(HistoryText.action(entry.type), side, HistoryText.reason(entry.detail))
+                .filter(String::isNotBlank).joinToString(" · ")
+            KerugiBoutEvents.SESSION_CANCELLED -> Localization.getString("bout_entry_cancelled").replace("%s", entry.detail)
+            // A correction names its target by ID; the action itself says what happened.
+            KerugiBoutEvents.SCORE_CORRECTION -> HistoryText.action(entry.type)
+            else -> listOf(HistoryText.action(entry.type), entry.detail).filter(String::isNotBlank).joinToString(" · ")
         }
     }
 

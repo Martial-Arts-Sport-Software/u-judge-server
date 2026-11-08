@@ -156,7 +156,7 @@ object EntryScreen : Screen {
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         ButtonComponent(
-                            "Русский",
+                            Localization.getString("language_ru"),
                             ButtonStyles.Plain,
                             onclick = { State.currentLocale = "ru" },
                             modifier = Modifier.weight(1f)
@@ -169,7 +169,7 @@ object EntryScreen : Screen {
                                 .clip(RoundedCornerShape(5.dp))
                         )
                         ButtonComponent(
-                            "English",
+                            Localization.getString("language_en"),
                             ButtonStyles.Plain,
                             onclick = { State.currentLocale = "en" },
                             modifier = Modifier.weight(1f)

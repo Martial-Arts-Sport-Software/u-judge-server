@@ -37,6 +37,7 @@ import org.mass.screens.BracketsSetupScreen
 import org.mass.screens.CourtsScreen
 import org.mass.screens.DevicesConnectionScreen
 import org.mass.screens.EntryScreen
+import org.mass.screens.ReportsScreen
 import org.mass.ui.TypographyManager.getTypography
 import org.mass.ui.server_status.ServerStatusComponent
 import u_judge_server.desktop.generated.resources.Res
@@ -107,6 +108,9 @@ fun App() {
                                 }
                                 animatedComposable(Routes.BOUT) {
                                     BoutScreen.Load()
+                                }
+                                animatedComposable(Routes.REPORTS) {
+                                    ReportsScreen.Load()
                                 }
                                 animatedComposable(Routes.PERFORMANCE) {
                                     PerformanceScreen.Load()

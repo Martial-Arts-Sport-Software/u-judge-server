@@ -37,7 +37,7 @@ data class PostgresRuntimeConfiguration(
     val applicationDataDirectory: Path,
     val port: Int,
     val platform: PostgresPlatform,
-    val databaseName: String = "u_judge",
+    val databaseName: String = DEFAULT_DATABASE,
     val databaseUser: String = "postgres",
 ) {
     val dataDirectory: Path = applicationDataDirectory.resolve("postgres")
@@ -65,7 +65,7 @@ data class PostgresRuntimeConfiguration(
 
     init {
         require(databaseName.isNotBlank())
-        require(databaseName.matches(POSTGRES_IDENTIFIER))
+        require(databaseName.matches(IDENTIFIER))
         require(databaseUser.isNotBlank())
         require(!dataDirectory.toAbsolutePath().normalize().startsWith(installationDirectory.toAbsolutePath().normalize())) {
             "PostgreSQL data directory must be outside the installation directory"
@@ -77,8 +77,9 @@ data class PostgresRuntimeConfiguration(
         .resolve("bin")
         .resolve(platform.executable(name))
 
-    private companion object {
-        val POSTGRES_IDENTIFIER = Regex("[a-zA-Z_][a-zA-Z0-9_]*")
+    companion object {
+        const val DEFAULT_DATABASE = "u_judge"
+        val IDENTIFIER = Regex("[a-z_][a-z0-9_]{0,62}")
     }
 }
 
@@ -106,6 +107,33 @@ class ManagedPostgresRuntime(
                 user = configuration.databaseUser
             }
         }
+
+    /** A datasource of another database of the running cluster, such as the target of a restore (ADR-012 §7). */
+    fun dataSource(databaseName: String): DataSource {
+        check(state is PostgresState.Running) { "PostgreSQL is not running" }
+        require(databaseName.matches(PostgresRuntimeConfiguration.IDENTIFIER))
+        return PGSimpleDataSource().apply {
+            setURL("jdbc:postgresql://127.0.0.1:${configuration.port}/$databaseName")
+            user = configuration.databaseUser
+        }
+    }
+
+    /** Creates the empty database [databaseName] in the running cluster; an existing one is an error. */
+    fun createDatabase(databaseName: String) {
+        require(databaseName.matches(PostgresRuntimeConfiguration.IDENTIFIER))
+        DriverManager.getConnection(configuration.administrationJdbcUrl, configuration.databaseUser, null).use { connection ->
+            connection.createStatement().use { it.executeUpdate("CREATE DATABASE $databaseName") }
+        }
+    }
+
+    /** Drops [databaseName], which must not be the active database: only a failed restore target is dropped. */
+    fun dropDatabase(databaseName: String) {
+        require(databaseName.matches(PostgresRuntimeConfiguration.IDENTIFIER))
+        require(databaseName != configuration.databaseName) { "The active database is never dropped" }
+        DriverManager.getConnection(configuration.administrationJdbcUrl, configuration.databaseUser, null).use { connection ->
+            connection.createStatement().use { it.executeUpdate("DROP DATABASE IF EXISTS $databaseName") }
+        }
+    }
 
     fun start(): PostgresState {
         if (managedPostgres.state !is PostgresState.Running) {

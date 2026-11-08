@@ -70,6 +70,10 @@ sealed interface DrawEvent {
     @Serializable
     data class OfficialsSet(override val competitionId: String, val officials: CompetitionOfficials) : DrawEvent
 
+    /** The seal and signature images of the protocols (ADR-012 §5). */
+    @Serializable
+    data class ProtocolImagesSet(override val competitionId: String, val images: ProtocolImages) : DrawEvent
+
     /** The operator picked the next bout of [court] instead of the default one (ADR-008 §9, `SES-003`). */
     @Serializable
     data class NextBoutSelected(
@@ -123,6 +127,7 @@ class JdbcCompetitionDrawJournal(
                     is DrawEvent.DesktopCourtSelected -> DESKTOP_COURT_SELECTED to json.encodeToString(event)
                     is DrawEvent.NextBoutSelected -> NEXT_BOUT_SELECTED to json.encodeToString(event)
                     is DrawEvent.OfficialsSet -> OFFICIALS_SET to json.encodeToString(event)
+                    is DrawEvent.ProtocolImagesSet -> PROTOCOL_IMAGES_SET to json.encodeToString(event)
                 }
                 JdbcDomainEventStore.PeerScopedEvent(
                     eventId = EventId(stored.eventId),
@@ -148,6 +153,7 @@ class JdbcCompetitionDrawJournal(
                 COURTS_SET -> json.decodeFromString<DrawEvent.CourtsSet>(stored.payload)
                 DESKTOP_COURT_SELECTED -> json.decodeFromString<DrawEvent.DesktopCourtSelected>(stored.payload)
                 NEXT_BOUT_SELECTED -> json.decodeFromString<DrawEvent.NextBoutSelected>(stored.payload)
+                PROTOCOL_IMAGES_SET -> json.decodeFromString<DrawEvent.ProtocolImagesSet>(stored.payload)
                 else -> json.decodeFromString<DrawEvent.OfficialsSet>(stored.payload)
             }
             StoredDrawEvent(stored.eventId.value, stored.occurredAt, event)
@@ -161,7 +167,10 @@ class JdbcCompetitionDrawJournal(
         const val DESKTOP_COURT_SELECTED = "desktop_court_selected"
         const val NEXT_BOUT_SELECTED = "court_next_bout_selected"
         const val OFFICIALS_SET = "competition_officials_set"
-        val TYPES = setOf(CONFIRMED, EDITED, STARTED, COURTS_SET, DESKTOP_COURT_SELECTED, NEXT_BOUT_SELECTED, OFFICIALS_SET)
+        const val PROTOCOL_IMAGES_SET = "competition_protocol_images_set"
+        val TYPES = setOf(
+            CONFIRMED, EDITED, STARTED, COURTS_SET, DESKTOP_COURT_SELECTED, NEXT_BOUT_SELECTED, OFFICIALS_SET, PROTOCOL_IMAGES_SET,
+        )
         val json = Json { explicitNulls = false }
     }
 }

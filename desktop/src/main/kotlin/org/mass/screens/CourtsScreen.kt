@@ -184,6 +184,13 @@ object CourtsScreen : Screen {
                                 modifier = Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.bodySmall,
                             )
+                            // I6: history, XLSX/CSV, result protocols, seal and signatures, backups and restore.
+                            ButtonComponent(
+                                text = Localization.getString("courts_reports"),
+                                onclick = { clickWithTransition(Routes.REPORTS) },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     }
                     Spacer(Modifier.width(20.dp))
@@ -400,6 +407,7 @@ object CourtsScreen : Screen {
             DrawRejection.INVALID_COURT -> "brackets_draw_rejected_invalid_court"
             DrawRejection.UNKNOWN_BOUT -> "brackets_draw_rejected_unknown_bout"
             DrawRejection.INVALID_OFFICIALS -> "brackets_draw_rejected_invalid_officials"
+            DrawRejection.INVALID_IMAGE -> "reports_image_invalid"
         },
     )
 

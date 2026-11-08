@@ -45,6 +45,16 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
+import org.mass.PairingRequests
+import org.mass.bout.CourtBouts
+import org.mass.report.CompetitionReportTest
+import org.mass.report.CompetitionReports
+import org.mass.report.CompetitionScenario
+import org.mass.report.CsvReport
+import org.mass.report.XlsxReport
+import java.time.ZoneId
+import javax.sql.DataSource
+import kotlin.test.assertFailsWith
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -396,6 +406,83 @@ class RealPostgresLifecycleTest {
             assertEquals(maxOf(restarted.bouts.cursor, restarted.performances.cursor), restarted.cursor)
         } finally {
             runtime.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `restores a judged competition from its backup into a new database of a clean cluster with identical exports`() {
+        val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
+        assumeTrue(
+            !installationDirectory.isNullOrBlank(),
+            "Set -DuJudge.postgres.installationDirectory to a PostgreSQL bundle root to run this acceptance test",
+        )
+        val root = createTempDirectory()
+        fun cluster(name: String) = ManagedPostgresRuntime(
+            PostgresRuntimeConfiguration(
+                installationDirectory = Path.of(installationDirectory),
+                applicationDataDirectory = root.resolve(name),
+                port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
+                platform = PostgresPlatform.current(),
+            ),
+        )
+        val generatedAt = Instant.parse("2026-11-08T16:00:00Z")
+        val zone = ZoneId.of("Europe/Moscow")
+        /** The services of one desktop over [dataSource], as `ServerRuntime` composes them. */
+        fun reports(dataSource: DataSource, judge: Boolean = false): CompetitionReports {
+            val peerId = LocalPeerIdentity.loadOrCreate(dataSource)
+            val store = JdbcDomainEventStore(dataSource)
+            val pairing = PairingRequests()
+            val applications = CompetitionApplicationsService(JdbcCompetitionApplicationsJournal(store, peerId), backup = null)
+            val draws = CompetitionDrawService(JdbcCompetitionDrawJournal(store, peerId), applications.history, peerId, seeds = { 11L })
+            val journal = JdbcBoutEventJournal(store)
+            val hub = RealtimeHub(KerugiBoutService(journal, peerId), TechnicalPerformanceService(journal, peerId))
+            val courts = CompetitionCourtsService(draws, peerId) { CourtBouts.progress(hub) }
+            if (judge) {
+                CompetitionScenario(applications, draws, CourtBouts(hub, draws, courts, pairing), pairing).apply {
+                    importAndDraw()
+                    connectJudges()
+                    judgeEverything()
+                }
+            }
+            return CompetitionReports(applications, courts, hub) { zone }
+        }
+        val source = cluster("source")
+        val clean = cluster("clean")
+        try {
+            assertIs<PostgresState.Running>(source.start())
+            val sourceData = requireNotNull(source.dataSource)
+            val before = requireNotNull(reports(sourceData, judge = true).report(generatedAt))
+            val backup = JournalBackups(root.resolve("backups"), sourceData).create(JournalBackups.MANUAL)
+            val file = assertIs<BackupInspection.Valid>(JournalBackup.inspect(backup)).backup
+            // A restore never writes into a journal that has rows (`AUD-001`).
+            assertEquals(JournalRestore.Failed(JournalBackup.TARGET_NOT_EMPTY), JournalBackup.restore(file, sourceData, Instant.now()))
+            assertEquals(PostgresState.Stopped, source.stop())
+
+            assertIs<PostgresState.Running>(clean.start())
+            clean.createDatabase("u_judge_r1")
+            val target = clean.dataSource("u_judge_r1")
+            val restored = assertIs<JournalRestore.Restored>(JournalBackup.restore(file, target, Instant.now()))
+            assertEquals(file.header.sha256, restored.sha256)
+            val after = requireNotNull(reports(target).report(generatedAt))
+            assertEquals(before, after)
+            assertEquals(String(CsvReport.render(before)), String(CsvReport.render(after)))
+            assertEquals(
+                CompetitionReportTest.cells(XlsxReport.render(before)),
+                CompetitionReportTest.cells(XlsxReport.render(after)),
+            )
+
+            // The restored journal is durable: after a PostgreSQL restart the projections are the same.
+            assertEquals(PostgresState.Stopped, clean.stop())
+            assertIs<PostgresState.Running>(clean.start())
+            assertEquals(before, reports(clean.dataSource("u_judge_r1")).report(generatedAt))
+            // A failed restore target is dropped; the active database never is.
+            clean.createDatabase("u_judge_r2")
+            clean.dropDatabase("u_judge_r2")
+            assertFailsWith<IllegalArgumentException> { clean.dropDatabase(PostgresRuntimeConfiguration.DEFAULT_DATABASE) }
+        } finally {
+            source.stop()
+            clean.stop()
             root.toFile().deleteRecursively()
         }
     }

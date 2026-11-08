@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,11 +22,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.mass.Server
 import org.mass.ServerRuntimeState
 import org.mass.enums.Colors
 import org.mass.locale.Localization
+import org.mass.persistence.BackupStatus
 import org.mass.ui.button.ButtonComponent
 
 /**
@@ -37,6 +40,17 @@ fun ServerStatusComponent(modifier: Modifier = Modifier, failuresOnly: Boolean =
     val state by Server.runtime.state.collectAsState()
     val scope = rememberCoroutineScope()
     val failed = state as? ServerRuntimeState.Failed
+    val backups = remember(state) { Server.runtime.backups }
+    val backupStatus by (backups?.status ?: remember { MutableStateFlow(BackupStatus()) }).collectAsState()
+    // A failed automatic backup (`BAK-002`) is a persistence failure the operator must see on every screen (`UI-007`).
+    backupStatus.failure?.takeIf { failed == null }?.let { failure ->
+        Text(
+            text = Localization.getString("reports_backup_failed").replace("%s", failure),
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(FAILURE_COLOR).padding(horizontal = 15.dp, vertical = 8.dp),
+        )
+    }
     if (failuresOnly && failed == null && state != ServerRuntimeState.Stopped) return
     val text = when (val current = state) {
         ServerRuntimeState.Stopped -> Localization.getString("server_status_stopped")

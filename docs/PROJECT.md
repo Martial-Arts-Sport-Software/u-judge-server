@@ -119,13 +119,14 @@ delivery proof, хранит решения pairing в журнале, а deskto
 категории по площадкам, нумерует бои по всем площадкам, выгружает PDF «Протокол хода соревнований» и показывает панель
 площадки со следующим боем (I4b). «Начать» открывает экран «Поединок»: бой Kerugi по баллам с составом из подключённых
 судей, действиями оператора, коррекцией, сбросом и результатом (server-часть I2a), с таймером раундов, ходом сетки и
-окном зрителей (server-часть I2b).
+окном зрителей (server-часть I2b). Экран «Отчёты и резервные копии» показывает историю с фильтрами, сохраняет XLSX, CSV и
+протоколы результатов с печатью и подписями, создаёт, копирует, удаляет и восстанавливает backup журнала (I6).
 
 ### 7.1. Реализовано в server
 
 - Kotlin/JVM desktop-проект с модулями `desktop` и `server`;
 - Compose Desktop shell и навигация между стартовым экраном и экраном устройств;
-- ввод фамилии и переключение русского/английского языка;
+- ввод фамилии и переключение русского/английского языка (русский по умолчанию);
 - встроенный Ktor Netty server с HTTPS/WSS на `0.0.0.0:8443`;
 - `GET /` и versioned `GET /v1/metadata` с protocol version, capabilities, identity площадки, pairing policy и server time;
 - read-only `GET /v1/health` с typed liveness status без персональных данных или credentials;
@@ -142,6 +143,9 @@ delivery proof, хранит решения pairing в журнале, а deskto
 - Tanbon и технические выступления по [ADR-011](adr/ADR-011-tanbon-technical-contract.md): бой Tanbon на pipeline Kerugi с
   `tanbon_score_command` и аудитным `CROSS`, `TechnicalPerformance` на том же журнале и dispatcher с финальным
   `technical_score_send_command`, итог в целых десятых по нормативным векторам, места категории; экран «Выступление»;
+- отчётность и backup по [ADR-012](adr/ADR-012-reports-backup-restore.md): история событий сессий с причиной учёта,
+  места категорий, XLSX и CSV, «Протокол результатов», backup `u-judge-backup` с SHA-256 после завершённых сессий и
+  проверенное восстановление в новую базу managed PostgreSQL; русский интерфейс desktop по умолчанию;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
@@ -162,7 +166,7 @@ delivery proof, хранит решения pairing в журнале, а deskto
 - bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
   provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
-- импорт XLSX, история, аудит, экспорт и backup;
+- шифрование backup и удаление заменённых при восстановлении баз из desktop (ADR-012);
 - интерфейсы арбитра, наблюдателя и редактора сеток;
 - автоматические тестовые сценарии.
 

@@ -12,11 +12,7 @@ import org.mass.domain.PeerId
 import org.mass.domain.SequencedDomainEvent
 import org.mass.domain.SessionId
 import org.mass.replication.JournalSchema
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.sql.Connection
 import java.sql.ResultSet
 import java.time.Instant
@@ -213,33 +209,11 @@ class JdbcDomainEventStore(private val dataSource: DataSource) {
     }
 
     /**
-     * Writes every journal row, in journal order, as one JSON object per line: a complete logical backup, since all state is
+     * Writes the whole journal as a `u-judge-backup` file (ADR-012 §6): a complete logical backup, since all state is
      * rebuilt from the journal (ADR-005, `BAK-001`).
      */
-    fun exportJournal(target: Path) {
-        Files.createDirectories(target.parent)
-        val temporary = target.resolveSibling("${target.fileName}.tmp")
-        dataSource.connection.use { connection ->
-            connection.prepareStatement("SELECT * FROM domain_events ORDER BY owner_peer_id, sequence").use { statement ->
-                statement.executeQuery().use { result ->
-                    Files.newBufferedWriter(temporary).use { writer ->
-                        val columns = (1..result.metaData.columnCount).map { result.metaData.getColumnName(it).lowercase() }
-                        while (result.next()) {
-                            val row = buildJsonObject {
-                                columns.forEach { column ->
-                                    val value = result.getObject(column)
-                                    put(column, if (value is Number) JsonPrimitive(value) else JsonPrimitive(value?.toString()))
-                                }
-                            }
-                            writer.write(row.toString())
-                            writer.newLine()
-                        }
-                    }
-                }
-            }
-        }
-        Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-    }
+    fun exportJournal(target: Path, reason: String = JournalBackups.BEFORE_IMPORT, createdAt: Instant = Instant.now()): BackupHeader =
+        JournalBackup.write(dataSource, target, reason, createdAt)
 
     data class PeerScopedEvent(
         val eventId: EventId,

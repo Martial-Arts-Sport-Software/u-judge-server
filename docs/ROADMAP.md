@@ -58,7 +58,8 @@ Pilot не считается production-ready до отдельного hardeni
   тестами.
 - [ ] Gate G5: server-часть I5 (Tanbon, технические выступления, нормативные векторы) подтверждена тестами; client, emulator и
   заключение эксперта-судьи по векторам и чтению tie-break (решение 08.11.2026) открыты.
-- [ ] Gate G6: не готов.
+- [x] Gate G6: история объясняет результат любой сессии, XLSX/CSV совпадают до и после backup/restore на чистом peer
+  (I6, тесты на H2, PostgreSQL 18.6 и production `ServerRuntime`); ручной прогон desktop - регресс этапа 7.
 - [ ] Gate G7: не готов.
 - [ ] Gate G8: не готов.
 
@@ -111,7 +112,7 @@ baseline; при расхождении действует этот план.
 | [ ] | I2b | 7-8 | server-часть G3 | Kerugi: время боя и ход сетки. Таймер по FHR 2024 для возрастной категории, два раунда, перерыв, golden round и победа по нему; экран оператора и экран зрителей на втором мониторе (то же без операторских кнопок); победитель продвигается по сетке, судьи переходят к следующему поединку без перезапуска | `KER-010`-`KER-013`, `UI-001`, `UI-003`-`UI-005`, `SES-007`, `BRK-003`, `BRK-004` | Да: client последовательные сессии |
 | [ ] | I3 | 8-9 | G1 (realtime), G3 | Honor 50 Lite и iPhone 15 через роутер площадки находят server, проходят pairing, судят Kerugi-бой, переживают disconnect с buffered events и искусственную задержку | `DEV-001`, `DEV-002`, `DEV-007`-`DEV-010`, `NET-002`-`NET-005`, `SYS-006`, `NFR-001`-`NFR-003`, `UI-006` | Да: client judge screen, outbox, clock offset |
 | [ ] | I5 | 9-10 | G5 | Tanbon переиспользует Kerugi pipeline; Hosinsool и технические режимы считают итог по нормативным векторам; client и server дают одинаковые суммы | `TAN-001`-`TAN-005`, `TEC-001`-`TEC-014`, `NFR-011` | Да: экраны дисциплин и vectors |
-| [ ] | I6 | 10 | G6 | Результат произвольной сессии объясняется историей и совпадает с XLSX/CSV после backup/restore; русский UI | `AUD-002`-`AUD-004`, `REP-001`-`REP-004`, `BAK-002`-`BAK-004`, `SYS-004` | Нет |
+| [x] | I6 | 10 | G6 | Результат произвольной сессии объясняется историей и совпадает с XLSX/CSV после backup/restore; русский UI | `AUD-002`-`AUD-004`, `REP-001`-`REP-004`, `BAK-002`-`BAK-004`, `SYS-004` | Нет |
 | [ ] | I7 | 11 | G7 | Clean Windows/macOS installers, APK/TestFlight, нагрузка 5-7 clients, packet loss и restart, security check | `SYS-005`, `REL-003`-`REL-007`, `NFR-005`-`NFR-007`, `NFR-014` | Да: mobile builds |
 | [ ] | I8 | 12 | G8 | Полевой пилот по разделу 12 | `REL-001`, `REL-002` | Да |
 
@@ -155,7 +156,7 @@ macOS 27 (arm64) с `./gradlew :desktop:run`: отчёт об ошибках, з
 | `IMP-005` | Implemented | Все правила «Требований к заполнению заявок» - блокирующие ошибки с файлом, листом, строкой, колонкой, значением и причиной (`ApplicationTemplateV1ReaderTest`, `ApplicationImportTest`, desktop) |
 | `IMP-006` | Implemented | Загрузка - одно событие журнала; ошибка проверки, backup или записи ничего не меняет (`CompetitionApplicationsServiceTest`) |
 | `IMP-007` | Implemented | Одинаковая загрузка ничего не пишет, другая требует подтверждения и отменяется без изменений (`CompetitionApplicationsServiceTest`, desktop) |
-| `IMP-008` | Implemented | Перед загрузкой, восстановлением и сбросом журнал выгружается в `backups/*.jsonl`; прежняя загрузка восстанавливается из истории. Восстановление из файла backup - I6 |
+| `IMP-008` | Implemented | Перед загрузкой, восстановлением и сбросом журнал выгружается в `backups/*.jsonl`; прежняя загрузка восстанавливается из истории, файл backup - восстановлением I6 ([ADR-012](adr/ADR-012-reports-backup-restore.md)) |
 | `BAK-001` | Implemented | Backup перед каждой загрузкой; ошибка backup отменяет загрузку (`CompetitionApplicationsServiceTest`) |
 | `SYS-003` | Partial | Импорт 500 участников: проверка меньше 10 с (`ApplicationImportTest`), запись и восстановление после перезапуска PostgreSQL 18.6 (`RealPostgresLifecycleTest`); навигация, расчёт и экспорт - следующие инкременты |
 | `AUD-001` | Implemented | Загрузки, замены, восстановления и сбросы только дописываются в `domain_events` (с I1) |
@@ -277,6 +278,30 @@ Tanbon с панели площадки, места категории и restar
 | `TEC-013` | Partial | Места по итогу, затем по технике (Hosinsool) или презентации, затем по сумме этой части; полное равенство помечается для голосования бригады (`TechnicalScoringTest`, `CourtBoutsTest`). Ожидает заключения эксперта-судьи (ADR-011 §8). |
 | `TEC-014` | Partial | Завершение без оценки места требует причины и достаточного числа оценок, недостающие места записываются (`TechnicalPerformanceServiceTest`); экран мест на desktop без ручного прогона (этап 7) |
 | `NFR-011` | Partial | Нормативные примеры и граничные случаи для всех семи технических дисциплин, Kerugi и Tanbon (`TechnicalScoringTest`, `KerugiScoringTest`, `TanbonBoutServiceTest`); подтверждение векторов экспертом - gate G5. Ожидает заключения эксперта-судьи (ADR-011 §8). |
+
+#### Доказательства I6
+
+Server issue [#140](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/140) поверх I5 #139, решения
+[ADR-012](adr/ADR-012-reports-backup-restore.md). Сценарий доказан acceptance tests на сервисах desktop и JDBC journal:
+соревнование из сетки Kerugi на четверых, финала Tanbon и трёх выступлений Hosinsool судится до конца с засчитанными,
+неподтверждёнными, отменёнными, аудитными и отброшенными оценками; история, места, XLSX, CSV и протоколы строятся из
+проекций; backup восстанавливается на чистом peer в новую базу, и выгрузки совпадают (`CompetitionReportTest` на H2,
+`RealPostgresLifecycleTest` на PostgreSQL 18.6, `ServerRuntimeTest` через production `ServerRuntime` на двух кластерах).
+Ручной прогон desktop отложен до полного регресса этапа 7 (решение 08.11.2026); clean Windows - I7.
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `AUD-002` | Implemented | Коррекция Kerugi и отзыв решения арбитра ссылаются на исходное событие, история показывает оба со статусом «отменён» (`CompetitionReportTest`; с I2a `KerugiBoutServiceTest`) |
+| `AUD-003` | Implemented | История всех событий боёв и выступлений с фильтрами по площадке, категории, сессии, судье и действию, через AND; каждая запись объясняет учёт: засчитан, нет кворума, вне времени боя, отменён, сброшен, только аудит, отброшена (`CompetitionReportTest`); экран «Отчёты и резервные копии» строится из той же модели |
+| `AUD-004` | Implemented | Время в UTC с `Z` и местное со смещением и зоной в истории, XLSX и CSV (`CompetitionReportTest`) |
+| `REP-001` | Implemented | XLSX: «Соревнование», «Места», «Поединки» (Kerugi, Tanbon, выступления с итогами в десятых), «Оценки» со всеми исходными событиями из той же модели, что история (`CompetitionReportTest`) |
+| `REP-002` | Implemented | CSV: UTF-8 без BOM, запятая, CRLF, RFC 4180, коды вместо слов, формат в ADR-012 §4; разбор обратно и кавычки проверены (`CompetitionReportTest`) |
+| `REP-003` | Implemented | XLSX, CSV и PDF строятся в процессе desktop без сети и пишутся по выбранному пути (`CompetitionReportTest`, `ReportsScreen`) |
+| `REP-004` | Implemented | ID соревнования и время формирования в XLSX и в каждой строке CSV (`CompetitionReportTest`) |
+| `BAK-002` | Implemented | Backup после каждого завершённого боя и выступления вне пути судейства, сбой виден оператору на всех экранах (`ServerRuntimeTest` на PostgreSQL 18.6) |
+| `BAK-003` | Implemented | Backup хранится до удаления оператором с подтверждением, удаляются только файлы каталога backups, срока хранения нет (`JournalBackupTest`, ADR-012 §6) |
+| `BAK-004` | Implemented | Восстановление на чистом peer в новую базу managed PostgreSQL с проверкой SHA-256 и числа событий, peer ID и проекции восстановлены, выгрузки совпадают; повреждённый, чужой, неполный, более новый файл и непустая база отклоняются без изменений (`JournalBackupTest`, `ServerRuntimeTest`, `RealPostgresLifecycleTest`) |
+| `SYS-004` | Partial | Русский по умолчанию, английский переключается без перезапуска; все ключи в обоих языках, нет кириллических строк в коде desktop, коды отказов и истории переведены (`LocalizationTest`); технические диагностики server остаются английскими внутри переведённого сообщения (ADR-012 §8) |
 
 Технические задачи, обязательные внутри инкрементов:
 
@@ -580,6 +605,9 @@ desktop (этап 7).
 ### Gate G6
 
 Результат произвольной сессии полностью объясняется из истории и совпадает с XLSX/CSV export после backup/restore.
+
+Закрыт I6 ([ADR-012](adr/ADR-012-reports-backup-restore.md)); статусы требований - в «Доказательства I6». Открыто: ручной
+прогон desktop (этап 7), clean Windows (I7), шифрование backup (проверка безопасности I7).
 
 ## 11. Этап 7: release hardening
 

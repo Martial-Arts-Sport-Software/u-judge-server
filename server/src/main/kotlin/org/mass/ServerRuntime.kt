@@ -16,32 +16,46 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import org.mass.applications.CompetitionApplicationsService
 import org.mass.bout.CourtBouts
 import org.mass.bout.JdbcBoutEventJournal
 import org.mass.bout.KerugiBoutService
 import org.mass.performance.TechnicalPerformanceService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
+import org.mass.domain.EventId
+import org.mass.domain.EventSource
 import org.mass.domain.PeerId
+import org.mass.domain.SessionState
 import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CourtProgress
 import org.mass.draw.CompetitionDrawService
 import org.mass.draw.JdbcCompetitionDrawJournal
+import org.mass.persistence.BackupInspection
 import org.mass.persistence.JdbcDomainEventStore
+import org.mass.persistence.JournalBackup
+import org.mass.persistence.JournalBackups
+import org.mass.persistence.JournalRestore
 import org.mass.persistence.LocalPeerIdentity
 import org.mass.persistence.ManagedPostgresRuntime
 import org.mass.persistence.PostgresCommand
 import org.mass.persistence.PostgresPlatform
 import org.mass.persistence.PostgresRuntimeConfiguration
 import org.mass.persistence.PostgresState
+import org.mass.report.CompetitionReports
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.nio.file.StandardCopyOption
 import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 /** Where the bundled PostgreSQL lives and where this peer keeps its cluster, logs and other local state. */
 data class ServerRuntimeConfiguration(
@@ -100,6 +114,18 @@ sealed interface ServerRuntimeState {
     data class Failed(val diagnostic: String) : ServerRuntimeState
 }
 
+/** The result of «Восстановить» (ADR-012 §7). */
+sealed interface RestoreOutcome {
+    /** The journal of the backup is active; [safetyBackup] holds the journal it replaced. */
+    data class Restored(val events: Int, val sha256: String, val safetyBackup: Path, val database: String) : RestoreOutcome
+
+    /** The file is not a restorable backup ([code] of `JournalBackup`); nothing changed. */
+    data class Rejected(val code: String) : RestoreOutcome
+
+    /** Writing or verifying failed; the current journal stays active and unchanged. */
+    data class Failed(val diagnostic: String) : RestoreOutcome
+}
+
 /**
  * Production composition of one desktop peer: managed PostgreSQL, schema migration, durable journals, the HTTP/WebSocket
  * module and mDNS publication. Supervises PostgreSQL while running and reports its failure instead of silently continuing.
@@ -141,6 +167,16 @@ class ServerRuntime(
     var courtBouts: CourtBouts? = null
         private set
 
+    /** The backups of this peer (ADR-012 §6); null while the server and its journal are not running. */
+    @Volatile
+    var backups: JournalBackups? = null
+        private set
+
+    /** History, XLSX and CSV of the current competition (ADR-012); null while the server is not running. */
+    @Volatile
+    var reports: CompetitionReports? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -172,6 +208,8 @@ class ServerRuntime(
         competitionCourts = null
         realtime = null
         courtBouts = null
+        backups = null
+        reports = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -196,6 +234,7 @@ class ServerRuntime(
                 applicationDataDirectory = configuration.applicationDataDirectory,
                 port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
                 platform = PostgresPlatform.current(),
+                databaseName = activeDatabase(),
             ),
         )
         postgres = runtime
@@ -218,13 +257,12 @@ class ServerRuntime(
         } catch (exception: Exception) {
             return failStartup("Device registry could not be restored: ${exception.message}")
         }.also { pairingRequests = it }
+        val journalBackups = JournalBackups(configuration.applicationDataDirectory.resolve("backups"), dataSource)
+            .also { backups = it }
         competitionApplications = try {
-            val backups = configuration.applicationDataDirectory.resolve("backups")
             CompetitionApplicationsService(
                 journal = JdbcCompetitionApplicationsJournal(store, peerId),
-                backup = {
-                    CompetitionApplicationsService.backupPath(backups, Instant.now()).also(store::exportJournal)
-                },
+                backup = { journalBackups.create(JournalBackups.BEFORE_IMPORT) },
             )
         } catch (exception: Exception) {
             return failStartup("Competition applications could not be restored: ${exception.message}")
@@ -245,6 +283,7 @@ class ServerRuntime(
             return failStartup("Bouts and performances could not be restored: ${exception.message}")
         }.also { realtime = it }
         courtBouts = CourtBouts(hub, checkNotNull(competitionDraws), checkNotNull(competitionCourts), pairing)
+        reports = CompetitionReports(checkNotNull(competitionApplications), checkNotNull(competitionCourts), hub)
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
@@ -290,6 +329,19 @@ class ServerRuntime(
                 }
             }
             runtimeScope.launch { supervisePostgres(runtime) }
+            // `BAK-002`: a backup after every completed bout or performance, off the scoring path; a failure is shown to the
+            // operator.
+            runtimeScope.launch {
+                var completed = completedBouts(hub)
+                combine(hub.bouts.revision, hub.performances.revision) { bouts, performances -> bouts to performances }.collect {
+                    val now = completedBouts(hub)
+                    if (now > completed) {
+                        completed = now
+                        runCatching { journalBackups.create(JournalBackups.AFTER_SESSION) }
+                            .onFailure { ServerLog.backupFailed(it.message.orEmpty()) }
+                    }
+                }
+            }
             // The bout clock (ADR-010 §2): periods end at their deadline and the running clock is saved for a restart.
             runtimeScope.launch {
                 while (isActive) {
@@ -300,6 +352,91 @@ class ServerRuntime(
         }
         return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode, addresses)
     }
+
+    /**
+     * «Восстановить» (ADR-012 §7): checks [file], backs up the current journal, restores the backup into a new database of
+     * the managed cluster, verifies it, journals `journal_restored`, makes the new database active and restarts the
+     * components, which rebuild every projection from the restored journal. A failure drops the new database and leaves
+     * the current one active; the replaced database is kept (`AUD-001`).
+     */
+    @Synchronized
+    fun restore(file: Path, now: () -> Instant = Instant::now): RestoreOutcome {
+        val backup = when (val inspection = JournalBackup.inspect(file)) {
+            is BackupInspection.Invalid -> return RestoreOutcome.Rejected(inspection.code)
+            is BackupInspection.Valid -> inspection.backup
+        }
+        val runtime = postgres?.takeIf { mutableState.value is ServerRuntimeState.Running }
+            ?: return RestoreOutcome.Failed("The server is not running")
+        val journalBackups = backups ?: return RestoreOutcome.Failed("The server is not running")
+        val safetyBackup = try {
+            journalBackups.create(JournalBackups.BEFORE_RESTORE)
+        } catch (exception: Exception) {
+            return RestoreOutcome.Failed("The current journal could not be backed up: ${exception.message}")
+        }
+        val restoredAt = now()
+        val database = "${PostgresRuntimeConfiguration.DEFAULT_DATABASE}_r${DATABASE_SUFFIX.format(restoredAt)}"
+        try {
+            runtime.createDatabase(database)
+        } catch (exception: Exception) {
+            return RestoreOutcome.Failed("A database for the restore could not be created: ${exception.message}")
+        }
+        val target = runtime.dataSource(database)
+        val result = try {
+            JournalBackup.restore(backup, target, restoredAt)
+        } catch (exception: Exception) {
+            JournalRestore.Failed(JournalBackup.WRITE_FAILED, "The backup could not be restored: ${exception.message}")
+        }
+        val restored = when (result) {
+            is JournalRestore.Restored -> result
+            is JournalRestore.Failed -> {
+                runCatching { runtime.dropDatabase(database) }
+                return RestoreOutcome.Failed(result.diagnostic)
+            }
+        }
+        try {
+            val peer = LocalPeerIdentity.loadOrCreate(target)
+            JdbcDomainEventStore(target).appendPeerEvent(
+                JdbcDomainEventStore.PeerScopedEvent(
+                    eventId = EventId.new(),
+                    peerId = peer,
+                    deviceId = null,
+                    source = EventSource("operator"),
+                    author = "operator",
+                    occurredAt = restoredAt,
+                    type = JOURNAL_RESTORED,
+                    payload = buildJsonObject {
+                        put("file", JsonPrimitive(file.fileName.toString()))
+                        put("sha256", JsonPrimitive(restored.sha256))
+                        put("events", JsonPrimitive(restored.events))
+                        put("reason", JsonPrimitive(backup.header.reason))
+                        put("safety_backup", JsonPrimitive(safetyBackup.fileName.toString()))
+                    }.toString(),
+                ),
+            )
+            val pointer = databasePointer()
+            Files.createDirectories(pointer.parent)
+            val temporary = pointer.resolveSibling("${pointer.fileName}.tmp")
+            Files.writeString(temporary, database)
+            Files.move(temporary, pointer, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (exception: Exception) {
+            runCatching { runtime.dropDatabase(database) }
+            return RestoreOutcome.Failed("The restored journal could not be activated: ${exception.message}")
+        }
+        ServerLog.journalRestored(database, restored.events)
+        restart()
+        return RestoreOutcome.Restored(restored.events, restored.sha256, safetyBackup, database)
+    }
+
+    /** The database the components use: `u_judge`, or the target of the latest restore (ADR-012 §7). */
+    private fun activeDatabase(): String = runCatching { Files.readString(databasePointer()).trim() }
+        .getOrNull()
+        ?.takeIf { it.matches(PostgresRuntimeConfiguration.IDENTIFIER) }
+        ?: PostgresRuntimeConfiguration.DEFAULT_DATABASE
+
+    private fun databasePointer(): Path = configuration.applicationDataDirectory.resolve("database")
+
+    private fun completedBouts(hub: RealtimeHub): Int = hub.bouts.bouts().count { it.state == SessionState.COMPLETED } +
+        hub.performances.performances().count { it.state == SessionState.COMPLETED }
 
     private suspend fun supervisePostgres(runtime: ManagedPostgresRuntime) {
         while (scope?.isActive != false) {
@@ -349,9 +486,16 @@ class ServerRuntime(
         competitionCourts = null
         realtime = null
         courtBouts = null
+        backups = null
+        reports = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }
+
+/** The event of a restore in the restored journal (ADR-012 §7.2). */
+const val JOURNAL_RESTORED = "journal_restored"
+
+private val DATABASE_SUFFIX: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").withZone(ZoneOffset.UTC)
 
 /** How often the bout clock is checked: the end of a period is journaled at most this long after its deadline. */
 private const val TIMER_TICK_MILLIS = 200L
