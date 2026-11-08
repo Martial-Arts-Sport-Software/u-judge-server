@@ -194,6 +194,8 @@ class ManagedPostgresRuntime(
         val deadline = Instant.now().plus(readinessTimeout)
         var lastFailure: SQLException? = null
         while (Instant.now().isBefore(deadline)) {
+            // A child that already exited will never accept connections: report why now instead of after the timeout.
+            (managedPostgres.state as? PostgresState.Failed)?.let { throw SQLException(exitDiagnostic(it.diagnostic)) }
             try {
                 DriverManager.getConnection(configuration.administrationJdbcUrl, configuration.databaseUser, null).use {
                     return
@@ -204,6 +206,15 @@ class ManagedPostgresRuntime(
             }
         }
         throw SQLException("Timed out after $readinessTimeout waiting for PostgreSQL", lastFailure)
+    }
+
+    /**
+     * PostgreSQL refuses to start in an elevated Windows session (UAC off or «Run as administrator»), which a clean CI
+     * runner reproduces (I7); the operator gets the remedy instead of the bare exit code.
+     */
+    private fun exitDiagnostic(exit: String): String {
+        val log = runCatching { Files.readString(configuration.logFile).takeLast(4_096) }.getOrDefault("")
+        return if (log.contains("administrative permissions")) ADMINISTRATOR_DIAGNOSTIC else exit
     }
 
     private fun createDatabaseIfMissing() {
@@ -222,3 +233,7 @@ class ManagedPostgresRuntime(
         statement.executeQuery().use { it.next() }
     }
 }
+
+/** The remedy shown when PostgreSQL refused to run with administrator rights. */
+const val ADMINISTRATOR_DIAGNOSTIC = "PostgreSQL does not run with administrator rights: start U'Judge as a standard Windows " +
+    "user, not with «Run as administrator» or with UAC turned off"
