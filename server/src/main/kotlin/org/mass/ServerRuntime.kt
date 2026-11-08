@@ -287,6 +287,13 @@ class ServerRuntime(
                 }
             }
             runtimeScope.launch { supervisePostgres(runtime) }
+            // The bout clock (ADR-010 §2): periods end at their deadline and the running clock is saved for a restart.
+            runtimeScope.launch {
+                while (isActive) {
+                    delay(TIMER_TICK_MILLIS)
+                    hub.tick()
+                }
+            }
         }
         return ServerRuntimeState.Running(configuration.port, peerId, certificate.verificationCode, addresses)
     }
@@ -342,3 +349,6 @@ class ServerRuntime(
         return ServerRuntimeState.Failed(diagnostic)
     }
 }
+
+/** How often the bout clock is checked: the end of a period is journaled at most this long after its deadline. */
+private const val TIMER_TICK_MILLIS = 200L
