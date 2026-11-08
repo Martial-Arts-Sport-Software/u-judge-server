@@ -226,8 +226,9 @@ A Send that arrives after completion is `session_closed`.
 }
 ```
 
-Pushed to every subscribed socket when the score object of the current performance changes: a Send, an adjustment, a
-withdrawal or the completion. `session_state_updated` follows every operator transition with `result: null`.
+Pushed to every subscribed socket when the score object of the current performance changes: a Send or the completion
+(adjustments change the result only, which judges see at completion). `session_state_updated` follows every operator
+transition with `result: null`.
 
 ### 11. Dispatcher
 
