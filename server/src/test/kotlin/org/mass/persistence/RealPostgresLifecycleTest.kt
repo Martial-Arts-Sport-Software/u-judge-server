@@ -1,6 +1,19 @@
 package org.mass.persistence
 
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.mass.RealtimeHub
+import org.mass.bout.BoutAthlete
+import org.mass.bout.BoutCorner
+import org.mass.bout.BoutDiscipline
+import org.mass.bout.RosterJudge
+import org.mass.bout.TanbonArea
+import org.mass.domain.BracketId
+import org.mass.domain.JudgeVector
+import org.mass.domain.TechnicalDiscipline
+import org.mass.performance.PerformanceCommand
+import org.mass.performance.PerformanceRejection
+import org.mass.performance.PerformanceStartSpec
+import org.mass.performance.TechnicalPerformanceService
 import org.mass.bout.BoutCommand
 import org.mass.bout.BoutOrigin
 import org.mass.bout.BoutOutcome
@@ -276,6 +289,111 @@ class RealPostgresLifecycleTest {
             assertIs<BoutOutcome.Applied>(again.dispatch(operator, BoutCommand.ChangeState(EventId.new(), started.sessionId, BoutStateAction.RESUME)))
             assertEquals(Instant.parse("2026-11-08T10:00:58Z"), again.current()!!.clock.runningSince)
             assertEquals(102_000L, again.current()!!.clock.remainingMillis)
+        } finally {
+            runtime.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+    @Test
+    fun `recovers a Tanbon bout and a technical performance in the middle with the same Sends after a PostgreSQL restart`() {
+        val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
+        assumeTrue(
+            !installationDirectory.isNullOrBlank(),
+            "Set -DuJudge.postgres.installationDirectory to a PostgreSQL bundle root to run this acceptance test",
+        )
+        val root = createTempDirectory()
+        val runtime = ManagedPostgresRuntime(
+            PostgresRuntimeConfiguration(
+                installationDirectory = Path.of(installationDirectory),
+                applicationDataDirectory = root.resolve("application-data"),
+                port = PostgresCommand.withAvailableLoopbackPort(listOf("postgres")).port,
+                platform = PostgresPlatform.current(),
+            ),
+        )
+        var clock = Instant.parse("2026-11-08T12:00:00Z")
+        fun hub(): RealtimeHub {
+            val dataSource = requireNotNull(runtime.dataSource)
+            val journal = JdbcBoutEventJournal(JdbcDomainEventStore(dataSource))
+            val peerId = LocalPeerIdentity.loadOrCreate(dataSource)
+            return RealtimeHub(KerugiBoutService(journal, peerId, now = { clock }), TechnicalPerformanceService(journal, peerId, now = { clock }))
+        }
+        val operator = "Оператор"
+        val judges = listOf("android-1", "android-2", "android-3")
+
+        try {
+            assertIs<PostgresState.Running>(runtime.start())
+            val first = hub()
+            // A Tanbon bout with an audit-only CROSS is decided before the performance starts on the same court.
+            val tanbon = assertIs<BoutOutcome.Applied>(
+                first.operator(operator, BoutCommand.StartBout(EventId.new(), testBoutSpec(judges.take(2), quorum = 1).copy(discipline = BoutDiscipline.TANBON))),
+            ).sessionId
+            first.operator(operator, BoutCommand.ChangeState(EventId.new(), tanbon, BoutStateAction.START))
+            val bout = requireNotNull(first.bouts.current())
+            fun tanbonTap(competitor: KerugiCompetitor?, area: TanbonArea, millis: Long) = BoutCommand.SubmitTanbonScore(
+                EventId.new(), 0, clock.plusMillis(millis),
+                JudgeContext(bout.competitionId, bout.peerId, bout.courtId, bout.bracketId, bout.sessionId,
+                    JudgeId(requireNotNull(bout.seatOf("android-1")).judgeId), "android-1"),
+                competitor, area,
+            )
+            assertIs<BoutOutcome.Applied>(first.bouts.dispatch(BoutOrigin.Judge("android-1"), tanbonTap(KerugiCompetitor.RED, TanbonArea.HEAD, 100)))
+            assertIs<BoutOutcome.Applied>(first.bouts.dispatch(BoutOrigin.Judge("android-1"), tanbonTap(null, TanbonArea.CROSS, 200)))
+            clock = clock.plusSeconds(5)
+            // «Стоп периода» on round 1, «Продолжить» from the break, «Стоп периода» on round 2 (ADR-010 §2).
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.EndPeriod(EventId.new(), tanbon)))
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.ChangeState(EventId.new(), tanbon, BoutStateAction.RESUME)))
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.EndPeriod(EventId.new(), tanbon)))
+            assertIs<BoutOutcome.Applied>(first.operator(operator, BoutCommand.CompleteBout(EventId.new(), tanbon)))
+
+            val spec = PerformanceStartSpec(
+                competitionId = bout.competitionId,
+                bracketId = BracketId("7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c41"),
+                categoryId = "self-defense",
+                categoryTitle = "Приёмы самообороны · Юниоры",
+                performanceNumber = 12,
+                round = 1,
+                index = 0,
+                entry = BoutCorner("entry-5", "Иванов И. И. (Москва)", listOf(BoutAthlete("Иванов Иван Иванович", "Москва"))),
+                discipline = TechnicalDiscipline.HOSINSOOL,
+                techniqueCriteria = 6,
+                judges = judges.mapIndexed { index, device -> RosterJudge(device, "Судья${index + 1}") },
+            )
+            val performanceId = assertIs<BoutOutcome.Applied>(first.performanceOperator(operator, PerformanceCommand.Start(EventId.new(), spec))).sessionId
+            first.performanceOperator(operator, PerformanceCommand.Begin(EventId.new(), performanceId))
+            val performance = requireNotNull(first.performances.current())
+            fun send(device: String, criterion: Int) = JudgeVector(List(6) { criterion }, List(4) { criterion }, 0).let { vector ->
+                PerformanceCommand.SendScore(
+                    EventId.new(), 0, clock,
+                    JudgeContext(performance.competitionId, performance.peerId, performance.courtId, performance.bracketId,
+                        performance.sessionId, JudgeId(requireNotNull(performance.seatOf(device)).judgeId), device),
+                    "hosinsool", vector, vector.totalTenths,
+                )
+            }
+            val firstSend = send("android-1", 7)
+            assertIs<BoutOutcome.Applied>(first.performances.dispatch(BoutOrigin.Judge("android-1"), firstSend))
+            assertIs<BoutOutcome.Applied>(first.performances.dispatch(BoutOrigin.Judge("android-2"), send("android-2", 8)))
+
+            assertEquals(PostgresState.Stopped, runtime.stop())
+            assertIs<PostgresState.Running>(runtime.start())
+            val restarted = hub()
+
+            val decided = requireNotNull(restarted.bouts.bout(tanbon))
+            assertEquals(BoutDiscipline.TANBON, decided.discipline)
+            assertEquals(2, decided.score().red)
+            assertEquals(KerugiCompetitor.RED, decided.result?.winner)
+            val current = requireNotNull(restarted.performances.current())
+            assertEquals(performanceId, current.sessionId)
+            assertEquals(SessionState.RUNNING, current.state)
+            assertEquals(listOf(1, 2), current.submittedSeats())
+            assertEquals(false, assertIs<BoutOutcome.Applied>(restarted.performances.dispatch(BoutOrigin.Judge("android-1"), firstSend)).isNew)
+            assertEquals(
+                BoutOutcome.Rejected(PerformanceRejection.SCORE_ALREADY_SENT),
+                restarted.performances.dispatch(BoutOrigin.Judge("android-1"), send("android-1", 9)),
+            )
+            assertIs<BoutOutcome.Applied>(restarted.performances.dispatch(BoutOrigin.Judge("android-3"), send("android-3", 9)))
+            assertIs<BoutOutcome.Applied>(restarted.performanceOperator(operator, PerformanceCommand.Complete(EventId.new(), performanceId)))
+            // Totals 7.0, 8.0 and 9.0: the trimmed mean keeps 8.0.
+            assertEquals(80, requireNotNull(restarted.performances.current()?.result()).totalTenths)
+            assertEquals(maxOf(restarted.bouts.cursor, restarted.performances.cursor), restarted.cursor)
         } finally {
             runtime.stop()
             root.toFile().deleteRecursively()

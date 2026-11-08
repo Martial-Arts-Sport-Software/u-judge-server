@@ -1,0 +1,1 @@
+{"type":"technical_score_updated","sessionId":"1b2c3d4e-5f60-4718-8a9b-0c1d2e3f4a50","cursor":211,"score":{"submittedSeats":[1,2],"result":{"totalTenths":62,"aggregateTenths":62,"adjustmentTenths":0,"divisor":2,"formula":"mean"}}}

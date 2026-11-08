@@ -53,7 +53,7 @@ data class ServerMetadata(
     companion object {
         fun local(peerId: String = "peer-local") = ServerMetadata(
             protocolVersion = "1.0",
-            capabilities = mapOf("metadata" to true, "kerugi_bout" to true),
+            capabilities = mapOf("metadata" to true, "kerugi_bout" to true, "tanbon_bout" to true, "technical_performance" to true),
             peerId = peerId,
             courtId = "court-local",
             serverName = "U'Judge Server",

@@ -57,7 +57,7 @@ import u_judge_server.desktop.generated.resources.cross_icon
 
 /** Kerugi categories whose shown draw has bouts: the ones the full-screen view and its arrows go through. */
 fun CategoryDrawState.hasBracket(): Boolean =
-    category.discipline == ApplicationDiscipline.KERUGI &&
+    category.discipline.isBout &&
         (shown?.format == DrawFormat.ELIMINATION || shown?.format == DrawFormat.ROUND_ROBIN)
 
 /**

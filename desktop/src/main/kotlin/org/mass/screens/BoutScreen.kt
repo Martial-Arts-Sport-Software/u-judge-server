@@ -47,6 +47,7 @@ import org.mass.DeviceConnectionState
 import org.mass.Server
 import org.mass.State
 import org.mass.bout.BoutCommand
+import org.mass.bout.BoutDiscipline
 import org.mass.bout.BoutEntryStatus
 import org.mass.bout.BoutHistoryEntry
 import org.mass.bout.BoutStateAction
@@ -71,6 +72,8 @@ import org.mass.domain.KerugiCompetitor
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.SessionState
 import org.mass.enums.Colors
+import org.mass.enums.Routes
+import org.mass.ui.button.clickWithTransition
 import org.mass.locale.Localization
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
@@ -351,6 +354,22 @@ object BoutScreen : Screen {
             CourtPanelComponent(panel, onPick, Modifier.fillMaxWidth().height(260.dp), enabled = enabled, onStart = onStart.takeIf { startable })
         }
         if (panel.next == null) Hint(Localization.getString("bout_select_empty"))
+        if (panel.next is CourtItem.Performance) {
+            Hint(Localization.getString("i5_bout_next_is_performance"))
+            ButtonComponent(
+                Localization.getString("i5_bout_open_performance"),
+                ButtonStyles.Secondary,
+                onclick = { clickWithTransition(Routes.PERFORMANCE) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        // The discipline comes from the category's application sheet: «Весовая категория» or «Танбон» (ADR-011 §3).
+        (panel.next as? CourtItem.Bout)?.let { CourtBouts.boutDiscipline(it.category) }?.let { discipline ->
+            Hint(
+                Localization.getString("i5_bout_discipline_next")
+                    .replace("%s", Localization.getString("i5_bout_discipline_${discipline.code}")),
+            )
+        }
         PanelTitle(Localization.getString("bout_judges_title"))
         if (connected.isEmpty()) {
             Hint(Localization.getString("bout_judges_empty"))
@@ -420,7 +439,8 @@ object BoutScreen : Screen {
         val now = rememberNow()
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                Localization.getString("bout_number").replace("%d", bout.started.boutNumber.toString()) + " · " + bout.started.categoryTitle,
+                Localization.getString("bout_number").replace("%d", bout.started.boutNumber.toString()) + " · " +
+                    Localization.getString("i5_bout_discipline_${bout.discipline.code}") + " · " + bout.started.categoryTitle,
                 color = Color.White,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
@@ -469,14 +489,15 @@ object BoutScreen : Screen {
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     val scoring = enabled && (bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Tanbon has no throws, spins or Gamjeom (ADR-011 §3): its score comes from the judges only.
+                    if (bout.discipline == BoutDiscipline.KERUGI) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         (1..3).forEach { points ->
                             SmallButton(Localization.getString("bout_throw").replace("%d", points.toString()), scoring, Modifier.weight(1f)) {
                                 onAction(KerugiOperatorActionType.THROW, side, points)
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (bout.discipline == BoutDiscipline.KERUGI) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         SmallButton(Localization.getString("bout_spin"), scoring, Modifier.weight(1f)) {
                             onAction(KerugiOperatorActionType.SPIN_BONUS, side, 1)
                         }
@@ -487,6 +508,7 @@ object BoutScreen : Screen {
                 }
             }
         }
+        if (bout.discipline == BoutDiscipline.TANBON) Hint(Localization.getString("i5_bout_tanbon_hint"))
         score.warnings.forEach { warning ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -538,7 +560,10 @@ object BoutScreen : Screen {
     private fun History(bout: KerugiBout, enabled: Boolean, onUndo: (BoutHistoryEntry) -> Unit) {
         PanelTitle(Localization.getString("bout_history_title"))
         val entries = remember(bout) {
-            bout.history().filter { it.type == KerugiBoutEvents.SCORE_CANDIDATE || it.type == KerugiBoutEvents.OPERATOR_ACTION }.reversed()
+            bout.history().filter {
+                it.type == KerugiBoutEvents.SCORE_CANDIDATE || it.type == KerugiBoutEvents.TANBON_SCORE_CANDIDATE ||
+                    it.type == KerugiBoutEvents.OPERATOR_ACTION
+            }.reversed()
         }
         if (entries.isEmpty()) {
             Hint(Localization.getString("bout_history_empty"))
@@ -703,6 +728,9 @@ object BoutScreen : Screen {
             KerugiBoutEvents.SCORE_CANDIDATE -> Localization.getString("bout_entry_kerugi_score_candidate")
                 .replaceFirst("%s", entry.seat?.toString().orEmpty())
                 .replaceFirst("%s", "$side ${entry.detail}")
+            KerugiBoutEvents.TANBON_SCORE_CANDIDATE -> Localization.getString("bout_entry_kerugi_score_candidate")
+                .replaceFirst("%s", entry.seat?.toString().orEmpty())
+                .replaceFirst("%s", if (entry.competitor == null) Localization.getString("i5_bout_cross") else "$side ${entry.detail}")
             KerugiBoutEvents.OPERATOR_ACTION -> Localization.getString("bout_entry_kerugi_operator_action")
                 .replace("%s", "$side ${actionLabel(entry.detail)}")
             else -> Localization.getString("bout_entry_other").replace("%s", entry.detail)
@@ -727,6 +755,7 @@ object BoutScreen : Screen {
             BoutEntryStatus.RESET -> "bout_status_reset"
             BoutEntryStatus.APPLIED -> "bout_status_applied"
             BoutEntryStatus.RECORDED -> "bout_status_recorded"
+            BoutEntryStatus.AUDIT_ONLY -> "i5_bout_status_audit_only"
         },
     )
 

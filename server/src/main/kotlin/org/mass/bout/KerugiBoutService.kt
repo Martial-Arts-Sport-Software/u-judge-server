@@ -38,7 +38,7 @@ data class BoutCourt(val courtId: CourtId, val number: Int) {
  */
 class KerugiBoutService(
     private val journal: BoutEventJournal,
-    private val peerId: PeerId,
+    val peerId: PeerId,
     val court: BoutCourt = BoutCourt.single(peerId),
     private val now: () -> Instant = Instant::now,
     private val clientTimestampTolerance: Duration = Duration.ofSeconds(5),
@@ -124,6 +124,10 @@ class KerugiBoutService(
     @Synchronized
     fun bouts(): List<KerugiBout> = bouts.values.toList()
 
+    /** Whether [eventId] is journaled for a bout of this court, so another session kind cannot reuse it. */
+    @Synchronized
+    fun knows(eventId: EventId): Boolean = eventId in eventsById
+
     /** Bouts of the bracket already decided: a completed bout cannot be started again. */
     @Synchronized
     fun completed(bracketId: BracketId, round: Int, index: Int): Boolean = bouts.values.any {
@@ -168,7 +172,7 @@ class KerugiBoutService(
         val after = bouts[applied.sessionId] ?: return null
         if (before == null || BoutChange.SCORE !in applied.changes || after.closed) return null
         if (after.clock.phase != KerugiClock.GOLDEN_ROUND) return null
-        val inputs = setOf(KerugiBoutEvents.SCORE_CANDIDATE, KerugiBoutEvents.OPERATOR_ACTION)
+        val inputs = setOf(KerugiBoutEvents.SCORE_CANDIDATE, KerugiBoutEvents.TANBON_SCORE_CANDIDATE, KerugiBoutEvents.OPERATOR_ACTION)
         if (after.events.last().event.type !in inputs) return null
         val was = before.score()
         val now = after.score()
@@ -196,13 +200,20 @@ class KerugiBoutService(
         val context = command.context
         if (context.deviceId != origin.deviceId) return BoutRejection.JUDGE_NOT_ASSIGNED
         val bout = bouts[context.sessionId] ?: return BoutRejection.SESSION_NOT_CURRENT
+        val discipline = when (command) {
+            is BoutCommand.SubmitScore -> BoutDiscipline.KERUGI
+            is BoutCommand.SubmitTanbonScore -> BoutDiscipline.TANBON
+            is BoutCommand.SignalAttention, is BoutCommand.SignalReady -> bout.discipline
+        }
+        if (discipline != bout.discipline) return BoutRejection.DISCIPLINE_MISMATCH
         if (bout.closed) return BoutRejection.SESSION_CLOSED
         if (bout.sessionId != currentSessionId || context.competitionId != bout.competitionId || context.peerId != bout.peerId ||
             context.courtId != bout.courtId || context.bracketId != bout.bracketId
         ) {
             return BoutRejection.SESSION_NOT_CURRENT
         }
-        if (bout.state == SessionState.PREPARED && command is BoutCommand.SubmitScore) return BoutRejection.SESSION_NOT_STARTED
+        val scoreTap = command is BoutCommand.SubmitScore || command is BoutCommand.SubmitTanbonScore
+        if (bout.state == SessionState.PREPARED && scoreTap) return BoutRejection.SESSION_NOT_STARTED
         if (bout.seatOf(origin.deviceId)?.judgeId != context.judgeId.value) return BoutRejection.JUDGE_NOT_ASSIGNED
         if (command.clientTimestamp.isAfter(now().plus(clientTimestampTolerance))) return BoutRejection.INVALID_CLIENT_TIMESTAMP
         return null
@@ -224,6 +235,12 @@ class KerugiBoutService(
         val sessionId = sessionOf(command)
         val bout = current()?.takeIf { it.sessionId == sessionId } ?: return BoutRejection.SESSION_NOT_CURRENT
         if (bout.closed) return BoutRejection.SESSION_CLOSED
+        // Tanbon defines only HEAD, BODY and CROSS: throws, spins, Gamjeom and the disqualification are Kerugi rules.
+        if (bout.discipline == BoutDiscipline.TANBON &&
+            (command is BoutCommand.AwardAction || command is BoutCommand.ConfirmDisqualification)
+        ) {
+            return BoutRejection.DISCIPLINE_MISMATCH
+        }
         val scoring = bout.state == SessionState.RUNNING || bout.state == SessionState.PAUSED
         return when (command) {
             is BoutCommand.ChangeState -> BoutRejection.INVALID_TRANSITION.takeIf {
@@ -307,6 +324,9 @@ class KerugiBoutService(
         val (type, payload) = when (command) {
             is BoutCommand.SubmitScore -> KerugiBoutEvents.SCORE_CANDIDATE to Json.encodeToString(
                 BoutScoreCandidatePayload(command.competitor, command.area, command.clientTimestamp.toString(), command.sequence),
+            )
+            is BoutCommand.SubmitTanbonScore -> KerugiBoutEvents.TANBON_SCORE_CANDIDATE to Json.encodeToString(
+                TanbonScoreCandidatePayload(command.competitor, command.area, command.clientTimestamp.toString(), command.sequence),
             )
             is BoutCommand.SignalAttention -> KerugiBoutEvents.JUDGE_ATTENTION to Json.encodeToString(
                 BoutAttentionPayload(command.clientTimestamp.toString(), command.sequence),
@@ -396,7 +416,8 @@ class KerugiBoutService(
         )
         return operatorEvent(
             origin, command.eventId, spec.competitionId, spec.bracketId, sessionId, occurredAt,
-            KerugiBoutEvents.BOUT_STARTED, Json.encodeToString(payload),
+            if (spec.discipline == BoutDiscipline.TANBON) KerugiBoutEvents.TANBON_BOUT_STARTED else KerugiBoutEvents.BOUT_STARTED,
+            Json.encodeToString(payload),
         )
     }
 
@@ -456,7 +477,7 @@ class KerugiBoutService(
 
     private fun project(event: SequencedDomainEvent) {
         val sessionId = event.event.sessionId
-        val bout = if (event.event.type == KerugiBoutEvents.BOUT_STARTED) {
+        val bout = if (event.event.type in KerugiBoutEvents.STARTS) {
             KerugiBout.start(event).also { if (it.courtId == court.courtId) currentSessionId = sessionId }
         } else {
             // Events of a session whose start is missing (none in production) are not projected.

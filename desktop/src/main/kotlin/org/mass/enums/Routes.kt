@@ -10,6 +10,7 @@ enum class Routes(val path: String) {
     BRACKETS_SETUP("brackets_setup"),
     COURTS("courts"),
     BOUT("bout"),
+    PERFORMANCE("performance"),
 
     BACK("");
 

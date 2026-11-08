@@ -8,10 +8,18 @@ import org.mass.PairingSubmission
 import org.mass.RealtimeHub
 import org.mass.applications.ApplicationCategory
 import org.mass.applications.ApplicationDiscipline
+import org.mass.applications.Weapon
 import org.mass.applications.CompetitionApplications
 import org.mass.applications.CompetitionApplicationsService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
+import org.mass.domain.AggregationFormula
 import org.mass.domain.EventId
+import org.mass.domain.JudgeId
+import org.mass.domain.JudgeVector
+import org.mass.domain.TechnicalDiscipline
+import org.mass.draw.CourtItem
+import org.mass.performance.PerformanceCommand
+import org.mass.performance.TechnicalPerformanceService
 import org.mass.domain.KerugiCompetitor
 import org.mass.domain.KerugiOperatorActionType
 import org.mass.domain.PeerId
@@ -19,7 +27,6 @@ import org.mass.draw.CategoryProgress
 import org.mass.draw.CategoryStatus
 import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
-import org.mass.draw.CourtItem
 import org.mass.draw.DrawFixtures.category
 import org.mass.draw.DrawOutcome
 import org.mass.draw.DrawRejection
@@ -44,7 +51,7 @@ class CourtBoutsTest {
     private val pairing = PairingRequests()
     private var seed = 1L
 
-    private class Court(val bouts: CourtBouts, val draws: CompetitionDrawService, val courts: CompetitionCourtsService)
+    private class Court(val bouts: CourtBouts, val draws: CompetitionDrawService, val courts: CompetitionCourtsService, val hub: RealtimeHub)
 
     @Test
     fun `the court panel starts its next bout with the connected judges, locks the draw and survives a restart`() {
@@ -179,10 +186,114 @@ class CourtBoutsTest {
         approve("android-2", "Судья2").let(pairing::connected)
 
         assertEquals(
-            CourtBoutOutcome.Rejected(CourtBouts.NOT_KERUGI),
+            CourtBoutOutcome.Rejected(CourtBouts.NOT_BOUT),
             court.bouts.start(listOf("android-1", "android-2"), 2, 1_000, "Оператор"),
         )
         assertNull(court.bouts.bouts.current())
+    }
+
+    @Test
+    fun `the court panel starts its next performance, locks the order, ranks the results and survives a restart`() {
+        val court = court(category(List(3) { "Тренер $it" }, id = "self-defense", discipline = ApplicationDiscipline.SELF_DEFENSE))
+        (1..3).map { approve("android-$it", "Судья$it") }.forEach(pairing::connected)
+        val judges = (1..3).map { "android-$it" }
+        val first = assertIs<CourtItem.Performance>(court.bouts.panel().next)
+        assertEquals(1, first.number)
+
+        assertEquals(CourtBoutOutcome.Rejected(CourtBouts.NOT_BOUT), court.bouts.start(judges.take(2), 2, 1_000, "Оператор"))
+        assertEquals(
+            CourtBoutOutcome.Rejected(BoutRejection.INVALID_SETTINGS),
+            court.bouts.startPerformance(judges.take(2), AggregationFormula.TRIMMED_MEAN, "Оператор"),
+        )
+        assertEquals(CategoryStatus.CONFIRMED, court.draws.board().category("self-defense")!!.status)
+        assertIs<CourtBoutOutcome.Done>(court.bouts.startPerformance(judges, AggregationFormula.TRIMMED_MEAN, "Оператор"))
+        assertEquals(CategoryStatus.STARTED, court.draws.board().category("self-defense")!!.status)
+
+        val performance = court.hub.performances.current()!!
+        assertEquals(TechnicalDiscipline.HOSINSOOL, performance.discipline)
+        assertEquals(4, performance.started.techniqueCriteria, "«Младшие юноши» perform four technical rounds")
+        assertEquals(first.number, performance.started.performanceNumber)
+        assertEquals(first.entry.id, performance.started.entry.entryId)
+        assertEquals(1, court.bouts.panel().current!!.number)
+        assertEquals(CourtBoutOutcome.Rejected(BoutRejection.BOUT_IN_PROGRESS), court.bouts.startPerformance(judges, AggregationFormula.MEAN, "Оператор"))
+
+        judgeAndComplete(court, judges, listOf(70, 64, 59))
+        assertTrue(court.bouts.panel().queue.none { it.number == 1 })
+        assertEquals(2, court.bouts.panel().next!!.number)
+        assertIs<CourtBoutOutcome.Done>(court.bouts.startPerformance(judges, AggregationFormula.MEAN, "Оператор"))
+        judgeAndComplete(court, judges, listOf(80, 80, 79))
+
+        val standings = court.bouts.standings("self-defense")
+        assertEquals(listOf(2, 1), standings.map { it.key.started.performanceNumber })
+        assertEquals(listOf(1, 2), standings.map { it.place })
+        assertEquals(listOf(80, 64), standings.map { it.result.totalTenths })
+
+        val restarted = courtOf(null)
+        assertEquals(2, restarted.bouts.panel().current!!.number)
+        assertEquals(3, restarted.bouts.panel().next!!.number)
+        assertEquals(listOf(80, 64), restarted.bouts.standings("self-defense").map { it.result.totalTenths })
+    }
+
+    @Test
+    fun `a category of the Tanbon sheet starts Tanbon bouts and a weight category Kerugi bouts`() {
+        val court = court(
+            category(List(2) { "Тренер $it" }, id = "tanbon", discipline = ApplicationDiscipline.TANBON),
+            category(List(2) { "Тренер $it" }, id = "weights", weight = "до 36 кг"),
+        )
+        (1..2).map { approve("android-$it", "Судья$it") }.forEach(pairing::connected)
+        val judges = listOf("android-1", "android-2")
+        assertEquals(BoutDiscipline.TANBON, CourtBouts.boutDiscipline(court.bouts.panel().next!!.category))
+        assertIs<CourtBoutOutcome.Done>(court.bouts.start(judges, 2, 1_000, "Оператор"))
+        val tanbon = court.bouts.bouts.current()!!
+        assertEquals(BoutDiscipline.TANBON, tanbon.discipline)
+        assertEquals("tanbon", tanbon.started.categoryId)
+        court.bouts.command("Оператор", BoutCommand.CancelBout(EventId.new(), tanbon.sessionId, "Проверка"))
+
+        val weights = court.bouts.panel().queue.single { it.category.id == "weights" }
+        assertEquals(DrawOutcome.Done, court.courts.selectNextBout(weights.ref))
+        assertIs<CourtBoutOutcome.Done>(court.bouts.start(judges, 2, 1_000, "Оператор"))
+        assertEquals(BoutDiscipline.KERUGI, court.bouts.bouts.current()!!.discipline)
+        assertNull(CourtBouts.boutDiscipline(category(listOf("Тренер"), discipline = ApplicationDiscipline.SELF_DEFENSE)))
+    }
+
+    /** Begins the current performance, lets each judge send a vector with the given total and completes it. */
+    private fun judgeAndComplete(court: Court, judges: List<String>, totals: List<Int>) {
+        val performance = court.hub.performances.current()!!
+        assertIs<CourtBoutOutcome.Done>(court.bouts.performanceCommand("Оператор", PerformanceCommand.Begin(EventId.new(), performance.sessionId)))
+        judges.zip(totals).forEach { (device, total) ->
+            val current = court.hub.performances.current()!!
+            val vector = vectorWithTotal(total)
+            val context = JudgeContext(
+                current.competitionId, current.peerId, current.courtId, current.bracketId, current.sessionId,
+                JudgeId(current.seatOf(device)!!.judgeId), device,
+            )
+            val command = PerformanceCommand.SendScore(EventId.new(), 0, java.time.Instant.now(), context, "hosinsool", vector, vector.totalTenths)
+            assertEquals(total, vector.totalTenths)
+            assertIs<BoutOutcome.Applied>(court.hub.performances.dispatch(BoutOrigin.Judge(device), command))
+        }
+        assertIs<CourtBoutOutcome.Done>(court.bouts.performanceCommand("Оператор", PerformanceCommand.Complete(EventId.new(), performance.sessionId)))
+    }
+
+    /** Four technique and four presentation criteria of `0.1..1.0` that add up to [total] tenths. */
+    private fun vectorWithTotal(total: Int): JudgeVector {
+        val criteria = IntArray(8) { 1 }
+        var rest = total - 8
+        criteria.indices.forEach { index -> (minOf(9, rest)).also { criteria[index] += it; rest -= it } }
+        return JudgeVector(criteria.take(4), criteria.drop(4), 0)
+    }
+
+    @Test
+    fun `the seven technical disciplines follow the application sheets and weapons`() {
+        fun of(discipline: ApplicationDiscipline, weapon: Weapon? = null) =
+            CourtBouts.technicalDiscipline(category(listOf("Тренер"), discipline = discipline).copy(weapon = weapon))
+        assertNull(of(ApplicationDiscipline.KERUGI))
+        assertEquals(TechnicalDiscipline.HOSINSOOL, of(ApplicationDiscipline.SELF_DEFENSE))
+        assertEquals(TechnicalDiscipline.PAIR_FREESTYLE, of(ApplicationDiscipline.STAGED_PAIR))
+        assertEquals(TechnicalDiscipline.GROUP_FREESTYLE, of(ApplicationDiscipline.STAGED_GROUP))
+        assertEquals(TechnicalDiscipline.SWORD, of(ApplicationDiscipline.FREE_FORM, Weapon.SWORD))
+        assertEquals(TechnicalDiscipline.POLE, of(ApplicationDiscipline.FREE_FORM, Weapon.STAFF))
+        assertEquals(TechnicalDiscipline.PAIRED_NUNCHAKU, of(ApplicationDiscipline.FREE_FORM, Weapon.DOUBLE_NUNCHAKU))
+        assertEquals(TechnicalDiscipline.PAIRED_FANS, of(ApplicationDiscipline.FREE_FORM, Weapon.FANS))
     }
 
     @Test
@@ -212,9 +323,10 @@ class CourtBoutsTest {
             draws.drawAll()
             draws.confirm()
         }
-        val hub = RealtimeHub(KerugiBoutService(JdbcBoutEventJournal(store), peerId))
-        val courts = CompetitionCourtsService(draws, peerId) { CourtBouts.progress(hub.bouts) }
-        return Court(CourtBouts(hub, draws, courts, pairing), draws, courts)
+        val journal = JdbcBoutEventJournal(store)
+        val hub = RealtimeHub(KerugiBoutService(journal, peerId), TechnicalPerformanceService(journal, peerId))
+        val courts = CompetitionCourtsService(draws, peerId) { CourtBouts.progress(hub) }
+        return Court(CourtBouts(hub, draws, courts, pairing), draws, courts, hub)
     }
 
     private fun approve(deviceId: String, surname: String): String {

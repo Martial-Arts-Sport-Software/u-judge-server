@@ -23,7 +23,7 @@ object DrawFixtures {
         discipline = discipline,
         weapon = null,
         section = AgeSection("2014-2013 г.р. Младшие юноши", AgeClass.YOUNGER, CategorySex.MALE, 2013, 2014),
-        weight = weight.takeIf { discipline == ApplicationDiscipline.KERUGI },
+        weight = weight.takeIf { discipline.hasWeight },
         entries = coaches.mapIndexed { index, coach ->
             CategoryEntry(
                 id = "file:sheet:$index",
@@ -31,7 +31,7 @@ object DrawFixtures {
                     Athlete(
                         fullName = names[index],
                         birthDate = LocalDate.of(2013, 1, 1).plusDays(index.toLong()),
-                        weight = weight.takeIf { discipline == ApplicationDiscipline.KERUGI },
+                        weight = weight.takeIf { discipline.hasWeight },
                         sportQualification = "б/р",
                         technicalQualification = belts[index],
                         city = "Город",

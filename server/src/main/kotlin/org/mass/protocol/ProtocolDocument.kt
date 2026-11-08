@@ -18,12 +18,16 @@ data class ProtocolPage(
     val court: Int,
     val numbers: Map<ItemRef, Int>,
 ) {
-    /** «<section>, <weight>» for Kerugi, «<discipline>, <weapon>, <section>» for the technical disciplines. */
+    /**
+     * «<section>, <weight>» for Kerugi, «Танбон, <section>, <weight>» for Tanbon, «<discipline>, <weapon>, <section>» for the
+     * technical disciplines.
+     */
     val title: String
-        get() = if (category.discipline == ApplicationDiscipline.KERUGI) {
-            listOfNotNull(category.section.title, category.weight).joinToString(", ")
-        } else {
-            listOfNotNull(category.discipline.sheetName, category.weapon?.title, category.section.title).joinToString(", ")
+        get() = when {
+            category.discipline == ApplicationDiscipline.KERUGI -> listOfNotNull(category.section.title, category.weight).joinToString(", ")
+            category.discipline.isBout ->
+                listOfNotNull(category.discipline.sheetName, category.section.title, category.weight).joinToString(", ")
+            else -> listOfNotNull(category.discipline.sheetName, category.weapon?.title, category.section.title).joinToString(", ")
         }
 }
 

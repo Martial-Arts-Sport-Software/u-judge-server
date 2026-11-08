@@ -47,6 +47,7 @@ import org.mass.Server
 import org.mass.applications.ApplicationsHistory
 import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionOfficials
+import org.mass.draw.CourtItem
 import org.mass.draw.CourtPanel
 import org.mass.draw.CourtPlan
 import org.mass.draw.CourtsBoard
@@ -215,8 +216,10 @@ object CourtsScreen : Screen {
                                     }
                                 },
                                 modifier = Modifier.fillMaxSize(),
-                                // I2a: «Начать» opens the bout screen, where the judges and settings are fixed for the bout.
-                                onStart = { clickWithTransition(Routes.BOUT) },
+                                // «Начать» opens the bout or the performance screen, where the judges and settings are fixed.
+                                onStart = {
+                                    clickWithTransition(if (panel.next is CourtItem.Performance) Routes.PERFORMANCE else Routes.BOUT)
+                                },
                             )
                         }
                     }

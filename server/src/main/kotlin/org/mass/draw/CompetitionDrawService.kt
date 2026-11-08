@@ -70,7 +70,7 @@ data class CategoryDrawState(
 
     /** Whether the operator can choose the system: Kerugi with three or more entries. */
     val systemSelectable: Boolean
-        get() = category.discipline == ApplicationDiscipline.KERUGI && category.entries.size > 2
+        get() = category.discipline.isBout && category.entries.size > 2
 }
 
 /** The draw of the current competition; empty before an import. */
@@ -170,7 +170,7 @@ class CompetitionDrawService(
             val status = when {
                 started -> CategoryStatus.STARTED
                 preview != null -> CategoryStatus.PREVIEW
-                category.discipline == ApplicationDiscipline.KERUGI && keys.size == 1 -> CategoryStatus.NO_BOUTS
+                category.discipline.isBout && keys.size == 1 -> CategoryStatus.NO_BOUTS
                 valid -> CategoryStatus.CONFIRMED
                 confirmed != null -> CategoryStatus.NEEDS_REDRAW
                 else -> CategoryStatus.NOT_DRAWN

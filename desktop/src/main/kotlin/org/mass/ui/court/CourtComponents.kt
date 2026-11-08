@@ -237,7 +237,7 @@ fun progressLabel(progress: CategoryProgress): String = Localization.getString(
 fun numbersText(board: CourtsBoard, state: CategoryDrawState): String? {
     val numbers = board.numbers.filterKeys { it.categoryId == state.category.id }.values.sorted()
     if (numbers.isEmpty()) return null
-    val key = if (state.category.discipline == ApplicationDiscipline.KERUGI) "courts_bouts" else "courts_performances"
+    val key = if (state.category.discipline.isBout) "courts_bouts" else "courts_performances"
     return Localization.getString(key).replace("%s", ranges(numbers))
 }
 

@@ -313,7 +313,7 @@ object BracketsSetupScreen : Screen {
         val editingHere = editing?.takeIf { it.categoryId == selected?.id && selectedState?.shown != null }
         val shownDraw = editingHere?.draw ?: selectedState?.shown
         val bracketAvailable = shownDraw?.format == DrawFormat.ELIMINATION || shownDraw?.format == DrawFormat.ROUND_ROBIN
-        val hasBracket = selected?.discipline == ApplicationDiscipline.KERUGI && selectedState?.status != CategoryStatus.NO_BOUTS
+        val hasBracket = selected?.discipline?.isBout == true && selectedState?.status != CategoryStatus.NO_BOUTS
         val bracketShown = bracketView && bracketAvailable && hasBracket
         // «Бой № N» belongs to the confirmed draw (ADR-008 §6); a pending preview shows no numbers until it is confirmed.
         val numberOf = { round: Int, index: Int ->

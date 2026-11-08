@@ -139,6 +139,9 @@ delivery proof, хранит решения pairing в журнале, а deskto
 - время боя и ход сетки по [ADR-010](adr/ADR-010-kerugi-timer-advancement.md): таймер раундов, перерыва и golden round на
   том же журнале, `kerugi_timer_updated`, `judge_ready_command`, продвижение победителя, «Победитель» и «завершена»,
   окно зрителей с «Приглашаются / Готовятся»;
+- Tanbon и технические выступления по [ADR-011](adr/ADR-011-tanbon-technical-contract.md): бой Tanbon на pipeline Kerugi с
+  `tanbon_score_command` и аудитным `CROSS`, `TechnicalPerformance` на том же журнале и dispatcher с финальным
+  `technical_score_send_command`, итог в целых десятых по нормативным векторам, места категории; экран «Выступление»;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
@@ -147,6 +150,7 @@ delivery proof, хранит решения pairing в журнале, а deskto
 
 - прогон client-частей I2a и I2b против `./gradlew :desktop:run`, ручной регресс desktop (этап 7); сброс раунда и остальные
   причины победы (`KER-014`);
+- client-часть Tanbon и технических дисциплин и экспертное подтверждение нормативных векторов (I5, gate G5);
 - physical-device evidence для WebSocket handshake, heartbeat и `heartbeat_timeout` (I3).
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
 - Нормативные длительности Kerugi, golden round policy и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum
