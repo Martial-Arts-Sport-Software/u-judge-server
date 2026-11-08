@@ -7,31 +7,31 @@ import java.time.Instant
 import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 
 class JdbcDomainEventStoreTest {
     @Test
-    fun `allocates one per-peer sequence across bout and timer events`() {
+    fun `allocates one per-peer sequence across event types`() {
         val store = JdbcDomainEventStore(dataSource("domain-events-sequence"))
-        val timer = JdbcKerugiTimerJournal(store, DomainJournalFixture.ownership, DomainJournalFixture.sessionId)
 
         val started = DomainJournalFixture.append(store, "session_started", 1)
-        val timerStarted = assertIs<KerugiTimerResult.Applied>(timer.apply(DomainJournalFixture.command("kerugi_timer_started"), DomainJournalFixture.eventId(2)))
+        val periodEnded = DomainJournalFixture.append(store, "kerugi_period_ended", 2)
         val paused = DomainJournalFixture.append(store, "session_paused", 3)
 
-        assertEquals(listOf(1L, 2L, 3L), listOf(started.sequence, timerStarted.event.sequence, paused.sequence))
+        assertEquals(listOf(1L, 2L, 3L), listOf(started.sequence, periodEnded.sequence, paused.sequence))
         assertEquals(listOf(started, paused), DomainJournalFixture.lifecycleEvents(store))
-        assertEquals(listOf(timerStarted.event), timer.events())
+        assertEquals(listOf(periodEnded), DomainJournalFixture.events(store, "kerugi_period_ended"))
     }
 
     @Test
-    fun `rejects an event ID already used by another command type`() {
+    fun `finds an event ID already used by another event type`() {
         val store = JdbcDomainEventStore(dataSource("domain-events-conflict"))
-        val timer = JdbcKerugiTimerJournal(store, DomainJournalFixture.ownership, DomainJournalFixture.sessionId)
         DomainJournalFixture.append(store, "session_started", 1)
 
-        assertIs<KerugiTimerResult.Rejected>(timer.apply(DomainJournalFixture.command("kerugi_timer_started"), DomainJournalFixture.eventId(1)))
-        assertEquals(emptyList(), timer.events())
+        assertEquals(
+            JdbcDomainEventStore.EventLookup.AssignedElsewhere,
+            store.find(DomainJournalFixture.eventId(1), setOf("kerugi_period_ended")),
+        )
+        assertEquals(emptyList(), DomainJournalFixture.events(store, "kerugi_period_ended"))
     }
 
     @Test
@@ -49,7 +49,6 @@ internal object DomainJournalFixture {
     val peerId = PeerId("00000000-0000-4000-8000-000000000001")
     val bracketId = BracketId("00000000-0000-4000-8000-000000000002")
     val sessionId = SessionId("00000000-0000-4000-8000-000000000003")
-    val ownership = BracketOwnership.assign(bracketId, peerId).start(peerId)
 
     fun command(type: String) = DomainCommand(
         CompetitionId("00000000-0000-4000-8000-000000000004"), peerId, CourtId("00000000-0000-4000-8000-000000000005"),
@@ -64,6 +63,8 @@ internal object DomainJournalFixture {
 
     fun lifecycleEvents(store: JdbcDomainEventStore) = store.sessionEvents(bracketId, sessionId, lifecycleTypes)
 
+    fun events(store: JdbcDomainEventStore, type: String) = store.sessionEvents(bracketId, sessionId, setOf(type))
+
     fun eventId(number: Int) = EventId("00000000-0000-4000-8000-${number.toString().padStart(12, '0')}")
 
     /**
@@ -77,11 +78,9 @@ internal object DomainJournalFixture {
         insertLegacy(dataSource, "session_lifecycle_events", eventId(3), "session_paused", sequence = 2, at = "2026-09-20T10:00:02Z")
 
         val store = JdbcDomainEventStore(dataSource)
-        val timer = JdbcKerugiTimerJournal(store, ownership, sessionId)
 
-        assertEquals(KerugiTimerState.RUNNING, timer.projection().state)
         assertEquals(listOf(eventId(1) to 1L, eventId(3) to 3L), lifecycleEvents(store).map { it.event.eventId to it.sequence })
-        assertEquals(listOf(eventId(2) to 2L), timer.events().map { it.event.eventId to it.sequence })
+        assertEquals(listOf(eventId(2) to 2L), events(store, "kerugi_timer_started").map { it.event.eventId to it.sequence })
         assertEquals(4L, append(store, "session_resumed", 4).sequence)
         dataSource.connection.use { connection ->
             val legacyTables = connection.metaData.getTables(null, null, "%", arrayOf("TABLE")).use { tables ->
