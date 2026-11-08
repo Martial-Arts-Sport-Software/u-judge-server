@@ -7,7 +7,9 @@ import org.mass.applications.ImportPreparation
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.applications.SyntheticApplications
 import org.mass.draw.CategoryStatus
+import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
+import org.mass.draw.CompetitionOfficials
 import org.mass.draw.DrawOutcome
 import org.mass.draw.JdbcCompetitionDrawJournal
 import org.mass.replication.JdbcPeerJournal
@@ -116,7 +118,7 @@ class RealPostgresLifecycleTest {
     }
 
     @Test
-    fun `imports and draws 500 participants atomically and restores them after a PostgreSQL restart`() {
+    fun `imports and draws 500 participants atomically and restores them and the courts after a PostgreSQL restart`() {
         val installationDirectory = System.getProperty("uJudge.postgres.installationDirectory")
         assumeTrue(
             !installationDirectory.isNullOrBlank(),
@@ -141,6 +143,7 @@ class RealPostgresLifecycleTest {
             )
             return applications to CompetitionDrawService(JdbcCompetitionDrawJournal(store, peerId), applications.history, peerId)
         }
+        fun peerId() = LocalPeerIdentity.loadOrCreate(requireNotNull(runtime.dataSource))
 
         try {
             assertIs<PostgresState.Running>(runtime.start())
@@ -154,6 +157,16 @@ class RealPostgresLifecycleTest {
             assertEquals(DrawOutcome.Done, draws.confirm())
             val drawn = draws.board()
             assertTrue(drawn.categories.none { it.status == CategoryStatus.NOT_DRAWN || it.status == CategoryStatus.PREVIEW })
+            // Three courts with the last category first on court 3, judged here; officials; another next bout.
+            val courts = CompetitionCourtsService(draws, peerId())
+            val last = drawn.categories.last().category.id
+            assertEquals(DrawOutcome.Done, courts.setCourtCount(3))
+            assertEquals(DrawOutcome.Done, courts.placeCategory(last, court = 3, position = 0))
+            assertEquals(DrawOutcome.Done, courts.selectLocalCourt(1))
+            assertEquals(DrawOutcome.Done, courts.setOfficials(CompetitionOfficials("Новосибирск", "Смирнов А. А.", "Волкова Е. В.")))
+            val picked = courts.courtPanel().queue.last().ref
+            assertEquals(DrawOutcome.Done, courts.selectNextBout(picked))
+            val arranged = courts.board()
 
             assertEquals(PostgresState.Stopped, runtime.stop())
             assertIs<PostgresState.Running>(runtime.start())
@@ -162,6 +175,13 @@ class RealPostgresLifecycleTest {
             assertEquals(imported.record, restored)
             assertEquals(500, restored.applications.athleteCount)
             assertEquals(drawn.categories.map { it.shown }, restartedDraws.board().categories.map { it.shown })
+            val restartedCourts = CompetitionCourtsService(restartedDraws, peerId())
+            val reopened = restartedCourts.board()
+            assertEquals(arranged.plan, reopened.plan)
+            assertEquals(arranged.localCourt, reopened.localCourt)
+            assertEquals(arranged.officials, reopened.officials)
+            assertEquals(arranged.numbers, reopened.numbers)
+            assertEquals(picked, restartedCourts.courtPanel().next?.ref)
         } finally {
             runtime.stop()
             root.toFile().deleteRecursively()

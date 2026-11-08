@@ -83,6 +83,7 @@ import org.mass.draw.CategoryDraw
 import org.mass.draw.CategoryDrawState
 import org.mass.draw.CategoryStatus
 import org.mass.draw.CompetitionDrawService
+import org.mass.draw.CourtsBoard
 import org.mass.draw.DrawBoard
 import org.mass.draw.DrawFormat
 import org.mass.draw.DrawMethod
@@ -92,11 +93,16 @@ import org.mass.draw.DrawSystem
 import org.mass.draw.SeparationCriterion
 import org.mass.draw.drawKey
 import org.mass.enums.Colors
+import org.mass.enums.Routes
 import org.mass.locale.Localization
+import org.mass.protocol.ProtocolDocument
 import org.mass.ui.button.ButtonComponent
 import org.mass.ui.button.ButtonStyles
+import org.mass.ui.button.clickWithTransition
 import org.mass.ui.bracket.BracketComponent
 import org.mass.ui.bracket.BracketEditing
+import org.mass.ui.bracket.BracketFullScreenComponent
+import org.mass.ui.protocol.ProtocolFiles
 import org.mass.ui.dialog.ConfirmDialogComponent
 import org.mass.ui.tooltip.TooltipComponent
 import org.mass.ui.input.TextInputComponent
@@ -126,7 +132,9 @@ import kotlin.time.Duration.Companion.milliseconds
  * «Настройка турнирных сеток» (I4a, I4b; ADR-005, ADR-007, ADR-008). The upload tab takes the competition name and date and
  * several application files; «Загрузить» checks them against «Требования к заполнению заявок» and imports them in one step.
  * The history tab lists every import, lets the operator view or restore one, reset them all, and holds the draw of the
- * current import: previews, «Перемешать», the system per category, «Подтвердить», and swaps in the preview list.
+ * current import: previews, «Перемешать», the system per category, «Подтвердить», and swaps in the preview list. Confirmed
+ * draws show «Бой № N» of the numbering across all courts; «Во весь экран» opens the full-screen bracket with the protocol
+ * download, and «Площадки и протоколы» leads to the courts screen.
  */
 object BracketsSetupScreen : Screen {
     private enum class Tab(val key: String) { UPLOAD("brackets_tab_upload"), HISTORY("brackets_tab_history") }
@@ -159,8 +167,11 @@ object BracketsSetupScreen : Screen {
         val service = remember(runtimeState) { Server.runtime.competitionApplications }
         val history by (service?.history ?: remember { MutableStateFlow(ApplicationsHistory(emptyList(), null)) }).collectAsState()
         val draws = remember(runtimeState) { Server.runtime.competitionDraws }
+        val courts = remember(runtimeState) { Server.runtime.competitionCourts }
         val revision by (draws?.revision ?: remember { MutableStateFlow(0L) }).collectAsState()
-        val board = remember(history, revision, draws) { draws?.board() ?: DrawBoard(null, DrawMethod(), emptyList()) }
+        // The courts board carries the draw board, so both are read once per change and always agree.
+        val courtsBoard = remember(history, revision, courts) { courts?.board() ?: CourtsBoard.Empty }
+        val board = courtsBoard.draws
         val scope = rememberCoroutineScope()
 
         var tab by remember { mutableStateOf(Tab.UPLOAD) }
@@ -175,6 +186,7 @@ object BracketsSetupScreen : Screen {
         var confirmation by remember { mutableStateOf<Confirmation?>(null) }
         var bracketView by remember { mutableStateOf(false) }
         var editing by remember { mutableStateOf<Editing?>(null) }
+        var fullScreen by remember { mutableStateOf(false) }
 
         val formReady = nameError(competitionName) == null && parseDate(dateText) != null
 
@@ -250,6 +262,18 @@ object BracketsSetupScreen : Screen {
             }
         }
 
+        /** «Протокол хода соревнований» of one category, saved where the operator chooses and written off the UI thread. */
+        fun downloadProtocol(categoryId: String) {
+            val current = history.current?.applications ?: return
+            val document = ProtocolDocument.of(courtsBoard, current, setOf(categoryId)) ?: return
+            val name = document.pages.single().title
+            val file = ProtocolFiles.choose(Localization.getString("protocol_file_one").replace("%s", name)) ?: return
+            run {
+                withContext(Dispatchers.IO) { ProtocolFiles.write(document, file) }
+                toast = Toast(Localization.getString("protocol_saved").replace("%s", file.absolutePath))
+            }
+        }
+
         fun confirmDraws() {
             val count = board.previews
             drawCommand(Localization.getString("brackets_draw_confirmed").replace("%d", count.toString())) { confirm() }
@@ -290,6 +314,10 @@ object BracketsSetupScreen : Screen {
         val bracketAvailable = shownDraw?.format == DrawFormat.ELIMINATION || shownDraw?.format == DrawFormat.ROUND_ROBIN
         val hasBracket = selected?.discipline == ApplicationDiscipline.KERUGI && selectedState?.status != CategoryStatus.NO_BOUTS
         val bracketShown = bracketView && bracketAvailable && hasBracket
+        // «Бой № N» belongs to the confirmed draw (ADR-008 §6); a pending preview shows no numbers until it is confirmed.
+        val numberOf = { round: Int, index: Int ->
+            if (selected != null && selectedState?.preview == null) courtsBoard.number(selected.id, round, index) else null
+        }
 
         /** Swaps two entries of the edited draw locally; «Сохранить» sends every swap. */
         fun swapEntries(first: String, second: String) {
@@ -388,6 +416,7 @@ object BracketsSetupScreen : Screen {
                                             }
                                             if (replacing > 0) confirmation = Confirmation.ReplaceDraws(replacing) else confirmDraws()
                                         },
+                                        onCourts = { clickWithTransition(Routes.COURTS) },
                                     )
                                 },
                             )
@@ -444,6 +473,10 @@ object BracketsSetupScreen : Screen {
                                     PreviewNavigation(
                                         bracketAvailable = bracketAvailable,
                                         bracketSelected = bracketShown,
+                                        onFullScreen = {
+                                            editing = null
+                                            fullScreen = true
+                                        },
                                         onSelect = { bracket ->
                                             bracketView = bracket
                                             // An elimination bracket is edited by dragging; a round robin only in the list.
@@ -498,7 +531,16 @@ object BracketsSetupScreen : Screen {
                                                 onSwap = ::swapEntries,
                                             )
                                         },
+                                        number = numberOf,
                                     )
+                                    if (courtsBoard.preliminary && selectedState?.preview == null) {
+                                        Text(
+                                            Localization.getString("brackets_numbering_preliminary"),
+                                            color = Colors.BROWN.color.copy(alpha = 0.65f),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
+                                    }
                                     Spacer(Modifier.height(8.dp))
                                     BoutsPlaceholder()
                                 }
@@ -509,10 +551,27 @@ object BracketsSetupScreen : Screen {
                                     method = board.method,
                                     editing = editingHere,
                                     onPick = ::pickEntry,
+                                    number = numberOf,
                                 )
                             }
                         }
                     }
+                }
+                // The full-screen bracket covers both panels; it follows the selected category and closes with it.
+                val fullScreenId = selected?.id?.takeIf { fullScreen && drawing && bracketAvailable && hasBracket }
+                if (fullScreenId != null) {
+                    BracketFullScreenComponent(
+                        board = courtsBoard,
+                        categoryId = fullScreenId,
+                        onSelect = { selectedCategoryId = it },
+                        onOpenElsewhere = {
+                            selectedCategoryId = it
+                            fullScreen = false
+                        },
+                        onClose = { fullScreen = false },
+                        onDownload = ::downloadProtocol.takeIf { selectedState?.numbered != null && selectedState.preview == null },
+                        modifier = Modifier.matchParentSize(),
+                    )
                 }
                 ToastComponent(toast, onDismiss = { toast = null }, modifier = Modifier.align(Alignment.TopCenter))
             }
@@ -649,11 +708,16 @@ object BracketsSetupScreen : Screen {
     }
 
     /**
-     * The preview line of the mockup: list or bracket view and the full screen view. The bracket view needs a drawn
-     * elimination or round robin; the full screen view comes with the bout numbers, so until then it is disabled and says why.
+     * The preview line of the mockup: list or bracket view and the full screen view (ADR-008 §7). Both need a drawn
+     * elimination or round robin; until then they are disabled and say why.
      */
     @Composable
-    private fun PreviewNavigation(bracketAvailable: Boolean, bracketSelected: Boolean, onSelect: (Boolean) -> Unit) {
+    private fun PreviewNavigation(
+        bracketAvailable: Boolean,
+        bracketSelected: Boolean,
+        onFullScreen: () -> Unit,
+        onSelect: (Boolean) -> Unit,
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -674,14 +738,21 @@ object BracketsSetupScreen : Screen {
                 dark = false,
                 fill = false,
             )
-            val content = Colors.PRIMARY.color.copy(alpha = 0.4f)
-            TooltipComponent(Localization.getString("brackets_fullscreen_next")) {
+            val content = if (bracketAvailable) Colors.PRIMARY.color else Colors.PRIMARY.color.copy(alpha = 0.4f)
+            TooltipComponent(Localization.getString("brackets_bracket_after_draw").takeIf { !bracketAvailable }) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(ROW_SHAPE)
-                        .background(Color.White.copy(alpha = 0.5f))
+                        .background(Color.White.copy(alpha = if (bracketAvailable) 0.6f else 0.5f))
                         .border(1.dp, content, ROW_SHAPE)
+                        .then(
+                            if (bracketAvailable) {
+                                Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button, onClick = onFullScreen)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .padding(horizontal = 12.dp, vertical = 9.dp)
                         .semantics { contentDescription = Localization.getString("brackets_fullscreen") },
                 ) {
@@ -990,6 +1061,7 @@ object BracketsSetupScreen : Screen {
         onDrawAll: () -> Unit,
         onShuffle: () -> Unit,
         onConfirm: () -> Unit,
+        onCourts: () -> Unit,
     ) {
         val active = enabled && board != null && board.categories.isNotEmpty()
         val method = board?.method ?: DrawMethod()
@@ -1116,6 +1188,15 @@ object BracketsSetupScreen : Screen {
                     textAlign = TextAlign.Center,
                 )
             }
+            // Forward to the courts, the numbering, the protocols and the court panel (ADR-008).
+            ButtonComponent(
+                text = Localization.getString("brackets_to_courts"),
+                style = ButtonStyles.Secondary,
+                onclick = onCourts,
+                enabled = board != null && board.categories.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 
@@ -1397,6 +1478,7 @@ object BracketsSetupScreen : Screen {
         method: DrawMethod,
         editing: Editing?,
         onPick: (String) -> Unit,
+        number: (round: Int, index: Int) -> Int?,
     ) {
         val byKey = category.entries.associateBy { it.drawKey }
         val clashing = state?.clashes.orEmpty().flatMap { listOf(it.first, it.second) }.toSet()
@@ -1449,9 +1531,13 @@ object BracketsSetupScreen : Screen {
             LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                 when (draw.format) {
                     DrawFormat.ELIMINATION -> itemsIndexed(draw.positions.chunked(2)) { pairIndex, pair ->
+                        // The first-round bout of the pair: byes before it have no bout, so they take no index.
+                        val boutIndex = draw.positions.chunked(2).take(pairIndex).count { it.all { key -> key != null } }
+                        val boutNumber = number(1, boutIndex).takeIf { pair.all { it != null } }
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                Localization.getString("brackets_pair").replace("%d", (pairIndex + 1).toString()),
+                                Localization.getString("brackets_pair").replace("%d", (pairIndex + 1).toString()) +
+                                    (boutNumber?.let { " · " + Localization.getString("brackets_bout_number").replace("%d", it.toString()) } ?: ""),
                                 color = Colors.PRIMARY.color,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
@@ -1469,8 +1555,14 @@ object BracketsSetupScreen : Screen {
                     }
                     // Keyed by the entry, so a swap moves both rows to their new places.
                     DrawFormat.ROUND_ROBIN, DrawFormat.PERFORMANCE_ORDER -> itemsIndexed(draw.entryKeys, key = { _, key -> key }) { index, key ->
+                        // Technical performances take their numbers from the same sequence as the bouts (ADR-008 §6).
+                        val performance = number(1, index).takeIf { draw.format == DrawFormat.PERFORMANCE_ORDER }
                         Box(Modifier.animateItem(fadeInSpec = tween(300), placementSpec = tween(300), fadeOutSpec = tween(300))) {
-                            EntryRow("${index + 1}.", key)
+                            EntryRow(
+                                "${index + 1}.",
+                                key,
+                                performance?.let { Localization.getString("brackets_performance_number").replace("%d", it.toString()) },
+                            )
                         }
                     }
                 }
@@ -1621,6 +1713,9 @@ object BracketsSetupScreen : Screen {
             DrawRejection.NOTHING_TO_CONFIRM -> "brackets_draw_rejected_nothing_to_confirm"
             DrawRejection.NOT_CONFIRMED -> "brackets_draw_rejected_not_confirmed"
             DrawRejection.UNKNOWN_ENTRY -> "brackets_draw_rejected_unknown_entry"
+            DrawRejection.INVALID_COURT -> "brackets_draw_rejected_invalid_court"
+            DrawRejection.UNKNOWN_BOUT -> "brackets_draw_rejected_unknown_bout"
+            DrawRejection.INVALID_OFFICIALS -> "brackets_draw_rejected_invalid_officials"
         },
     )
 

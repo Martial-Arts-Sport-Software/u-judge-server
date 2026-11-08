@@ -59,6 +59,15 @@ data class CategoryDrawState(
     val shown: CategoryDraw?
         get() = preview?.draw ?: confirmed?.draw?.takeIf { status != CategoryStatus.NEEDS_REDRAW }
 
+    /**
+     * The confirmed draw of the current entries, the one bouts are numbered and protocols printed from (ADR-008 §6, §8);
+     * a pending preview does not change it until it is confirmed.
+     */
+    val numbered: CategoryDraw?
+        get() = confirmed?.draw?.takeIf { draw ->
+            status == CategoryStatus.STARTED || draw.entryKeys.toSet() == category.entries.map { it.drawKey }.toSet()
+        }
+
     /** Whether the operator can choose the system: Kerugi with three or more entries. */
     val systemSelectable: Boolean
         get() = category.discipline == ApplicationDiscipline.KERUGI && category.entries.size > 2
@@ -81,7 +90,23 @@ data class DrawBoard(val competitionId: String?, val method: DrawMethod, val cat
 }
 
 /** Why a draw command was refused; nothing changed. */
-enum class DrawRejection { NO_COMPETITION, UNKNOWN_CATEGORY, STARTED, NOTHING_TO_CONFIRM, NOT_CONFIRMED, UNKNOWN_ENTRY }
+enum class DrawRejection {
+    NO_COMPETITION,
+    UNKNOWN_CATEGORY,
+    STARTED,
+    NOTHING_TO_CONFIRM,
+    NOT_CONFIRMED,
+    UNKNOWN_ENTRY,
+
+    /** A court outside 1..[CourtPlan.MAX_COURTS] or above the number of courts. */
+    INVALID_COURT,
+
+    /** Not a bout of this desktop's court whose participants are known. */
+    UNKNOWN_BOUT,
+
+    /** A competition setting longer than [CompetitionOfficials.MAX_LENGTH]. */
+    INVALID_OFFICIALS,
+}
 
 sealed interface DrawOutcome {
     data object Done : DrawOutcome
@@ -325,34 +350,53 @@ class CompetitionDrawService(
         }
 
     /** The latest confirmed draw of every category of [competitionId] with its edits and start applied. */
-    private fun journaled(competitionId: String): Map<String, ConfirmedDraw> {
-        val draws = mutableMapOf<String, ConfirmedDraw>()
-        events.filter { it.event.competitionId == competitionId }.forEach { stored ->
-            when (val event = stored.event) {
-                is DrawEvent.Confirmed -> {
-                    val previous = draws[event.categoryId]?.ownership
-                    draws[event.categoryId] = ConfirmedDraw(
-                        eventId = stored.eventId,
-                        applicationsEventId = event.applicationsEventId,
-                        system = event.system,
-                        method = event.method,
-                        seed = event.seed,
-                        draw = event.draw,
-                        ownership = previous ?: BracketOwnership.assign(BracketId(event.bracketId), peerId),
-                    )
-                }
-                is DrawEvent.Edited -> draws[event.categoryId]?.let { draw ->
-                    draws[event.categoryId] = draw.copy(draw = draw.draw.copy(positions = event.after))
-                }
-                is DrawEvent.Started -> draws[event.categoryId]?.let { draw ->
-                    draws[event.categoryId] = draw.copy(ownership = draw.ownership.start(peerId))
-                }
-            }
-        }
-        return draws
-    }
+    private fun journaled(competitionId: String): Map<String, ConfirmedDraw> = replayDraws(events, competitionId, peerId)
+
+    /** The journal of the draw and the courts as this service knows it, in journal order. */
+    @Synchronized
+    internal fun journal(): List<StoredDrawEvent> = events
+
+    /**
+     * Appends [written] for the courts service, which validated them against [board]; the revision changes on success, so
+     * the desktop re-reads both boards.
+     */
+    @Synchronized
+    internal fun record(written: List<DrawEvent>): DrawOutcome =
+        write(written).also { if (it == DrawOutcome.Done) mutableRevision.value++ }
 
     private companion object {
         val secureRandom = SecureRandom()
     }
+}
+
+/**
+ * The latest confirmed draw of every category of [competitionId] in [events] with its edits and start applied. Replaying a
+ * prefix of the journal gives the draws as they were at that point, which freezes the bout numbers (ADR-008 §6).
+ */
+internal fun replayDraws(events: List<StoredDrawEvent>, competitionId: String, peerId: PeerId): Map<String, ConfirmedDraw> {
+    val draws = mutableMapOf<String, ConfirmedDraw>()
+    events.filter { it.event.competitionId == competitionId }.forEach { stored ->
+        when (val event = stored.event) {
+            is DrawEvent.Confirmed -> {
+                val previous = draws[event.categoryId]?.ownership
+                draws[event.categoryId] = ConfirmedDraw(
+                    eventId = stored.eventId,
+                    applicationsEventId = event.applicationsEventId,
+                    system = event.system,
+                    method = event.method,
+                    seed = event.seed,
+                    draw = event.draw,
+                    ownership = previous ?: BracketOwnership.assign(BracketId(event.bracketId), peerId),
+                )
+            }
+            is DrawEvent.Edited -> draws[event.categoryId]?.let { draw ->
+                draws[event.categoryId] = draw.copy(draw = draw.draw.copy(positions = event.after))
+            }
+            is DrawEvent.Started -> draws[event.categoryId]?.let { draw ->
+                draws[event.categoryId] = draw.copy(ownership = draw.ownership.start(peerId))
+            }
+            else -> Unit
+        }
+    }
+    return draws
 }

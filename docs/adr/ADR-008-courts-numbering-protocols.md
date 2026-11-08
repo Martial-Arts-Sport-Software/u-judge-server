@@ -26,7 +26,9 @@ ADR-007 defines how one category is drawn. It leaves open:
 1. **Courts.** The operator sets the number of courts (1-10, default 1) and assigns every category to exactly one court;
    a category is never on two courts. One desktop holds the draw, the courts, the numbering and the protocols of the
    whole competition and judges the bouts of one court selected on it. Confirmed brackets belong to the local peer
-   (`CMP-005`). Handing brackets to desktops of other courts is post-v1 (ADR-002).
+   (`CMP-005`). Handing brackets to desktops of other courts is post-v1 (ADR-002). The courts and the order of the
+   categories on each are one `competition_courts_set` with the whole plan, the court of a desktop is
+   `desktop_court_selected`; categories of a later import join court 1, a category whose first bout started keeps its court.
 2. **Method and criterion.** One choice for the whole competition (FHR §1.4: one criterion, criteria are not mixed):
    random, or separation by subject, city, organisation or first coach (ADR-007). The criterion can be combined with the
    belt (`гып`, technical qualification), as HapkiPRO's «пояс + тренер» and «пояс + город»: then only entries with the
@@ -48,8 +50,10 @@ ADR-007 defines how one category is drawn. It leaves open:
 6. **Bout numbers.** One numbering across all courts, derived from the confirmed draws, not stored: round 1 of every
    category (courts in order, categories of a court in the operator's order, default import order), then round 2, and so
    on; round-robin rounds interleave the same way; byes are not numbered. Technical disciplines get performance numbers
-   in the same pass. Numbers are frozen once the first bout of the competition starts (I2a); until every category is
-   confirmed the views and the PDF say «нумерация предварительная».
+   in the same pass: their performances take numbers from the same sequence in round 1. Numbers are frozen once the first
+   bout of the competition starts (I2a): the numbering of the plan and the draws journaled up to that start stays, bouts
+   numbered later follow its highest number. Until every category is confirmed the views and the PDF say «нумерация
+   предварительная».
 7. **Bracket view.** Per the owner's mockups: rounds left to right, entry boxes by side of the bout (upper slot blue,
    lower slot red, as the client's sides; also while the entry is not known), connectors, a green final box «Победитель»
    (empty until I2b) and «Бой № N» at every bout. The preview panel shows it under «Список / Сетка» and «Во весь экран»,
@@ -65,8 +69,9 @@ ADR-007 defines how one category is drawn. It leaves open:
    bundled Cyrillic font; the result protocols of I6 reuse the renderer.
 9. **Current and next bout (`SES-003`).** The court panel, the right column of the future operator screen, shows «Текущий
    бой № N» and «Следующий бой» (pair, category). The next bout defaults to the lowest number of this court whose
-   participants are known; the operator can pick another confirmed bout of the court (`court_next_bout_selected`).
-   «Начать» (I2a) makes it current. The call screen «Приглашаются / Готовятся» belongs to the spectator window (I2b).
+   participants are known; the operator can pick another confirmed bout of the court (`court_next_bout_selected`). On a
+   court with a technical category the next item can be a performance (`SES-003`: «поединок/выступление»). «Начать»
+   (I2a) makes it current. The call screen «Приглашаются / Готовятся» belongs to the spectator window (I2b).
 10. **Lock.** A category rejects a redraw or an edit with a typed error once its first bout starts (`BRK-002`, I2a starts
     bouts). Selecting the next bout does not lock.
 11. **Progress (`CMP-008`).** «Все категории» shows every category with the statuses «свободна», «в процессе»,

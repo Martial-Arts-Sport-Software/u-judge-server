@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import org.mass.applications.CompetitionApplicationsService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
 import org.mass.domain.PeerId
+import org.mass.draw.CompetitionCourtsService
 import org.mass.draw.CompetitionDrawService
 import org.mass.draw.JdbcCompetitionDrawJournal
 import org.mass.persistence.JdbcDomainEventStore
@@ -121,6 +122,11 @@ class ServerRuntime(
     var competitionDraws: CompetitionDrawService? = null
         private set
 
+    /** Courts, bout numbers and the court panel of this desktop (ADR-008); null while the server is not running. */
+    @Volatile
+    var competitionCourts: CompetitionCourtsService? = null
+        private set
+
     private var postgres: ManagedPostgresRuntime? = null
     private var httpServer: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var scope: CoroutineScope? = null
@@ -149,6 +155,7 @@ class ServerRuntime(
         postgres = null
         competitionApplications = null
         competitionDraws = null
+        competitionCourts = null
         if (mutableState.value != ServerRuntimeState.Stopped) ServerLog.runtimeStopped()
         mutableState.value = ServerRuntimeState.Stopped
     }
@@ -212,6 +219,7 @@ class ServerRuntime(
         } catch (exception: Exception) {
             return failStartup("Competition draw could not be restored: ${exception.message}")
         }
+        competitionCourts = CompetitionCourtsService(checkNotNull(competitionDraws), peerId)
 
         val certificate = try {
             PeerCertificate.loadOrCreate(configuration.applicationDataDirectory.resolve("tls"), peerId.value)
@@ -306,6 +314,7 @@ class ServerRuntime(
         postgres = null
         competitionApplications = null
         competitionDraws = null
+        competitionCourts = null
         return ServerRuntimeState.Failed(diagnostic)
     }
 }
