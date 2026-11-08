@@ -198,6 +198,10 @@ internal object JournalSchema {
         statement.executeQuery().use { it.next() }
     }
 
+    /** The highest migration this build applies: the `schema` of a backup (ADR-012 §6). */
+    val latestVersion: Int
+        get() = migrations.maxOf(Migration::version)
+
     private data class Migration(val version: Int, val resourcePath: String)
 
     private val migrations = listOf(

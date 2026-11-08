@@ -39,7 +39,8 @@ class CompetitionApplicationsServiceTest {
         val first = valid(service, file("a.xlsx", AthleteRow()))
         val imported = assertIs<ImportOutcome.Imported>(service.import(first, replaceConfirmed = false))
         assertEquals(first, service.history.value.current?.applications)
-        assertEquals(emptyList(), imported.backup!!.readLines())
+        // The backup is a `u-judge-backup` file (ADR-012 §6): the header, then the journal rows.
+        assertEquals(listOf(), imported.backup!!.readLines().drop(1))
 
         // The same files again change nothing; other files need confirmation and can be cancelled safely.
         assertEquals(ImportOutcome.AlreadyImported, service.import(first, replaceConfirmed = false))
@@ -52,7 +53,7 @@ class CompetitionApplicationsServiceTest {
         val replaced = assertIs<ImportOutcome.Imported>(service.import(second, replaceConfirmed = true))
         assertEquals(imported.record.competitionId, replaced.record.competitionId)
         assertEquals(listOf(imported.record, replaced.record), service.history.value.imports)
-        val backupRows = replaced.backup!!.readLines().map { Json.parseToJsonElement(it).jsonObject }
+        val backupRows = replaced.backup!!.readLines().drop(1).map { Json.parseToJsonElement(it).jsonObject }
         assertEquals(listOf("competition_applications_imported"), backupRows.map { it.getValue("event_type").jsonPrimitive.content })
         assertEquals(imported.record.eventId, backupRows.single().getValue("event_id").jsonPrimitive.content)
 
@@ -69,7 +70,7 @@ class CompetitionApplicationsServiceTest {
         // Reset: nothing is current, the history starts over (the backup keeps it), and the next import is a new competition.
         val reset = assertIs<ClearOutcome.Cleared>(restarted.clear())
         assertEquals(ApplicationsHistory(emptyList(), null), restarted.history.value)
-        assertEquals(3, reset.backup!!.readLines().size)
+        assertEquals(3, reset.backup!!.readLines().drop(1).size)
         assertEquals(ClearOutcome.NothingToClear, restarted.clear())
         val afterReset = assertIs<ImportOutcome.Imported>(restarted.import(second, replaceConfirmed = false))
         assertTrue(afterReset.record.competitionId != imported.record.competitionId)
