@@ -24,6 +24,13 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.mass.applications.AgeClass
 import org.mass.bout.BoutAthlete
 import org.mass.bout.BoutTiming
+import kotlinx.serialization.json.JsonArray
+import org.mass.bout.BoutDiscipline
+import org.mass.domain.AggregationFormula
+import org.mass.domain.TechnicalDiscipline
+import org.mass.performance.PerformanceCommand
+import org.mass.performance.PerformanceStartSpec
+import org.mass.performance.TechnicalPerformanceService
 import org.mass.bout.BoutCommand
 import org.mass.bout.BoutCorner
 import org.mass.bout.BoutEventJournal
@@ -50,7 +57,7 @@ import kotlin.test.assertEquals
 class ContractFixturesTest {
     private val metadata = ServerMetadata(
         protocolVersion = "1.0",
-        capabilities = mapOf("metadata" to true, "kerugi_bout" to true),
+        capabilities = mapOf("metadata" to true, "kerugi_bout" to true, "tanbon_bout" to true, "technical_performance" to true),
         peerId = "00000000-0000-4000-8000-000000000001",
         courtId = "court-local",
         serverName = "U'Judge Server",
@@ -172,13 +179,127 @@ class ContractFixturesTest {
         assertMatches("session_state_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
     }
 
+    @Test
+    fun `Tanbon bout messages match the fixtures`() = testApplication {
+        val pairing = PairingRequests()
+        val clock = Instant.parse("2026-11-08T10:15:30Z")
+        val hub = RealtimeHub(KerugiBoutService(BoutEventJournal.InMemory(), PeerId(metadata.peerId), now = { clock }))
+        contractModule(pairing, hub)
+        val judge = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        val second = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        judge.exchange(withCredential(fixture("handshake_request"), approve(pairing, "android-contract")))
+        second.exchange(withCredential(fixture("handshake_request"), approve(pairing, "android-2")))
+        judge.exchange(fixture("resync_request"))
+        second.exchange(fixture("resync_request"))
+
+        val spec = boutSpec("tanbon_session_snapshot").copy(discipline = BoutDiscipline.TANBON)
+        val sessionId = (hub.operator("Оператор", BoutCommand.StartBout(EventId.new(), spec)) as BoutOutcome.Applied).sessionId
+        val bout = hub.bouts.current()!!
+        val generated = mapOf("sessionId" to sessionId.value, "courtId" to bout.courtId.value, "judgeId" to bout.seatOf("android-contract")!!.judgeId)
+        assertMatches("tanbon_session_snapshot", judge.receiveText(), generated = setOf("cursor", "session.sessionId", "session.courtId", "session.seat.judgeId"))
+        second.receiveText()
+        hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START))
+        judge.receiveText()
+        second.receiveText()
+
+        val cross = withValues(fixture("tanbon_score_command"), generated)
+        assertMatches("command_ack", judge.exchange(cross).replace(cross.getValue("eventId").jsonPrimitive.content, "6f1c8a52-3c1e-4c55-9a3e-2b9f0d6e4a10"))
+        val head = JsonObject(withValues(cross, mapOf("eventId" to EventId.new().value, "area" to "HEAD")) + ("competitor" to JsonPrimitive("BLUE")))
+        judge.exchange(head)
+        val secondHead = withValues(head, mapOf("eventId" to EventId.new().value, "judgeId" to bout.seatOf("android-2")!!.judgeId, "deviceId" to "android-2"))
+        second.exchange(secondHead)
+        assertMatches("tanbon_score_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
+    }
+
+    @Test
+    fun `technical performance messages match the fixtures`() = testApplication {
+        val pairing = PairingRequests()
+        val clock = Instant.parse("2026-11-08T12:40:00Z")
+        val journal = BoutEventJournal.InMemory()
+        val peerId = PeerId(metadata.peerId)
+        val hub = RealtimeHub(KerugiBoutService(journal, peerId, now = { clock }), TechnicalPerformanceService(journal, peerId, now = { clock }))
+        contractModule(pairing, hub)
+        val judge = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        val second = createClient { install(WebSockets) }.webSocketSession("/v1/realtime")
+        judge.exchange(withCredential(fixture("handshake_request"), approve(pairing, "android-contract")))
+        second.exchange(withCredential(fixture("handshake_request"), approve(pairing, "android-2")))
+        judge.exchange(fixture("resync_request"))
+        second.exchange(fixture("resync_request"))
+
+        val sessionId = (hub.performanceOperator("Оператор", PerformanceCommand.Start(EventId.new(), performanceSpec())) as BoutOutcome.Applied).sessionId
+        val performance = hub.performances.current()!!
+        val generated = mapOf(
+            "sessionId" to sessionId.value,
+            "courtId" to performance.courtId.value,
+            "judgeId" to performance.seatOf("android-contract")!!.judgeId,
+        )
+        assertMatches(
+            "technical_session_snapshot", judge.receiveText(),
+            generated = setOf("cursor", "session.sessionId", "session.courtId", "session.seat.judgeId"),
+        )
+        second.receiveText()
+        hub.performanceOperator("Оператор", PerformanceCommand.Begin(EventId.new(), sessionId))
+        judge.receiveText()
+        second.receiveText()
+
+        val send = withValues(fixture("technical_score_send_command"), generated)
+        assertEquals(send.getValue("eventId"), Json.parseToJsonElement(judge.exchange(send)).jsonObject.getValue("eventId"))
+        judge.receiveText()
+        second.receiveText()
+        val secondContext = mapOf(
+            "judgeId" to performance.seatOf("android-2")!!.judgeId,
+            "deviceId" to "android-2",
+            "eventId" to fixture("technical_command_rejected").getValue("eventId").jsonPrimitive.content,
+        )
+        val wrongTotal = JsonObject(
+            withValues(send, secondContext) + mapOf(
+                "techniqueTenths" to JsonArray(List(4) { JsonPrimitive(8) }),
+                "presentationTenths" to JsonArray(List(4) { JsonPrimitive(8) }),
+                "deductionTenths" to JsonPrimitive(0),
+                "totalTenths" to JsonPrimitive(65),
+            ),
+        )
+        assertMatches("technical_command_rejected", second.exchange(wrongTotal))
+        val corrected = withValues(JsonObject(wrongTotal + ("totalTenths" to JsonPrimitive(64))), mapOf("eventId" to EventId.new().value))
+        assertEquals("command_ack", Json.parseToJsonElement(second.exchange(corrected)).jsonObject.getValue("type").jsonPrimitive.content)
+        judge.receiveText()
+        hub.performanceOperator("Оператор", PerformanceCommand.Complete(EventId.new(), sessionId))
+        assertEquals("session_state_updated", Json.parseToJsonElement(judge.receiveText()).jsonObject.getValue("type").jsonPrimitive.content)
+        assertMatches("technical_score_updated", judge.receiveText(), generated = setOf("cursor", "sessionId"))
+    }
+
+    private fun performanceSpec(): PerformanceStartSpec {
+        val snapshot = fixture("technical_session_snapshot").getValue("session").jsonObject
+        val entry = snapshot.getValue("entry").jsonObject
+        return PerformanceStartSpec(
+            competitionId = CompetitionId(snapshot.getValue("competitionId").jsonPrimitive.content),
+            bracketId = BracketId(snapshot.getValue("bracketId").jsonPrimitive.content),
+            categoryId = "self-defense",
+            categoryTitle = snapshot.getValue("categoryTitle").jsonPrimitive.content,
+            performanceNumber = snapshot.getValue("performanceNumber").jsonPrimitive.content.toInt(),
+            round = 1,
+            index = 0,
+            entry = BoutCorner(
+                entry.getValue("entryId").jsonPrimitive.content,
+                entry.getValue("label").jsonPrimitive.content,
+                entry.getValue("athletes").jsonArray.map {
+                    BoutAthlete(it.jsonObject.getValue("fullName").jsonPrimitive.content, it.jsonObject.getValue("city").jsonPrimitive.content)
+                },
+            ),
+            discipline = TechnicalDiscipline.HOSINSOOL,
+            techniqueCriteria = 4,
+            judges = listOf(RosterJudge("android-contract", "Ivanov"), RosterJudge("android-2", "Petrova")),
+            formula = AggregationFormula.MEAN,
+        )
+    }
+
     private fun approve(pairing: PairingRequests, deviceId: String): String {
         val submitted = pairing.submit(PairingRequestCommand(deviceId, "Ivanov", "android")) as PairingSubmission.Pending
         return (pairing.approve(submitted.request.requestId) as PairingApproval.Accepted).request.reconnectCredential
     }
 
-    private fun boutSpec(): BoutStartSpec {
-        val snapshot = fixture("session_snapshot").getValue("session").jsonObject
+    private fun boutSpec(name: String = "session_snapshot"): BoutStartSpec {
+        val snapshot = fixture(name).getValue("session").jsonObject
         fun corner(side: String) = snapshot.getValue(side).jsonObject.let { corner ->
             BoutCorner(
                 corner.getValue("entryId").jsonPrimitive.content,
