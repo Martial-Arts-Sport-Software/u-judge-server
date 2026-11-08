@@ -6,6 +6,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -28,9 +29,16 @@ import java.util.UUID
 
 /**
  * A paired judge phone speaking the ADR-009 contract over a real WebSocket: handshake, resync, taps from the snapshot's
- * audit context and a routing reader that keeps pushes apart from replies. Used by the bout acceptance tests.
+ * audit context and a routing reader that keeps pushes apart from replies. Used by the bout acceptance tests; the fault
+ * test points [endpoint] at a TCP proxy and gives up on a reply after [replyTimeoutMillis].
  */
-class JudgeSimulator(private val client: HttpClient, private val credential: String, val deviceId: String) {
+class JudgeSimulator(
+    private val client: HttpClient,
+    private val credential: String,
+    val deviceId: String,
+    private val endpoint: String = "/v1/realtime",
+    private val replyTimeoutMillis: Long = 5_000,
+) {
     private lateinit var socket: WebSocketSession
     private val buffered = mutableListOf<JsonObject>()
     private var sequence = 0L
@@ -42,7 +50,7 @@ class JudgeSimulator(private val client: HttpClient, private val credential: Str
         private set
 
     suspend fun connect(): JudgeSimulator {
-        socket = client.webSocketSession("/v1/realtime")
+        socket = client.webSocketSession(endpoint)
         send("""{"type":"handshake","protocolVersion":"1.0","reconnectCredential":"$credential"}""")
         check(receive().string("type") == "handshake_accepted")
         return this
@@ -133,6 +141,11 @@ class JudgeSimulator(private val client: HttpClient, private val credential: Str
 
     suspend fun close() = socket.close()
 
+    /** Drops the socket without a close handshake, as a phone does when the network is gone. */
+    fun abort() {
+        if (::socket.isInitialized) socket.cancel()
+    }
+
     private fun apply(message: JsonObject) {
         val messageCursor = message.getValue("cursor").jsonPrimitive.long
         when (message.string("type")) {
@@ -162,7 +175,7 @@ class JudgeSimulator(private val client: HttpClient, private val credential: Str
 
     private suspend fun send(text: String) = socket.send(Frame.Text(text))
 
-    private suspend fun receive(): JsonObject = withTimeout(5_000) {
+    private suspend fun receive(): JsonObject = withTimeout(replyTimeoutMillis) {
         Json.parseToJsonElement((socket.incoming.receive() as Frame.Text).readText()).jsonObject
     }
 }

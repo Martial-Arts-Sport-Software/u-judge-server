@@ -22,7 +22,11 @@ description: Use when testing, packaging, releasing, or modifying Gradle, depend
 - For source and dependency changes, run `./gradlew build`.
 - For persistence changes, also run `RealPostgresLifecycleTest` against a real PostgreSQL bundle (see `README.md`).
 - For desktop packaging changes, run `./gradlew :desktop:packageDistributionForCurrentOS`.
-- For standalone server distribution changes, run `./gradlew :server:installDist`.
+- For standalone server distribution changes, run `./gradlew :server:installDist` and its `--smoke-test` (see `README.md`).
+- For realtime, journal or reconnect changes, also run `./gradlew :server:faultTest` (seven phones through the fault proxy).
+- For packaging or runtime changes, run the installed app with `--smoke-test`; the «Build Installers» workflow does it for
+  the DMG and the MSI (MSI as a standard Windows user: PostgreSQL refuses administrator rights).
+- Keep the LAN write surface in `WriteSurfaceTest`: a new route or anonymous input needs a review and a size limit.
 - Run `git diff --check` before committing.
 
 ## Toolchain rules
@@ -35,4 +39,6 @@ description: Use when testing, packaging, releasing, or modifying Gradle, depend
 ## Release evidence
 
 Record the OS, command, and result for installer smoke tests. The pilot requires clean Windows and macOS verification,
-backup/restore proof, and no anonymous write endpoint.
+backup/restore proof, and no anonymous write endpoint. CI runners are not clean physical machines: those runs, TestFlight,
+devices and the manual desktop regression stay in the owner's checklist (`docs/ROADMAP.md`, stage 7).
+`scripts/check-secrets.sh` must stay green; never commit a key store or token.

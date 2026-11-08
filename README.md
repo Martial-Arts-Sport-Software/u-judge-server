@@ -12,8 +12,8 @@ Desktop-приложение площадки и локальный server U'Jud
 - арбитр и полноэкранное watcher-табло;
 - append-only аудит, история, XLSX/CSV export и backup;
 - локальный PostgreSQL на каждой площадке;
-- P2P-синхронизация до 8 равноправных площадок без центрального server;
-- работа при сетевом разделении и сходимость после reconnect.
+- работа при сетевом разделении и восстановление судейских устройств после reconnect;
+- после пилота: P2P-синхронизация до 8 равноправных площадок без центрального server.
 
 ## Текущее состояние
 
@@ -26,6 +26,13 @@ Read-only `GET /v1/health` возвращает typed liveness status `healthy` 
 Tanbon и технические выступления (server-часть I5, [ADR-011](docs/adr/ADR-011-tanbon-technical-contract.md)): категории Tanbon читаются из необязательного листа «Танбон» заявок и судятся боями Tanbon (`tanbon_score_command`, только `HEAD=2`, `BODY=1` и `CROSS` в аудите, без бросков, вращений и Gamjeom); следующее выступление площадки начинается с 1-7 подключёнными судьями и формулой итога, каждый судья один раз отправляет вектор критериев `technical_score_send_command`, server считает итог в десятых (без min/max или среднее), учитывает штрафы и бонус арбитра и ранжирует категорию; экран «Выступление» на desktop. Client-часть ещё не прогнана против desktop; нормативные векторы и чтение tie-break ждут заключения эксперта-судьи.
 
 Отчётность, backup и восстановление (I6, [ADR-012](docs/adr/ADR-012-reports-backup-restore.md)): экран «Отчёты и резервные копии» показывает историю каждого действия судей и оператора с фильтрами и причиной учёта, сохраняет XLSX, документированный CSV, «Протокол хода соревнований» с победителями и счётом и «Протокол результатов» с местами, с печатью и подписями; backup журнала создаётся перед загрузкой и восстановлением, после каждого завершённого боя и по кнопке, хранится до удаления и восстанавливается с проверкой в новую базу на этом или чистом компьютере. Интерфейс desktop по умолчанию русский, английский переключается без перезапуска. Backup не шифруется.
+
+Release hardening (I7, автоматизируемая часть): workflow «Build Installers» устанавливает DMG и MSI на чистых runners
+GitHub и проверяет установленное приложение режимом `--smoke-test`; CI гоняет семь симулированных телефонов через прокси
+с задержками, обрывами, длительным разделением и перезапуском server (`:server:faultTest`), закрепляет перечень маршрутов
+без анонимной записи и ищет секреты в файлах и истории. Server нужно запускать от обычного пользователя Windows. Чистые
+физические машины, TestFlight, устройства и ручной регресс desktop - [чек-лист владельца](docs/ROADMAP.md#чек-лист-владельца).
+Ограничения версии - в [release notes](docs/RELEASE-NOTES.md).
 
 `BracketOwnership` закрепляет сетку за единственным local peer при `IN_PROGRESS`; P2P claims и ownership transfer не входят в v1 Pilot.
 
@@ -78,6 +85,21 @@ delivery proof, хранит решения pairing в журнале, а deskto
 ./gradlew :server:run
 ```
 
+Headless-проверка установленного приложения или distribution (запуск server с managed PostgreSQL, `GET /v1/health` по TLS
+с сертификатом peer, остановка; код выхода `0` при успехе):
+
+```shell
+/Applications/UJudgeServer.app/Contents/MacOS/UJudgeServer --smoke-test --data-directory=/tmp/ujudge-smoke --report=report.txt
+```
+
+Fault-injection нагрузочный тест (семь телефонов, задержки, обрывы, разделение, перезапуск; около 25 секунд) и проверка
+секретов:
+
+```shell
+./gradlew :server:faultTest
+scripts/check-secrets.sh
+```
+
 Проверка managed PostgreSQL против реального PostgreSQL. Задача `:server:preparePostgresBundle` распаковывает
 зафиксированные бинарники `io.zonky.test.postgres:embedded-postgres-binaries-*` в `server/build/postgres-bundle/postgresql`
 и передаёт этот путь тестам; нужен `tar` с поддержкой xz (есть в macOS, Windows 10+ и Linux):
@@ -97,6 +119,7 @@ delivery proof, хранит решения pairing в журнале, а deskto
 ## Ограничения pilot
 
 - заявки импортируются по шаблону `df-template-v1`, сетки строит жеребьёвка по правилам ФХР 2024 (случайная и с разведением);
-- Windows signing и macOS notarization отложены до этапа после pilot;
+- Windows signing и macOS notarization отложены до этапа после pilot; installers не подписаны;
+- версия installer `1.0.0` - техническая версия пилота, не production-релиз;
 - P2P protocol и упаковка PostgreSQL должны пройти обязательные ADR/spikes;
 - посев по рейтингу, двойное выбывание и олимпийская система не входят в scope.

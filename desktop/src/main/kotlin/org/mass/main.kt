@@ -10,8 +10,11 @@ import kotlinx.coroutines.withContext
 import org.mass.State.currentRoute
 import org.mass.locale.Localization
 import org.mass.screens.SpectatorWindow
+import kotlin.system.exitProcess
 
-fun main() {
+fun main(args: Array<String>) {
+    // `--smoke-test` checks the installed server headlessly, without a window (installer workflow, I7).
+    ServerSmokeCheck.options(args)?.let { exitProcess(ServerSmokeCheck.run(it)) }
     ServerLog.useDirectory(ServerRuntimeConfiguration.fromEnvironment().applicationDataDirectory.resolve("logs"))
     desktopApplication()
 }

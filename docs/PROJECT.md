@@ -147,8 +147,14 @@ delivery proof, хранит решения pairing в журнале, а deskto
   места категорий, XLSX и CSV, «Протокол результатов», backup `u-judge-backup` с SHA-256 после завершённых сессий и
   проверенное восстановление в новую базу managed PostgreSQL; русский интерфейс desktop по умолчанию;
 - публикация `_u-judge._tcp` через mDNS;
-- ручной workflow сборки installers для Windows, macOS и Linux.
-- CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
+- ручной workflow «Build Installers»: после build и fault-injection теста собирает DMG, MSI и DEB, устанавливает DMG и MSI на
+  чистых runners, запускает установленное приложение в режиме `--smoke-test` (server, managed PostgreSQL, health по TLS,
+  остановка) и удаляет его; MSI проверяется от имени обычного пользователя Windows (I7);
+- CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check, Gradle build на Java 21, fault-injection
+  нагрузочный тест семи телефонов (`:server:faultTest`), smoke-test `:server:installDist` и проверка секретов в файлах и
+  истории;
+- ограничения анонимного ввода: тело pairing request до 4 KB, кадр WebSocket до 64 KB, полный перечень маршрутов закреплён
+  тестом (I7).
 
 ### 7.2. Не реализовано в server
 
@@ -163,12 +169,11 @@ delivery proof, хранит решения pairing в журнале, а deskto
   authenticated projection publication уже существуют. Отдельный persisted `ROUND_BREAK` period принимает только `START_BREAK` из
   `RUNNING` и `END_BREAK` обратно в `RUNNING`, с durable rebuild и realtime publication; нормативная длительность,
   remaining-time countdown, desktop datasource wiring и physical-device acceptance открыты;
-- bundled PostgreSQL distribution, реальный lifecycle и clean-machine proof; durable journal migration, configured `initdb`
-  provisioning boundary и process supervision существуют только как Stage 1 JDBC spike;
 - P2P-обнаружение, авторизация и репликация;
 - шифрование backup и удаление заменённых при восстановлении баз из desktop (ADR-012);
+- проверка на чистых физических Windows/macOS, TestFlight и pilot devices, полный ручной регресс desktop (чек-лист
+  владельца в roadmap, этап 7);
 - интерфейсы арбитра, наблюдателя и редактора сеток;
-- автоматические тестовые сценарии.
 
 `GET /v1/metadata` и `GET /v1/pairing-status/{requestId}` являются публичными read-only endpoints API v1. Status response
 не создаёт online state и содержит только typed state, device ID и rejection code при отклонении, без surname и reconnect
@@ -309,6 +314,8 @@ Mobile clients                         Mobile clients
 - Сетки строятся жеребьёвкой по ФХР 2024 из импортированных заявок (ADR-007, ADR-008); один desktop ведёт жеребьёвку,
   нумерацию и протоколы всего соревнования и судит одну площадку.
 - Подпись Windows installer и notarization macOS переносятся после пилота.
+- Server запускается от обычного пользователя Windows: PostgreSQL не работает с правами администратора («Запуск от имени
+  администратора» или выключенный UAC), приложение показывает это как сбой.
 - Публичная публикация приложений в магазинах не требуется; используются APK и TestFlight.
 
 ## 12. Открытые вопросы и blockers
@@ -317,7 +324,7 @@ Mobile clients                         Mobile clients
 |----------------------------|--------------------------|------------------------------------------------------------------------|
 | Фактическая схема XLSX     | Adapter реализован (I4a) | Импорт реальной обезличенной заявки (`IMP-001`)                         |
 | P2P transport/anti-entropy | Post-v1 scope           | Реализация отложена; ADR-002 сохраняет целевую topology и claim semantics |
-| Управляемый PostgreSQL     | ADR                      | Проверена автоматическая установка и lifecycle на чистых Windows/macOS |
+| Управляемый PostgreSQL     | CI runners (I7)          | Проверена автоматическая установка и lifecycle на чистых физических Windows/macOS |
 | Минимальные Android/iOS    | Решение принято          | Physical-device smoke tests на Honor 50 Lite/Android 11 и iPhone 15/iOS 26.6 |
 | Правила Tanbon             | Решение принято           | `HEAD=2`, `BODY=1`, `CROSS` сохраняется в audit без изменения счёта     |
 | Английские PDF             | Post-v1 scope            | Добавлены реальные английские материалы после русской версии            |

@@ -195,6 +195,35 @@ class ManagedPostgresTest {
         }
     }
 
+    @Test
+    fun `a child refused for administrator rights fails at once with the remedy`() {
+        val root = createTempDirectory()
+        try {
+            val configuration = PostgresRuntimeConfiguration(
+                installationDirectory = root.resolve("installation"),
+                applicationDataDirectory = root.resolve("application-data"),
+                port = 54326,
+                platform = PostgresPlatform.current(),
+            )
+            val command = javaCommand(
+                "-cp", System.getProperty("java.class.path"), AdministratorPostgresProcessFixture::class.java.name, port = 54326,
+            )
+            val runtime = ManagedPostgresRuntime(
+                configuration,
+                ManagedPostgres(command, logFile = configuration.logFile),
+                readinessTimeout = java.time.Duration.ofSeconds(30),
+            )
+            val startedAt = System.nanoTime()
+
+            val failed = assertIs<PostgresState.Failed>(runtime.start())
+
+            assertEquals("PostgreSQL did not become ready: $ADMINISTRATOR_DIAGNOSTIC", failed.diagnostic)
+            assertTrue(System.nanoTime() - startedAt < 15_000_000_000, "Fails without waiting for the readiness timeout")
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun waitingCommand(port: Int): PostgresCommand = javaCommand(
         "-cp",
         System.getProperty("java.class.path"),
@@ -215,6 +244,16 @@ object ManagedPostgresProcessFixture {
     @JvmStatic
     fun main(args: Array<String>) {
         Thread.sleep(60_000)
+    }
+}
+
+/** Prints what `postgres.exe` prints in an elevated Windows session and exits like it. */
+object AdministratorPostgresProcessFixture {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        System.err.println("Execution of PostgreSQL by a user with administrative permissions is not")
+        System.err.println("permitted.")
+        kotlin.system.exitProcess(1)
     }
 }
 

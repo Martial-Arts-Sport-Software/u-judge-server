@@ -13,6 +13,7 @@ dependencies {
     testImplementation(libs.h2)
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.ktor.client.websockets)
+    testImplementation(libs.ktor.client.cio)
 
     implementation(libs.kotlinx.coroutinesSwing)
 
@@ -90,7 +91,8 @@ val preparePostgresBundle = tasks.register<PreparePostgresBundle>("preparePostgr
 }
 
 tasks.test {
-    useJUnitPlatform()
+    // The fault-injection load test runs in `faultTest`: it takes tens of seconds of real time.
+    useJUnitPlatform { excludeTags("fault") }
     val bundle = preparePostgresBundle.flatMap(PreparePostgresBundle::bundleDirectory)
     inputs.dir(bundle).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("postgresBundle")
     jvmArgumentProviders.add(
@@ -98,6 +100,17 @@ tasks.test {
             listOf("-DuJudge.postgres.installationDirectory=${bundle.get().asFile.absolutePath}")
         },
     )
+}
+
+/** I7 reliability: seven simulated phones through a fault-injecting TCP proxy (`FaultInjectionLoadTest`). */
+val faultTest = tasks.register<Test>("faultTest") {
+    description = "Runs the fault-injection load tests (tag `fault`)."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("fault") }
+    testLogging { events("passed", "failed") }
+    shouldRunAfter(tasks.test)
 }
 
 fun postgresBinariesPlatform(): String {
