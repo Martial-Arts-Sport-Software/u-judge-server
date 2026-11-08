@@ -106,6 +106,9 @@ enum class DrawRejection {
 
     /** A competition setting longer than [CompetitionOfficials.MAX_LENGTH]. */
     INVALID_OFFICIALS,
+
+    /** A protocol image that is not PNG or JPEG or is larger than [ProtocolImages.MAX_BYTES] (ADR-012 §5). */
+    INVALID_IMAGE,
 }
 
 sealed interface DrawOutcome {

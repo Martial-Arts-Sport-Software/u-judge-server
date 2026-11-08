@@ -400,6 +400,7 @@ object CourtsScreen : Screen {
             DrawRejection.INVALID_COURT -> "brackets_draw_rejected_invalid_court"
             DrawRejection.UNKNOWN_BOUT -> "brackets_draw_rejected_unknown_bout"
             DrawRejection.INVALID_OFFICIALS -> "brackets_draw_rejected_invalid_officials"
+            DrawRejection.INVALID_IMAGE -> "reports_image_invalid"
         },
     )
 

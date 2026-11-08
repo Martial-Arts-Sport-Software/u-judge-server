@@ -44,6 +44,8 @@ data class CourtsBoard(
     val officials: CompetitionOfficials = CompetitionOfficials(),
     /** The results of the decided bouts by category, with the winners moved on (ADR-010 §6). */
     val results: Map<String, BracketProgress> = emptyMap(),
+    /** The seal and signatures of the protocols (ADR-012 §5). */
+    val images: ProtocolImages = ProtocolImages(),
 ) {
     fun number(ref: ItemRef): Int? = numbers[ref]
 
@@ -110,13 +112,14 @@ class CompetitionCourtsService(
         }
         val officials = events.map { it.event }.filterIsInstance<DrawEvent.OfficialsSet>().lastOrNull()?.officials
             ?: CompetitionOfficials()
+        val images = events.map { it.event }.filterIsInstance<DrawEvent.ProtocolImagesSet>().lastOrNull()?.images ?: ProtocolImages()
         val decisions = progress().decisions
         val results = drawBoard.categories.mapNotNull { state ->
             val draw = state.numbered ?: return@mapNotNull null
             val own = decisions.filterKeys { it.categoryId == state.category.id }.mapKeys { (ref, _) -> ref.round to ref.index }
             state.category.id to BracketProgress(draw, own)
         }.toMap()
-        return CourtsBoard(competitionId, drawBoard, plan, localCourt, numbers, preliminary, frozen != null, officials, results)
+        return CourtsBoard(competitionId, drawBoard, plan, localCourt, numbers, preliminary, frozen != null, officials, results, images)
     }
 
     /** Place, chief judge and chief secretary of the protocols (`competition_officials_set`); unchanged values write nothing. */
@@ -126,6 +129,14 @@ class CompetitionCourtsService(
         if (!normalised.valid) return@withBoard DrawOutcome.Rejected(DrawRejection.INVALID_OFFICIALS)
         if (normalised == board.officials) return@withBoard DrawOutcome.Done
         draws.record(listOf(DrawEvent.OfficialsSet(checkNotNull(board.competitionId), normalised)))
+    }
+
+    /** The seal and signature images of the protocols (`competition_protocol_images_set`); unchanged images write nothing. */
+    @Synchronized
+    fun setProtocolImages(images: ProtocolImages): DrawOutcome = withBoard { board ->
+        if (!images.valid) return@withBoard DrawOutcome.Rejected(DrawRejection.INVALID_IMAGE)
+        if (images == board.images) return@withBoard DrawOutcome.Done
+        draws.record(listOf(DrawEvent.ProtocolImagesSet(checkNotNull(board.competitionId), images)))
     }
 
     /**

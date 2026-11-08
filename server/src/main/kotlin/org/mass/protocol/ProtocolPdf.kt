@@ -5,34 +5,50 @@ import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
 import org.apache.pdfbox.pdmodel.common.PDRectangle
 import org.apache.pdfbox.pdmodel.font.PDType0Font
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject
 import org.mass.applications.CategoryEntry
 import org.mass.draw.BoutSide
 import org.mass.draw.Bouts
 import org.mass.draw.DrawFormat
 import org.mass.draw.ItemRef
+import org.mass.draw.ProtocolImages
 import org.mass.draw.drawKey
 import java.io.ByteArrayOutputStream
 import java.time.format.DateTimeFormatter
 
 /**
- * Renders «Протокол хода соревнований» in the organiser's layout (ADR-008 §8) with Apache PDFBox: A4 landscape, one page
- * per category with the title, the competition, its date and place, the category and its court, the bracket with «Бой № N»
- * at every bout (byes start in the second-round column), and the signature lines of the chief judge and the chief secretary.
- * Round robins list their rounds, technical disciplines the performance order. The bundled Montserrat (OFL) carries Cyrillic.
+ * Renders «Протокол хода соревнований» (ADR-008 §8) and «Протокол результатов» (ADR-012 §5) with Apache PDFBox: A4
+ * landscape, one page per category with the title, the competition, its date and place, the category and its court; the
+ * bracket with «Бой № N», winners and scores at every bout (byes start in the second-round column), round robins by round,
+ * technical disciplines in performance order with totals, or the places table; the signature lines of the chief judge and
+ * the chief secretary with the signature images and the seal. The bundled Montserrat (OFL) carries Cyrillic.
  */
 object ProtocolPdf {
     const val TITLE = "Протокол хода соревнований"
+    const val RESULTS_TITLE = "Протокол результатов"
     const val PRELIMINARY = "Нумерация предварительная"
+
+    fun title(kind: ProtocolKind) = if (kind == ProtocolKind.RESULTS) RESULTS_TITLE else TITLE
 
     fun render(document: ProtocolDocument): ByteArray = PDDocument().use { pdf ->
         val fonts = Fonts(font(pdf, "Montserrat-Regular.ttf"), font(pdf, "Montserrat-Bold.ttf"))
+        val images = Images(
+            seal = image(pdf, document.images.seal),
+            chiefJudge = image(pdf, document.images.chiefJudgeSignature),
+            chiefSecretary = image(pdf, document.images.chiefSecretarySignature),
+        )
         document.pages.forEach { page ->
             val pdfPage = PDPage(PDRectangle(PDRectangle.A4.height, PDRectangle.A4.width))
             pdf.addPage(pdfPage)
-            PDPageContentStream(pdf, pdfPage).use { stream -> PageLayout(Canvas(stream, fonts), document, page).draw() }
+            PDPageContentStream(pdf, pdfPage).use { stream -> PageLayout(Canvas(stream, fonts), document, page, images).draw() }
         }
-        pdf.documentInformation.title = TITLE
+        pdf.documentInformation.title = title(document.kind)
         ByteArrayOutputStream().also(pdf::save).toByteArray()
+    }
+
+    /** A journaled PNG or JPEG; an image PDFBox cannot read is left out rather than failing the protocol. */
+    private fun image(pdf: PDDocument, base64: String?): PDImageXObject? = ProtocolImages.decode(base64)?.let { bytes ->
+        runCatching { PDImageXObject.createFromByteArray(pdf, bytes, null) }.getOrNull()
     }
 
     private fun font(pdf: PDDocument, name: String): PDType0Font =
@@ -41,6 +57,11 @@ object ProtocolPdf {
 }
 
 private class Fonts(val regular: PDType0Font, val bold: PDType0Font)
+
+private class Images(val seal: PDImageXObject?, val chiefJudge: PDImageXObject?, val chiefSecretary: PDImageXObject?) {
+    val any: Boolean
+        get() = seal != null || chiefJudge != null || chiefSecretary != null
+}
 
 /** Text and lines on one page; characters the font cannot show become «?» instead of failing the whole protocol. */
 private class Canvas(private val stream: PDPageContentStream, private val fonts: Fonts) {
@@ -74,6 +95,12 @@ private class Canvas(private val stream: PDPageContentStream, private val fonts:
         stream.stroke()
     }
 
+    /** Draws [image] scaled to fit [width] × [height] with its aspect ratio, bottom-left at ([x], [y]). */
+    fun image(image: PDImageXObject, x: Float, y: Float, width: Float, height: Float) {
+        val scale = minOf(width / image.width, height / image.height)
+        stream.drawImage(image, x, y, image.width * scale, image.height * scale)
+    }
+
     fun box(x: Float, y: Float, width: Float, height: Float) {
         stream.setLineWidth(0.8f)
         stream.addRect(x, y, width, height)
@@ -94,7 +121,12 @@ private class Canvas(private val stream: PDPageContentStream, private val fonts:
 
 private enum class Align { LEFT, CENTRE, RIGHT }
 
-private class PageLayout(private val canvas: Canvas, private val document: ProtocolDocument, private val page: ProtocolPage) {
+private class PageLayout(
+    private val canvas: Canvas,
+    private val document: ProtocolDocument,
+    private val page: ProtocolPage,
+    private val images: Images,
+) {
     private val width = PDRectangle.A4.height
     private val height = PDRectangle.A4.width
     private val left = MARGIN
@@ -103,21 +135,54 @@ private class PageLayout(private val canvas: Canvas, private val document: Proto
 
     fun draw() {
         val top = header()
-        val bottom = MARGIN + 44f
-        when (page.draw.format) {
-            DrawFormat.ELIMINATION -> elimination(top, bottom)
-            DrawFormat.ROUND_ROBIN -> roundRobin(top, bottom)
-            DrawFormat.PERFORMANCE_ORDER -> performanceOrder(top, bottom)
-            DrawFormat.NO_BOUTS -> Unit
+        val bottom = MARGIN + if (images.any) 74f else 44f
+        when {
+            document.kind == ProtocolKind.RESULTS -> results(top, bottom)
+            page.draw.format == DrawFormat.ELIMINATION -> elimination(top, bottom)
+            page.draw.format == DrawFormat.ROUND_ROBIN -> roundRobin(top, bottom)
+            page.draw.format == DrawFormat.PERFORMANCE_ORDER -> performanceOrder(top, bottom)
+            else -> Unit
         }
         signatures()
+    }
+
+    /** «Протокол результатов»: место, участник, город, субъект РФ, тренер (ADR-012 §5). */
+    private fun results(top: Float, bottom: Float) {
+        val columns = listOf("Место" to 0.08f, "Участник" to 0.36f, "Город" to 0.16f, "Субъект РФ" to 0.2f, "Тренер" to 0.2f)
+        val width = right - left
+        val starts = columns.runningFold(left) { x, (_, share) -> x + width * share }
+        val rows = if (page.places.isEmpty()) {
+            listOf(listOf("", "Места не определены: категория не завершена", "", "", ""))
+        } else {
+            page.places.map { placed ->
+                val athletes = placed.entry.athletes
+                listOf(
+                    placed.place?.toString() ?: if (placed.panelDecision) "—" else "",
+                    athletes.joinToString(", ") { ProtocolDocument.shortName(it.fullName) },
+                    athletes.map { it.city.trim() }.filter(String::isNotEmpty).distinct().joinToString(", "),
+                    athletes.map { it.region.trim() }.filter(String::isNotEmpty).distinct().joinToString(", "),
+                    athletes.flatMap { it.coaches }.distinct().joinToString(", "),
+                )
+            }
+        }
+        val lineHeight = minOf(LINE + 4f, (top - bottom) / (rows.size + 1))
+        val size = minOf(9.5f, lineHeight * 0.62f)
+        fun row(values: List<String>, y: Float, bold: Boolean) = values.forEachIndexed { index, value ->
+            canvas.text(value, starts[index] + 3f, y, size, bold = bold, maxWidth = width * columns[index].second - 6f)
+        }
+        row(columns.map { it.first }, top - lineHeight, bold = true)
+        canvas.line(left, top - lineHeight - 4f, right, top - lineHeight - 4f, 0.6f)
+        rows.forEachIndexed { index, values -> row(values, top - lineHeight * (index + 2), bold = false) }
+        if (page.places.any { it.panelDecision }) {
+            canvas.text("— место определяет главный судья (судейская коллегия)", left, bottom + 4f, 8f)
+        }
     }
 
     /** Title, competition, date and place, the category and its court; returns the top of the bracket area. */
     private fun header(): Float {
         val centre = width / 2
         var y = height - MARGIN - 14f
-        canvas.text(ProtocolPdf.TITLE, centre, y, 15f, bold = true, align = Align.CENTRE)
+        canvas.text(ProtocolPdf.title(document.kind), centre, y, 15f, bold = true, align = Align.CENTRE)
         if (document.preliminary) canvas.text(ProtocolPdf.PRELIMINARY, right, y + 4f, 8f, align = Align.RIGHT)
         y -= 18f
         canvas.text(document.competitionName, centre, y, 11f, bold = true, align = Align.CENTRE, maxWidth = right - left)
@@ -134,15 +199,21 @@ private class PageLayout(private val canvas: Canvas, private val document: Proto
     private fun signatures() {
         val y = MARGIN + 12f
         val half = (right - left) / 2
-        listOf("Главный судья" to document.officials.chiefJudge, "Главный секретарь" to document.officials.chiefSecretary)
-            .forEachIndexed { index, (role, name) ->
-                val x = left + half * index
-                canvas.text(role, x, y, 9.5f, bold = true)
-                val lineStart = x + canvas.width(role, 9.5f, bold = true) + 8f
-                val lineEnd = lineStart + 110f
-                canvas.line(lineStart, y - 2f, lineEnd, y - 2f, 0.6f)
-                canvas.text(name, lineEnd + 8f, y, 9.5f, maxWidth = x + half - lineEnd - 16f)
-            }
+        listOf(
+            Triple("Главный судья", document.officials.chiefJudge, images.chiefJudge),
+            Triple("Главный секретарь", document.officials.chiefSecretary, images.chiefSecretary),
+        ).forEachIndexed { index, (role, name, signature) ->
+            val x = left + half * index
+            canvas.text(role, x, y, 9.5f, bold = true)
+            val lineStart = x + canvas.width(role, 9.5f, bold = true) + 8f
+            val lineEnd = lineStart + 110f
+            canvas.line(lineStart, y - 2f, lineEnd, y - 2f, 0.6f)
+            // The signature stands on its line, as signed by hand.
+            signature?.let { canvas.image(it, lineStart, y - 6f, lineEnd - lineStart, 34f) }
+            canvas.text(name, lineEnd + 8f, y, 9.5f, maxWidth = x + half - lineEnd - 16f)
+        }
+        // The seal overlaps the chief judge's signature, between the two blocks.
+        images.seal?.let { canvas.image(it, left + half - 86f, y - 14f, 72f, 72f) }
     }
 
     /**
@@ -199,13 +270,16 @@ private class PageLayout(private val canvas: Canvas, private val document: Proto
                 if (!shown) return@forEach
                 val y = centre(level, index)
                 canvas.box(x(level), y - boxHeight / 2, boxWidth, boxHeight)
-                known[level][index]?.let { key ->
+                val decided = level > 0 && bout(level, index)
+                val ref = if (decided) ItemRef(page.category.id, level, boutIndex++) else null
+                // A bye entry is known from the draw, a winner from the result of the bout (ADR-010 §6).
+                (known[level][index] ?: ref?.let { page.progress?.winner(it.round, it.index) })?.let { key ->
                     canvas.text(name(key), x(level) + 3f, y - fontSize * 0.35f, fontSize, maxWidth = boxWidth - 6f)
                 }
-                // The box of a winner carries the number of the bout that decides it.
-                if (level > 0 && bout(level, index)) {
-                    val number = page.numbers[ItemRef(page.category.id, level, boutIndex++)]
-                    canvas.text(boutLabel(number), x(level) + 2f, y + boxHeight / 2 + 2f, labelSize, bold = true)
+                // The box of a winner carries the number of the bout that decides it and its score.
+                if (ref != null) {
+                    val label = listOfNotNull(boutLabel(page.numbers[ref]), page.scores[ref]).joinToString("   ")
+                    canvas.text(label, x(level) + 2f, y + boxHeight / 2 + 2f, labelSize, bold = true)
                 }
             }
         }
@@ -214,8 +288,10 @@ private class PageLayout(private val canvas: Canvas, private val document: Proto
     private fun roundRobin(top: Float, bottom: Float) {
         val lines = Bouts.of(page.draw).groupBy { it.round }.flatMap { (round, bouts) ->
             listOf(Line("Круг $round", bold = true)) + bouts.map { bout ->
-                val number = page.numbers[ItemRef(page.category.id, bout.round, bout.index)]
-                Line("${boutLabel(number)}   ${side(bout.first)} — ${side(bout.second)}")
+                val ref = ItemRef(page.category.id, bout.round, bout.index)
+                val winner = page.progress?.winner(bout.round, bout.index)?.let { "   победитель: ${name(it)}" }.orEmpty()
+                val score = page.scores[ref]?.let { "   $it" }.orEmpty()
+                Line("${boutLabel(page.numbers[ref])}   ${side(bout.first)} — ${side(bout.second)}$score$winner")
             }
         }
         flow(lines, top, bottom)
@@ -223,8 +299,10 @@ private class PageLayout(private val canvas: Canvas, private val document: Proto
 
     private fun performanceOrder(top: Float, bottom: Float) {
         val lines = listOf(Line("Порядок выступлений", bold = true)) + page.draw.entryKeys.mapIndexed { index, key ->
-            val number = page.numbers[ItemRef(page.category.id, 1, index)]
-            Line("${number?.let { "Выступление № $it" } ?: "Выступление"}   ${name(key)}")
+            val ref = ItemRef(page.category.id, 1, index)
+            val number = page.numbers[ref]
+            val total = page.scores[ref]?.let { "   $it" }.orEmpty()
+            Line("${number?.let { "Выступление № $it" } ?: "Выступление"}   ${name(key)}$total")
         }
         flow(lines, top, bottom)
     }

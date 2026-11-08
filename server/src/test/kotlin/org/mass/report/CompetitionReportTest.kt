@@ -1,6 +1,17 @@
 package org.mass.report
 
+import org.apache.pdfbox.Loader
+import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.poi.ss.usermodel.CellType
+import org.mass.draw.DrawOutcome
+import org.mass.draw.DrawRejection
+import org.mass.draw.ProtocolImages
+import org.mass.protocol.ProtocolDocument
+import org.mass.protocol.ProtocolKind
+import org.mass.protocol.ProtocolPdf
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
+import javax.imageio.ImageIO
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.h2.jdbcx.JdbcDataSource
 import org.mass.PairingRequests
@@ -167,6 +178,52 @@ class CompetitionReportTest {
         assertEquals(cells(XlsxReport.render(before)), cells(XlsxReport.render(after)))
         file.parent.toFile().deleteRecursively()
     }
+
+    @Test
+    fun `the protocols print winners, scores and places with the seal and the signatures`() {
+        val dataSource = h2()
+        val court = judgedCompetition(dataSource)
+        val png = png()
+        assertEquals(DrawOutcome.Rejected(DrawRejection.INVALID_IMAGE), court.courts.setProtocolImages(ProtocolImages(seal = ProtocolImages.encode("not an image".toByteArray()))))
+        assertEquals(DrawOutcome.Rejected(DrawRejection.INVALID_IMAGE), court.courts.setProtocolImages(ProtocolImages(seal = ProtocolImages.encode(ByteArray(ProtocolImages.MAX_BYTES + 1)))))
+        val images = ProtocolImages(seal = ProtocolImages.encode(png), chiefJudgeSignature = ProtocolImages.encode(png))
+        assertEquals(DrawOutcome.Done, court.courts.setProtocolImages(images))
+        val events = JdbcDomainEventStore(dataSource).peerEvents(setOf("competition_protocol_images_set")).size
+        assertEquals(DrawOutcome.Done, court.courts.setProtocolImages(images))
+        assertEquals(events, JdbcDomainEventStore(dataSource).peerEvents(setOf("competition_protocol_images_set")).size, "unchanged images write nothing")
+        // The images are competition settings in the journal: a restart and a backup keep them.
+        assertEquals(images, Court(dataSource).courts.board().images)
+
+        val progress = checkNotNull(court.reports.protocol(ProtocolKind.PROGRESS))
+        val progressText = pdfText(ProtocolPdf.render(progress))
+        val final = court.report().sessions.filter { it.categoryId == "kerugi" }.maxBy { it.round }
+        val champion = court.report().categories.single { it.category.id == "kerugi" }.places.first().entry
+        assertTrue(progressText.contains("${final.blueScore}:${final.redScore}"), progressText)
+        assertTrue(progressText.contains(ProtocolDocument.shortName(champion.athletes.single().fullName)))
+        assertTrue(progressText.contains("6.3"), "the total of the last performance")
+
+        val results = checkNotNull(court.reports.protocol(ProtocolKind.RESULTS, setOf("kerugi", "hosinsool")))
+        val bytes = ProtocolPdf.render(results)
+        val resultText = pdfText(bytes)
+        assertTrue(resultText.contains(ProtocolPdf.RESULTS_TITLE))
+        assertTrue(resultText.contains("Место") && resultText.contains("Субъект РФ"))
+        assertTrue(resultText.contains("1 ${ProtocolDocument.shortName(champion.athletes.single().fullName)}"), resultText)
+        assertTrue(resultText.contains("Главный судья"))
+        Loader.loadPDF(bytes).use { pdf ->
+            assertEquals(2, pdf.numberOfPages)
+            pdf.pages.forEach { page ->
+                val drawn = page.resources.xObjectNames.count { page.resources.isImageXObject(it) }
+                assertEquals(2, drawn, "the seal and the chief judge's signature on every page")
+            }
+        }
+    }
+
+    private fun png(): ByteArray {
+        val image = BufferedImage(40, 20, BufferedImage.TYPE_INT_ARGB).apply { setRGB(3, 3, 0xFF0000FF.toInt()) }
+        return ByteArrayOutputStream().also { ImageIO.write(image, "png", it) }.toByteArray()
+    }
+
+    private fun pdfText(bytes: ByteArray): String = Loader.loadPDF(bytes).use { PDFTextStripper().getText(it) }
 
     /** The services of one desktop over [dataSource], as `ServerRuntime` composes them. */
     private inner class Court(dataSource: DataSource) {
