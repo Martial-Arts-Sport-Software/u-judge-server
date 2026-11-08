@@ -9,6 +9,7 @@
 - Amends by reference: [ADR-004](ADR-004-http-websocket-contract.md) (realtime message families, resync, generic command);
   keeps the envelope rules of [ADR-001](ADR-001-event-envelope.md) and the court panel of
   [ADR-008](ADR-008-courts-numbering-protocols.md) §9-§10
+- Extended by: [ADR-010](ADR-010-kerugi-timer-advancement.md) (timer, periods, golden round, winner advancement, I2b)
 
 ## Context
 

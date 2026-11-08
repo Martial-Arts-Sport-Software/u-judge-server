@@ -268,6 +268,7 @@ restart (H2 и PostgreSQL 18.6) и отказами (`KerugiBoutScenarioTest`, `
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
 | [x]    | [ADR-006](adr/ADR-006-local-tls-trust.md) | Local TLS: self-signed сертификат peer и SPKI pin на телефоне с кодом сверки |
 | [x]    | [ADR-009](adr/ADR-009-kerugi-bout-contract.md) | Realtime-контракт боя Kerugi: snapshot, resync, `kerugi_score_command`, один dispatcher |
+| [x]    | [ADR-010](adr/ADR-010-kerugi-timer-advancement.md) | Время боя Kerugi: раунды, перерыв, golden round, `kerugi_timer_updated`; продвижение победителя по сетке |
 
 ### Gate G0
 
