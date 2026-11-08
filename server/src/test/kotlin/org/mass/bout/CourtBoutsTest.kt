@@ -122,6 +122,13 @@ class CourtBoutsTest {
         val winnerId = opening.started.red.entryId
         val advanced = court.bouts.panel().queue.filterIsInstance<CourtItem.Bout>().single { it.ref.round == 2 && winnerId in listOf(it.blue.id, it.red.id) }
         assertEquals(numbers.getValue(advanced.ref), advanced.number)
+        // The spectator window sees the finished bout read-only and calls the next two bouts (ADR-010 §8).
+        val spectator = court.bouts.spectator()
+        assertNull(spectator.session!!.seat)
+        assertEquals("completed", spectator.session!!.state)
+        assertEquals(opening.sessionId.value, spectator.session!!.sessionId)
+        assertEquals(court.bouts.panel().next, spectator.invited)
+        assertEquals(court.bouts.panel().queue.first { it != spectator.invited }, spectator.preparing)
         // The draw is locked since the first «Начать», before any judge event (`BRK-003`); a result changes no structure.
         assertEquals(DrawOutcome.Rejected(DrawRejection.STARTED), court.draws.shuffle("kerugi-a"))
 

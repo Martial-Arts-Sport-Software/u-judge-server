@@ -3,6 +3,7 @@ package org.mass.bout
 import org.mass.DeviceConnectionState
 import org.mass.PairingRequests
 import org.mass.RealtimeHub
+import org.mass.SessionView
 import org.mass.applications.ApplicationDiscipline
 import org.mass.applications.CategoryEntry
 import org.mass.domain.CompetitionId
@@ -17,6 +18,12 @@ import org.mass.draw.CourtPanel
 import org.mass.draw.CourtProgress
 import org.mass.draw.DrawOutcome
 import org.mass.draw.ItemRef
+
+/**
+ * The spectator window (ADR-010 §8): the current bout as a connected device without a seat receives it, and the call list
+ * «Приглашаются» ([invited], the next bout) and «Готовятся» ([preparing], the bout after it). Read-only.
+ */
+data class SpectatorView(val court: Int, val session: SessionView?, val invited: CourtItem?, val preparing: CourtItem?)
 
 /** A paired device the operator can seat: approved, not revoked and connected now. */
 data class ConnectedJudge(val deviceId: String, val surname: String, val platform: String)
@@ -46,6 +53,12 @@ class CourtBouts(
         get() = realtime.bouts
 
     fun panel(): CourtPanel = courts.courtPanel()
+
+    fun spectator(): SpectatorView {
+        val panel = panel()
+        val calls = listOfNotNull(panel.next) + panel.queue.filter { it.ref != panel.next?.ref }
+        return SpectatorView(panel.court, realtime.session(null), calls.getOrNull(0), calls.getOrNull(1))
+    }
 
     fun connectedJudges(): List<ConnectedJudge> = pairing.operatorRegistry().devices
         .filter { !it.revoked && it.connectionState == DeviceConnectionState.CONNECTED }
