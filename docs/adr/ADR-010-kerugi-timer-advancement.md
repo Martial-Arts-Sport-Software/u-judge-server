@@ -190,7 +190,7 @@ idempotent.
   "type": "judge_ready_command",
   "eventId": "4c2a6e8b-9d1f-4a3b-8c5d-7e9f1a2b3c40",
   "sequence": 2,
-  "clientTimestamp": "2026-11-08T10:15:20.000Z",
+  "clientTimestamp": "2026-11-08T10:15:20.500Z",
   "competitionId": "3f6c1d2e-8a4b-4c7d-9e1f-0a2b3c4d5e60",
   "peerId": "00000000-0000-4000-8000-000000000001",
   "courtId": "5b7e2c10-1d3f-4a6b-8c9d-0e1f2a3b4c50",
