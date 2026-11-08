@@ -131,6 +131,10 @@ class ContractFixturesTest {
         val sessionPaths = setOf("cursor", "session.sessionId", "session.courtId", "session.seat.judgeId")
         assertMatches("session_snapshot", judge.receiveText(), generated = sessionPaths)
         second.receiveText()
+        // ADR-010 §9: «Готов» of the seated judge while the bout is prepared.
+        val ready = withValues(fixture("judge_ready_command"), generated)
+        assertEquals(ready.getValue("eventId"), Json.parseToJsonElement(judge.exchange(ready)).jsonObject.getValue("eventId"))
+        assertEquals(setOf(1), hub.bouts.current()!!.ready)
         hub.operator("Оператор", BoutCommand.ChangeState(EventId.new(), sessionId, BoutStateAction.START))
         judge.receiveText()
         second.receiveText()

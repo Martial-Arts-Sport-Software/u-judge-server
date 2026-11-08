@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-08
 - Increment: I2b «Kerugi: время боя и ход сетки» (`docs/ROADMAP.md`)
-- Requirements: `KER-010`-`KER-013`, `UI-001`, `UI-003`-`UI-005`, `SES-007`, `BRK-003`, `BRK-004`; client `CLI-026`,
+- Requirements: `KER-010`-`KER-013`, `UI-001`, `UI-003`-`UI-005`, `SES-007`, `BRK-003`, `BRK-004`, `CMP-008`; client `CLI-026`,
   `CLI-072`, `CLI-074`, `CLI-075`
 - Extends: [ADR-009](ADR-009-kerugi-bout-contract.md) (additive only: no field, type or code of ADR-009 changes meaning);
   keeps the numbering and the bracket view of [ADR-008](ADR-008-courts-numbering-protocols.md) §6-§7, §9
@@ -177,7 +177,31 @@ a seat receives (`seat: null`), refreshed on every journaled bout event and the 
 list «Приглашаются» (the next bout) and «Готовятся» (the bout after it). It has no state-changing control (`UI-004`). The
 call list is not part of the device protocol in I2b; a read-only Android TV board after v1 will add it as a push.
 
-### 9. Removed
+### 9. Judge ready
+
+`judge_ready_command` reports that a seated judge is ready for the bout (client `CLI-026`). It has the envelope and the
+audit context of `judge_attention_command` (ADR-009 §7), is accepted in `prepared`, `running` and `paused`, gets
+`command_ack`/`command_rejected` as every judge command and is journaled as `judge_ready_signalled`; it never changes the
+score or the state. The operator sees «готов» at the judge's seat on the bout screen; a retry with the same `eventId` is
+idempotent.
+
+```json
+{
+  "type": "judge_ready_command",
+  "eventId": "4c2a6e8b-9d1f-4a3b-8c5d-7e9f1a2b3c40",
+  "sequence": 2,
+  "clientTimestamp": "2026-11-08T10:15:20.000Z",
+  "competitionId": "3f6c1d2e-8a4b-4c7d-9e1f-0a2b3c4d5e60",
+  "peerId": "00000000-0000-4000-8000-000000000001",
+  "courtId": "5b7e2c10-1d3f-4a6b-8c9d-0e1f2a3b4c50",
+  "bracketId": "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c40",
+  "sessionId": "9c8b7a6d-5e4f-4d3c-8b2a-1f0e9d8c7b60",
+  "judgeId": "2d4f6a8c-0e1b-4c3d-9e5f-7a9b1c3d5e70",
+  "deviceId": "android-contract"
+}
+```
+
+### 10. Removed
 
 `KerugiTimerJournal`, `JdbcKerugiTimerJournal` and their event types (`kerugi_timer_started`, `kerugi_round_break_started`
 and others) are removed: no production code wrote them, and the clock is part of the bout on the single journal.
@@ -185,7 +209,7 @@ and others) are removed: no production code wrote them, and the clock is part of
 ## Contract fixtures
 
 `session_snapshot` and `resync_response` gain `session.timer`, `session_state_updated` gains `timer`;
-`kerugi_timer_updated` is new. `ContractFixturesTest`
+`kerugi_timer_updated` and `judge_ready_command` are new. `ContractFixturesTest`
 checks them against the running module; the client syncs them by bumping `contract/server-ref`.
 
 ## Consequences

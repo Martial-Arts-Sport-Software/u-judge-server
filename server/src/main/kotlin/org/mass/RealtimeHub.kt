@@ -53,6 +53,7 @@ data class KerugiScoreCommandMessage(
     val area: KerugiScoringArea,
 )
 
+/** `judge_attention_command` and `judge_ready_command` share the envelope (ADR-009 §7, ADR-010 §9). */
 @Serializable
 data class JudgeAttentionCommandMessage(
     val type: String,
@@ -192,6 +193,14 @@ class RealtimeHub(val bouts: KerugiBoutService) {
                 val message = Json.decodeFromString<JudgeAttentionCommandMessage>(text)
                 require(message.type == type)
                 BoutCommand.SignalAttention(
+                    EventId(message.eventId), message.sequence.also { require(it >= 0) }, Instant.parse(message.clientTimestamp),
+                    context(message.competitionId, message.peerId, message.courtId, message.bracketId, message.sessionId, message.judgeId, message.deviceId),
+                )
+            }
+            "judge_ready_command" -> judgeCommand(connection, eventId) {
+                val message = Json.decodeFromString<JudgeAttentionCommandMessage>(text)
+                require(message.type == type)
+                BoutCommand.SignalReady(
                     EventId(message.eventId), message.sequence.also { require(it >= 0) }, Instant.parse(message.clientTimestamp),
                     context(message.competitionId, message.peerId, message.courtId, message.bracketId, message.sessionId, message.judgeId, message.deviceId),
                 )

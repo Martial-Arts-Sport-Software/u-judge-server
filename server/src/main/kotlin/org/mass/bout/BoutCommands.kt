@@ -83,6 +83,14 @@ sealed interface BoutCommand {
         override val context: JudgeContext,
     ) : FromJudge
 
+    /** «Готов»: the seated judge is ready for the bout (ADR-010 §9). */
+    data class SignalReady(
+        override val eventId: EventId,
+        override val sequence: Long,
+        override val clientTimestamp: Instant,
+        override val context: JudgeContext,
+    ) : FromJudge
+
     data class StartBout(override val eventId: EventId, val spec: BoutStartSpec) : FromOperator
 
     data class ChangeState(override val eventId: EventId, val sessionId: SessionId, val action: BoutStateAction) : FromOperator

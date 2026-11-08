@@ -181,6 +181,24 @@ class KerugiBoutTimerTest {
     }
 
     @Test
+    fun `a seated judge reports ready before the start and a judge without a seat cannot`() {
+        val court = BoutFixture()
+        val sessionId = court.start(running = false)
+        val ready = BoutCommand.SignalReady(court.id(), 0, court.clock, court.context("android-2"))
+
+        assertIs<BoutOutcome.Applied>(court.judge("android-2", ready))
+        assertEquals(false, assertIs<BoutOutcome.Applied>(court.judge("android-2", ready)).isNew)
+        assertEquals(
+            BoutOutcome.Rejected(BoutRejection.JUDGE_NOT_ASSIGNED),
+            court.judge("android-9", BoutCommand.SignalReady(court.id(), 0, court.clock, court.context("android-2").copy(deviceId = "android-9"))),
+        )
+        assertEquals(setOf(2), court.service.current()!!.ready)
+        assertEquals(SessionState.PREPARED, court.service.bout(sessionId)!!.state)
+        court.restart()
+        assertEquals(setOf(2), court.service.current()!!.ready)
+    }
+
+    @Test
     fun `a break interrupted by a restart ends and the operator starts round 2`() {
         val court = BoutFixture()
         val sessionId = court.start()

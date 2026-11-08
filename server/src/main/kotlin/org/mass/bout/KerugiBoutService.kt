@@ -285,6 +285,9 @@ class KerugiBoutService(
             is BoutCommand.SignalAttention -> KerugiBoutEvents.JUDGE_ATTENTION to Json.encodeToString(
                 BoutAttentionPayload(command.clientTimestamp.toString(), command.sequence),
             )
+            is BoutCommand.SignalReady -> KerugiBoutEvents.JUDGE_READY to Json.encodeToString(
+                BoutAttentionPayload(command.clientTimestamp.toString(), command.sequence),
+            )
             is BoutCommand.ChangeState -> when (command.action) {
                 BoutStateAction.START -> KerugiBoutEvents.SESSION_STARTED
                 BoutStateAction.PAUSE -> KerugiBoutEvents.SESSION_PAUSED

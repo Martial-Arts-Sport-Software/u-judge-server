@@ -379,7 +379,9 @@ object BoutScreen : Screen {
             val online = connection[seat.deviceId] == DeviceConnectionState.CONNECTED
             SelectableRow(
                 text = Localization.getString("bout_seat").replaceFirst("%d", seat.number.toString()).replaceFirst("%s", seat.surname),
-                detail = Localization.getString(if (online) "bout_seat_connected" else "bout_seat_disconnected"),
+                // `CLI-026`, ADR-010 §9: «готов» once the seated judge reported ready.
+                detail = Localization.getString(if (online) "bout_seat_connected" else "bout_seat_disconnected") +
+                    (if (seat.number in bout.ready) " · " + Localization.getString("bout_seat_ready") else ""),
                 selected = online,
                 onClick = {},
             )

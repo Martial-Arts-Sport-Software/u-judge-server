@@ -20,6 +20,9 @@ object KerugiBoutEvents {
     const val DISQUALIFICATION_CONFIRMED = "kerugi_disqualification_confirmed"
     const val JUDGE_ATTENTION = "judge_attention_signalled"
 
+    /** A seated judge reports ready for the bout (ADR-010 §9, client `CLI-026`). */
+    const val JUDGE_READY = "judge_ready_signalled"
+
     /** The clock of ADR-010: a period ends by the operator or at its deadline by the server timer. */
     const val PERIOD_ENDED = "kerugi_period_ended"
     const val CLOCK_ADJUSTED = "kerugi_clock_adjusted"
@@ -33,7 +36,7 @@ object KerugiBoutEvents {
     val ALL = setOf(
         BOUT_STARTED, SESSION_STARTED, SESSION_PAUSED, SESSION_RESUMED, SESSION_COMPLETED, SESSION_CANCELLED,
         SCORE_CANDIDATE, OPERATOR_ACTION, SCORE_CORRECTION, BOUT_RESET, DISQUALIFICATION_CONFIRMED, JUDGE_ATTENTION,
-        PERIOD_ENDED, CLOCK_ADJUSTED, CLOCK_SAVED, CLOCK_STOPPED,
+        PERIOD_ENDED, CLOCK_ADJUSTED, CLOCK_SAVED, CLOCK_STOPPED, JUDGE_READY,
     )
 
     const val JUDGE_SOURCE = "judge_device"

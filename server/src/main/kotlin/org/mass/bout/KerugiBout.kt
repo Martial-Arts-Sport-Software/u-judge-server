@@ -85,6 +85,9 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
     val result: BoutResult?
     val attention: List<BoutAttention>
 
+    /** Seat numbers whose judge reported ready (ADR-010 §9). */
+    val ready: Set<Int>
+
     /** The clock of the bout (ADR-010 §2). */
     val clock: KerugiClock
 
@@ -107,6 +110,7 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
         var disqualified: KerugiDisqualification? = null
         var time = KerugiClock(started.timing)
         val signals = mutableListOf<BoutAttention>()
+        val readySeats = mutableSetOf<Int>()
         // The score at a period end decides whether the golden round follows (ADR-010 §2).
         val tied = {
             val score = scoreWith(time, disqualified)
@@ -177,12 +181,14 @@ class KerugiBout private constructor(val events: List<SequencedDomainEvent>) {
                     Instant.parse(Json.decodeFromString<BoutAttentionPayload>(event.payload).clientTimestamp),
                     event.occurredAt,
                 )
+                KerugiBoutEvents.JUDGE_READY -> seatOfJudge(event.judgeId.value)?.number?.let(readySeats::add)
                 else -> error("Unsupported Kerugi bout event ${event.type}")
             }
         }
         state = projection.state
         result = completed
         attention = signals
+        ready = readySeats
         clock = time
         lastEventAt = (events.map { it.event.occurredAt } + candidates.map { it.occurredAt }).max()
         disqualification = disqualified
