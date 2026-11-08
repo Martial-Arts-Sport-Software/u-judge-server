@@ -184,6 +184,13 @@ object CourtsScreen : Screen {
                                 modifier = Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.bodySmall,
                             )
+                            // I6: history, XLSX/CSV, result protocols, seal and signatures, backups and restore.
+                            ButtonComponent(
+                                text = Localization.getString("courts_reports"),
+                                onclick = { clickWithTransition(Routes.REPORTS) },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     }
                     Spacer(Modifier.width(20.dp))

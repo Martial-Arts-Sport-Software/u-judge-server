@@ -54,9 +54,11 @@ import org.mass.domain.SessionState
 import org.mass.draw.CourtItem
 import org.mass.draw.CourtPanel
 import org.mass.draw.DrawOutcome
+import org.mass.draw.DrawRejection
 import org.mass.enums.Colors
 import org.mass.enums.Routes
 import org.mass.locale.Localization
+import org.mass.ui.RejectionText
 import org.mass.performance.PerformanceCommand
 import org.mass.performance.TechnicalAdjustment
 import org.mass.performance.TechnicalAdjustmentKind
@@ -152,7 +154,7 @@ object PerformanceScreen : Screen {
                                 scope.launch {
                                     val outcome = withContext(Dispatchers.IO) { courts.selectNextBout(ref) }
                                     message = (outcome as? DrawOutcome.Rejected)?.let {
-                                        Localization.getString("bout_rejected").replace("%s", it.reason.name.lowercase())
+                                        Localization.getString(if (it.reason == DrawRejection.UNKNOWN_BOUT) "brackets_draw_rejected_unknown_bout" else "brackets_draw_rejected_no_competition")
                                     }
                                 }
                             },
@@ -522,7 +524,7 @@ object PerformanceScreen : Screen {
 
     private fun signedTenths(value: Int): String = (if (value < 0) "−" else "+") + tenths(kotlin.math.abs(value))
 
-    private fun rejection(code: String): String = Localization.getString("i5_rejection_$code").takeIf { it != "i5_rejection_$code" } ?: code
+    private fun rejection(code: String): String = RejectionText.of(code)
 
     private const val MAX_SEATS = 7
     private val PANEL_SHAPE = RoundedCornerShape(15.dp)

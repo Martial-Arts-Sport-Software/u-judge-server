@@ -42,6 +42,12 @@ dependencies {
     implementation(libs.slf4j.api)
 
     implementation(project(":server"))
+
+    testImplementation(kotlin("test"))
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 /** Places the PostgreSQL bundle prepared by `:server` into the app resources shipped with the desktop application. */
