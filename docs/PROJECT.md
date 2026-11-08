@@ -109,7 +109,7 @@ Authoritative source для v1 Pilot — предоставленный «Про
 
 Раздел описывает состояние `main`. Статусы требований, доказательства и следующий инкремент ведутся только в
 [roadmap](ROADMAP.md#инкременты-поставки). `Server.start()` и desktop запускают bundled PostgreSQL 18.6 в application-data каталоге ОС, применяют миграции единого
-журнала `domain_events`, сохраняют peer ID и generic realtime commands, пишут JSON-логи и показывают сбой server/БД оператору;
+журнала `domain_events`, сохраняют peer ID и бои Kerugi, пишут JSON-логи и показывают сбой server/БД оператору;
 после аварийного завершения оставшийся PostgreSQL останавливается при следующем запуске. Server
 принимает только HTTPS/WSS на `8443` с self-signed сертификатом peer (ADR-006), выдаёт credential только по matching
 delivery proof, хранит решения pairing в журнале, а desktop показывает код сверки и позволяет подтвердить, отклонить и
@@ -117,7 +117,8 @@ delivery proof, хранит решения pairing в журнале, а deskto
 строгой проверкой, backup журнала и историей загрузок (I4a), проводит жеребьёвку по ФХР 2024 с preview, правкой и
 подтверждением, показывает сетку с номерами боёв и полноэкранный просмотр; экран «Площадки и протоколы» распределяет
 категории по площадкам, нумерует бои по всем площадкам, выгружает PDF «Протокол хода соревнований» и показывает панель
-площадки со следующим боем (I4b). Старт поединка и Kerugi handlers подключают I2a и I2b.
+площадки со следующим боем (I4b). «Начать» открывает экран «Поединок»: бой Kerugi по баллам с составом из подключённых
+судей, действиями оператора, коррекцией, сбросом и результатом (server-часть I2a); таймер и ход сетки - I2b.
 
 ### 7.1. Реализовано в server
 
@@ -131,33 +132,16 @@ delivery proof, хранит решения pairing в журнале, а deskto
 - transport-agnostic `BracketOwnership` с immutable local owner для v1 `IN_PROGRESS` workflow;
 - privacy-safe `DiagnosticContext` с stable IDs без персональных данных и credentials;
 - typed `SequencedDomainEvent` и deterministic per-peer order для доменных событий;
-- transport-agnostic `SessionLifecycleJournal`, который атомарно append-ит owner lifecycle event с общей peer sequence и
-  обновляет immutable session projection; duplicate event ID возвращает исходный результат;
-- `JdbcSessionLifecycleJournal`, сохраняющий полный lifecycle event envelope до обновления проекции и восстанавливающий
-  immutable projection из JDBC journal после recreation в integration-тесте;
-- authenticated realtime `session_lifecycle_command`, который валидирует полный domain audit context и получает ACK только
-  после применения owner event через общий in-memory/JDBC lifecycle journal; retry не меняет projection второй раз, а
-  malformed и foreign-owner commands получают typed rejection;
-- transport-agnostic `KerugiScoreJournal` и `JdbcKerugiScoreJournal`, которые append-ят raw `HEAD`/`BODY` candidate с
-   полным audit envelope до пересчёта deterministic score/audit projection и восстанавливают его из JDBC journal; realtime
-   `kerugi_score_command` получает idempotent ACK только после применения configured journal и публикует authoritative
-   blue/red projection всем authenticated realtime subscribers только для нового event;
-- typed `kerugi_operator_action_command` для append-only операторских `THROW`, `SPIN_BONUS` и `GAMJEOM`: бросок и вращение
-  увеличивают выбранный счёт, Gamjeom - счёт соперника, а raw action с типом, участником, значением и автором сохраняется
-  отдельно в Kerugi audit projection; JDBC rebuild и realtime score publication используют тот же журнал;
+- бой Kerugi по [ADR-009](adr/ADR-009-kerugi-bout-contract.md): `KerugiBout` на едином журнале `domain_events`, один
+  realtime dispatcher `RealtimeHub` для судей и оператора, snapshot и resync для устройства, `kerugi_score_command`,
+  `judge_attention_command`, `session_state_updated`, `kerugi_score_updated`; экран «Поединок» на desktop;
 - публикация `_u-judge._tcp` через mDNS;
 - ручной workflow сборки installers для Windows, macOS и Linux.
 - CI на `push` и `pull_request`: Gradle Wrapper validation, whitespace check и Gradle build на Java 21.
 
 ### 7.2. Не реализовано в server
 
-- модель соревнования и сеток за пределами typed UUID IDs, transport-agnostic `DomainCommand` и in-memory lifecycle journal
-  для competition, peer, court, bracket, session, judge, device и event; `DomainCommand` принимает полный typed audit context
-  и преобразуется в event только с назначенными event ID и UTC timestamp. `SessionLifecycleJournal` может rebuild immutable
-   projection из sequenced in-memory lifecycle events с deterministic order и idempotent duplicate delivery. Отдельный
-   `JdbcSessionLifecycleJournal` покрывает durable lifecycle envelope и rebuild при recreation; authenticated transport
-   boundary lifecycle commands уже использует общий journal contract, но desktop datasource, separate operator authorization,
-   scoring и real-PostgreSQL acceptance ещё не реализованы;
+- таймер, раунды, golden round и продвижение победителя (I2b); client-часть боя (client PR I2a);
 - physical-device evidence для WebSocket handshake, heartbeat и `heartbeat_timeout` (I3).
   Optional `JdbcPeerJournal` сохраняет command перед ACK и отдаёт cursor-based resync; `POST /score` удалён и не является API v1;
 - Нормативные длительности Kerugi, golden round policy и формулы остальных дисциплин; базовые Kerugi `HEAD`/`BODY` quorum

@@ -122,7 +122,8 @@ when the court has no bout yet. It is personalised: `seat` is the receiving devi
   (`CLI-034`).
 - `warnings`: `{ "code": "disqualification_pending", "competitor": "RED", "gamjeomCount": 10 }` while 10 effective
   Gamjeom wait for the operator's confirmation (`KER-015`).
-- `result`: `null`, or `{ "winner": "BLUE", "reason": "final_score" }` once the bout is `completed`.
+- `result`: `null`, or `{ "winner": "BLUE", "reason": "final_score" }` once the bout is `completed` (see the changes below
+  for `disqualification`).
 - The server pushes a new `session_snapshot` when a bout starts on the court (new `sessionId`) or the device's seat
   changes; the client replaces its whole session state with it.
 
@@ -341,23 +342,38 @@ checks them against the running module: `metadata_response` (`kerugi_bout` capab
 - Old clients that still send the generic `command` get terminal `unsupported_command` rejections for taps, which the
   server never scored anyway.
 
-## Server implementation notes (I2a)
+## Implementation (I2a)
 
-- Replace `RealtimeCommands`, `RealtimeSessionLifecycleCommands`, the five `RealtimeKerugi*Commands`, the four
-  publishers and their `module()` parameters with one dispatcher and one court publisher (per-socket subscription after
-  the first `resync_response`, personalised snapshot). Remove `JdbcPeerJournal` from the realtime path.
-- One `KerugiBout` aggregate per session over `JdbcDomainEventStore`, rebuilt from the journal on start; it replaces
-  the separate score/timer/result journals and their JDBC adapters. Events: `kerugi_bout_started` (bout number, category,
-  bracket, sides, roster seats with `judgeId` and device, quorum, window), lifecycle `session_started`/`_paused`/
-  `_resumed`/`_completed`/`_cancelled`, `kerugi_score_candidate` (payload with `clientTimestamp`, `sequence`),
-  `kerugi_operator_action`, `kerugi_score_correction`, `kerugi_bout_reset` (reason, compensated event IDs, `SES-006`),
-  `kerugi_disqualification_confirmed`, `kerugi_result_recorded` (only from the authoritative final score; a tie cannot be
-  completed by `final_score` in I2a), `judge_attention_signalled`.
-- Running periods come from lifecycle event server timestamps; candidates outside them get the audit decision
-  «outside running period». The round reset of `SES-006` needs rounds and comes with I2b; I2a resets the bout.
-- `DomainEvent.deviceId` requires a UUID while the paired device ID is opaque: derive a name-based UUID from it and keep
-  the paired ID in the payload.
-- On «Начать» also append `DrawEvent.Started` for the category's first bout. Integrate with the court panel and start
-  seam of I4b part 2 (`feat/i4b-court`) after rebasing.
-- Acceptance: a judge simulator of 2-3 paired WebSocket clients speaking this contract in `testApplication` with the JDBC
-  journal: quorum, window, duplicates, reconnect with seat hold, restart with the same score, rejections.
+- `RealtimeHub` is the single dispatcher and publisher: it decodes judge messages, applies them through
+  `KerugiBoutService` with the judge origin and queues the reply and the pushes on each socket's ordered outbound queue.
+  The desktop sends operator commands through the same hub (`CourtBouts`, `ServerRuntime.courtBouts`). The separate
+  `Realtime*Commands`, their publishers, the generic `command` path and the per-type score, lifecycle and result journals
+  are removed; the timer journal stays for I2b.
+- `KerugiBout` is rebuilt from the session's events in `domain_events`: `kerugi_bout_started` (category, court and bout
+  number, sides, seats with `judgeId`, paired device and surname, quorum, window), `session_started`/`_paused`/`_resumed`/
+  `_completed` (with the result)/`_cancelled` (with the reason), `kerugi_score_candidate` (`clientTimestamp`, `sequence`),
+  `kerugi_operator_action`, `kerugi_score_correction`, `kerugi_bout_reset` (reason and compensated event IDs),
+  `kerugi_disqualification_confirmed`, `judge_attention_signalled`. Candidates outside a running period are journaled with
+  the audit status «outside running period». The domain `deviceId` of a judge event is a name-based UUID of the paired
+  device ID; the session ID and the judge IDs are name-based UUIDs of the start event ID, so an identical retry rebuilds
+  the same event.
+- «Начать» of the I4b court panel starts its next Kerugi bout: the roster must be connected now, the category's draw is
+  locked on its first bout (`DrawEvent.Started`) after the start is validated, and the panel shows the bout as current and
+  drops decided bouts from the queue (`CourtProgress`).
+- Evidence: `KerugiBoutServiceTest`, `CourtBoutsTest`, `KerugiBoutScenarioTest` (three `JudgeSimulator` sockets over the
+  production module and the JDBC journal), `ContractFixturesTest`, `ServerRuntimeTest`, `RealPostgresLifecycleTest`.
+
+## Changes since the first version (d1ce2b4)
+
+All are additive or clarify the first version; no field or code of it changed.
+
+- `result.reason` can also be `disqualification`: finishing a bout after a confirmed disqualification gives the win to the
+  opponent. A tied score cannot be finished in I2a (golden round comes with I2b).
+- `resync_request.requestId` must be a canonical UUID and `cursor` must be present (a number or `null`); anything else is
+  `resync_rejected` with `invalid_resync_request`. The cursor of a snapshot before any bout event is `0`.
+- A `session_snapshot` pushed at «Начать» has state `prepared`; `session_state_updated` follows for every operator
+  transition, and `kerugi_score_updated` is pushed only when the score object changes.
+- `session.courtId` is the domain court UUID of the desktop; it is not the `courtId` of `GET /v1/metadata`, which stays a
+  display identity.
+- The fixture values differ from the examples above (two judges, generated IDs compared by presence); the shapes are the
+  same.

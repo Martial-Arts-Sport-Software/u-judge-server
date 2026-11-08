@@ -53,8 +53,8 @@ Pilot не считается production-ready до отдельного hardeni
   mobile realtime на физических устройствах (I3) открыты; P2P остаётся post-v1.
 - [ ] Gate G2: не готов.
 - [ ] Gate G3: не готов.
-- [ ] Gate G4: импорт заявок (I4a), жеребьёвка, площадки, нумерация боёв и протоколы (I4b) подтверждены тестами;
-  проведение сеток с подключёнными судьями и продвижение победителя открыты (I2a, I2b).
+- [ ] Gate G4: импорт заявок (I4a), жеребьёвка, площадки, нумерация боёв и протоколы (I4b), старт поединка с панели
+  площадки с подключёнными судьями (server-часть I2a) подтверждены тестами; продвижение победителя открыто (I2b).
 - [ ] Gate G5: не готов.
 - [ ] Gate G6: не готов.
 - [ ] Gate G7: не готов.
@@ -174,10 +174,45 @@ Server [#132](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull
 | `BRK-001` | Implemented | Список категорий со статусами; preview с участниками, парами, «Бой № N», сеткой и полноэкранным просмотром; одна нумерация по всем площадкам по кругам, без byes, с номерами выступлений (`BoutNumberingTest`, `CompetitionCourtsServiceTest`). Результаты в сетке - I2b |
 | `BRK-002` | Implemented | Обмен участников до старта журналируется `bracket_edited` одной транзакцией, отклонённый обмен ничего не пишет; после старта перемешивание, правка, система и смена площадки отклоняются типизированной ошибкой, также после перезапуска (`CompetitionDrawServiceTest`, `CompetitionCourtsServiceTest`). Репликация - post-v1 |
 | `BRK-005` | Implemented | Выбывание и круговая; случайная жеребьёвка и разведение по субъекту, городу, организации или тренеру, в том числе внутри пояса; посева, двойного выбывания и олимпийской системы в UI нет (`DrawTest`, `CompetitionDrawServiceTest`) |
-| `SES-003` | Partial | Панель площадки показывает следующий бой или выступление площадки этого компьютера (наименьший номер с известными участниками) и выбор оператора `court_next_bout_selected`, восстановленный после перезапуска (`CompetitionCourtsServiceTest`, `RealPostgresLifecycleTest`); текущий бой появляется с «Начать» (I2a) |
+| `SES-003` | Implemented | Панель площадки показывает следующий бой или выступление площадки этого компьютера (наименьший номер с известными участниками) и выбор оператора `court_next_bout_selected`, восстановленный после перезапуска (`CompetitionCourtsServiceTest`, `RealPostgresLifecycleTest`); «Начать» делает следующий бой текущим, решённые бои уходят из очереди, панель восстанавливается после перезапуска (`CourtBoutsTest`, I2a) |
 | `CMP-005` | Implemented | Подтверждённая сетка назначается единственному локальному peer, bracket ID сохраняется при повторной жеребьёвке и перезапуске (`CompetitionDrawServiceTest`) |
-| `CMP-006` | Partial | `bracket_started` переводит сетку в `IN_PROGRESS`, изменения отклоняются (`CompetitionDrawServiceTest`); end-to-end - со стартом поединка (I2a) |
+| `CMP-006` | Implemented | `bracket_started` переводит сетку в `IN_PROGRESS`, изменения отклоняются (`CompetitionDrawServiceTest`); первый «Начать» категории блокирует её жеребьёвку только после проверки старта, отклонённый старт ничего не блокирует (`CourtBoutsTest`, I2a) |
 | `CMP-008` | Partial | «Все категории» показывает все категории по площадкам с номерами боёв и статусами «свободна», «нет поединков», «требует новой жеребьёвки», «в процессе» (`CompetitionCourtsServiceTest`); «завершена» и результаты - I2b |
+
+#### Доказательства I2a (server)
+
+Server [#135](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull/135) поверх I4b #133, issue
+[#134](https://github.com/Martial-Arts-Sport-Software/u-judge-server/issues/134), контракт
+[ADR-009](adr/ADR-009-kerugi-bout-contract.md). Сценарий доказан acceptance tests на production `module()` и JDBC journal:
+три `JudgeSimulator` по WebSocket и оператор судят бой с повтором, конфликтом, out-of-order, reconnect на то же место,
+restart (H2 и PostgreSQL 18.6) и отказами (`KerugiBoutScenarioTest`, `KerugiBoutServiceTest`, `CourtBoutsTest`,
+`ContractFixturesTest`, `ServerRuntimeTest`, `RealPostgresLifecycleTest`). Строка I2a остаётся открытой до client PR
+(emulator-судьи, snapshot, resync, outbox после app kill). Ручной прогон desktop отложен до полного регресса этапа 7
+(решение 08.11.2026).
+
+| Requirement | Статус | Доказательство |
+|-------------|--------|----------------|
+| `KER-001` | Implemented | Состав - 2 или 3 подключённых устройства на момент «Начать», журналируется в `kerugi_bout_started` и применяется scoring engine; другой размер или неподключённое устройство отклоняются (`KerugiBoutServiceTest`, `CourtBoutsTest`) |
+| `KER-002` | Implemented | Кворум задаётся при старте, по умолчанию 2; одиночный удар остаётся в аудите без балла (`KerugiBoutServiceTest`, `KerugiBoutScenarioTest`) |
+| `KER-003` | Implemented | Окно задаётся при старте, по умолчанию `1000 мс`, граница 1000/1001 мс; новое значение действует для следующего боя (`KerugiBoutServiceTest`) |
+| `KER-004` | Implemented | `kerugi_score_command` с участником и `HEAD`/`BODY`; неизвестный цвет или область - `invalid_command` (`KerugiBoutScenarioTest`) |
+| `KER-005` | Implemented | `BODY=1`, `HEAD=2`, минимальная оценка при конфликте в окне, независимо от порядка прихода (`KerugiBoutServiceTest`) |
+| `KER-006` | Implemented | Броски `+1`-`+3` и вращение `+1` с типом, участником, значением и автором; неверное значение отклоняется (`KerugiBoutServiceTest`) |
+| `KER-007` | Implemented | Gamjeom увеличивает счёт соперника и считается отдельно (`KerugiBoutServiceTest`) |
+| `KER-008` | Implemented | Коррекция - компенсирующее событие, исходное сохраняется, повторная коррекция отклоняется (`KerugiBoutServiceTest`) |
+| `KER-009` | Implemented | История боя объясняет каждое нажатие: засчитан, нет кворума, вне времени боя, отменён, сброшен (`KerugiBoutServiceTest`) |
+| `KER-015` | Implemented | 10 Gamjeom дают предупреждение, дисквалификация только после подтверждения оператора, победа сопернику (`KerugiBoutServiceTest`, `ContractFixturesTest`) |
+| `SES-001` | Implemented | `prepared`/`running`/`paused`/`completed`/`cancelled`; недопустимый переход отклоняется без события (`KerugiBoutServiceTest`) |
+| `SES-002` | Implemented | Бой меняет только local owner: команды судьи с чужим peer, сеткой или сессией отклоняются без события (`KerugiBoutServiceTest`); P2P - post-v1 |
+| `SES-004` | Partial | Все подписанные сокеты получают одну версию snapshot, состояния и счёта в порядке журнала, неподписанный - ничего (`KerugiBoutScenarioTest`); экран зрителей - I2b |
+| `SES-005` | Partial | Результат только по финальному счёту, ничья не завершается; desktop требует подтверждения, ручной прогон - этап 7 |
+| `SES-006` | Partial | Сброс боя требует причину и компенсирует все действующие события, история их сохраняет (`KerugiBoutServiceTest`); подтверждение на desktop, сброс раунда - I2b |
+| `UI-002` | Partial | Каждое добавление и отмена балла или штрафа - аудируемое событие (`KerugiBoutServiceTest`); экран боя на desktop без ручного прогона (этап 7) |
+| `UI-008` | Partial | Сброс, отмена, коррекция, дисквалификация и завершение на desktop идут через диалог подтверждения; ручной прогон - этап 7 |
+| `NET-001` | Partial | ACK после commit с event ID; sequence и client timestamp в журнале (`KerugiBoutScenarioTest`); client - отдельный PR |
+| `NET-003` | Partial | Повтор с тем же ID получает прежний ACK без второго события, также после restart (`KerugiBoutScenarioTest`, `RealPostgresLifecycleTest`); client outbox - отдельный PR |
+| `AUD-002` | Implemented | Коррекция ссылается на исходное событие, история показывает оба (`KerugiBoutServiceTest`) |
+| `DEV-008` | Partial | Snapshot передаёт номер, категорию, стороны, состояние и место судьи (`ContractFixturesTest`, `KerugiBoutScenarioTest`); отказ от hardcoded номера - client PR |
 
 Технические задачи, обязательные внутри инкрементов:
 
@@ -232,6 +267,7 @@ Server [#132](https://github.com/Martial-Arts-Sport-Software/u-judge-server/pull
 | [x]    | [ADR-004](adr/ADR-004-http-websocket-contract.md) | HTTP/WebSocket contract и version negotiation     |
 | [ ]    | ADR-005 | Версионирование XLSX import adapter               |
 | [x]    | [ADR-006](adr/ADR-006-local-tls-trust.md) | Local TLS: self-signed сертификат peer и SPKI pin на телефоне с кодом сверки |
+| [x]    | [ADR-009](adr/ADR-009-kerugi-bout-contract.md) | Realtime-контракт боя Kerugi: snapshot, resync, `kerugi_score_command`, один dispatcher |
 
 ### Gate G0
 
@@ -291,7 +327,7 @@ architecture. They are not v1 Pilot acceptance gates.
 | Operator pairing service | Идемпотентные approve/reject/revoke; reconnect credential только при принятии и inactive после отзыва; проекция device ID, platform и `connected`/`disconnected` без surname и credential; anonymous LAN decision/revoke endpoints отсутствуют | - |
 | `GET /v1/pairing-status/{requestId}` | Typed pending/accepted/rejected; rejection code только для rejected; credential только по matching proof на secure transport | - |
 | `/v1/realtime` handshake | Versioned handshake только для active credential; unknown, revoked и incompatible-version отклоняются без pending state | - |
-| Typed commands и ACK | Bounded envelope, idempotent ACK по event ID; с `JdbcPeerJournal` append до ACK, identical retry после recreation, cursor-based resync; typed rejections для malformed, oversized, post-revocation, conflicting и journal failure | Client outbox против server (I2a) |
+| Typed commands и ACK | Bounded envelope, idempotent ACK по event ID после commit в `domain_events`, identical retry после restart, resync со snapshot (ADR-009); typed rejections для malformed, oversized, post-revocation, conflicting и journal failure | Client outbox против server (client-часть I2a) |
 | `clock_sync` | Echo client timestamp и UTC server receive/send timestamps; invalid timestamp получает typed rejection без закрытия сессии | Artificial delay на физических устройствах (I3) |
 | `heartbeat` | `heartbeat_ack`/`heartbeat_rejected`; `heartbeat_timeout` закрывает socket, valid heartbeat продлевает deadline; close помечает устройство disconnected | Physical devices (I3) |
 | Удалённый API | Anonymous `POST /score` и revoke endpoint отсутствуют | - |
@@ -322,9 +358,9 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 | Typed UUID IDs | Competition, peer, court, bracket, session, judge, device и event; canonical generation и rejection malformed/noncanonical | - |
 | `DomainCommand` → `DomainEvent` | Полный typed audit context, source, author, UTC timestamp, type и raw payload; event только с назначенными ID и timestamp; rejection blank fields | - |
 | `SequencedDomainEvent`, `DomainEventOrder`, `PeerEventSequence` | Positive per-owner sequence, deterministic order, rejection owner/sequence conflicts | Sequence уникальна только внутри каждой таблицы `V2`-`V5` (I1) |
-| `SessionProjection`, `SessionLifecycleJournal`, `JdbcSessionLifecycleJournal` | `prepared`/`running`/`paused`/`completed`/`cancelled`; только local owner `IN_PROGRESS`; append до замены projection; idempotent retry, rejection conflicting ID; rebuild из JDBC после recreation | Не вызывается из production entry point (I2a) |
+| `SessionProjection` | `prepared`/`running`/`paused`/`completed`/`cancelled`; переходы боя применяет `KerugiBout` (I2a) | - |
 | `BracketOwnership` | Immutable local owner; чужая команда отклоняется без изменения projection; сетка восстанавливается из журнала жеребьёвки (I4b) | P2P claims post-v1 |
-| `session_lifecycle_command`, `session_state_updated` | ACK после применения; публикация всем authenticated sockets только для нового события | Operator authorization и desktop datasource (I2a) |
+| `session_state_updated` | Публикация всем подписанным sockets только для нового события; операторские команды идут с desktop, устройство их не отправляет (I2a) | - |
 | `GET /v1/health`, `DiagnosticContext` | Typed liveness без pairing identity и PII; stable IDs без author, payload и credential | - |
 
 ### Client
@@ -371,19 +407,16 @@ its later implementation must preserve ADR-002 ownership and quorum semantics.
 
 ### Накопленное server-only доказательство
 
-Domain, JDBC/H2 recovery и two-socket Ktor contract tests. Это partial evidence для `KER-001`-`KER-009`, `KER-011`-`KER-013`,
-`KER-015`, `NET-001`, `NET-003`, `SES-004`, `NFR-011` и `NFR-012`. Общий пробел: production wiring, desktop arbiter/watcher,
-client outbox/reconnect и physical devices (I2a, I2b, I3).
+Domain, JDBC/H2/PostgreSQL recovery и Ktor contract tests с production `module()`; статусы требований - в «Доказательства
+I2a (server)». Общий пробел: client, таймер и раунды (I2b), physical devices (I3).
 
 | Компонент | Подтверждено тестами | Открыто |
 |-----------|----------------------|---------|
 | `KerugiScoringEngine` | 2 или 3 боковых судьи, quorum и coincidence window (по умолчанию 2 и `1000 мс`); непересекающиеся окна одного участника; distinct configured judges; `BODY=1`/`HEAD=2`, минимальная оценка при конфликте; audit каждого окна, включая insufficient quorum | - |
-| `KerugiScoreJournal`, `JdbcKerugiScoreJournal` (`V3`), `kerugi_score_command` | Raw candidate append до пересчёта; rejection foreign judge и conflicting ID; rebuild; ACK после применения; `kerugi_score_updated` только для нового события | - |
-| `kerugi_operator_action_command` | `THROW`, `SPIN_BONUS` и `GAMJEOM` append-only с автором; Gamjeom увеличивает счёт соперника; отдельная audit projection | Desktop UI (I2a) |
-| `kerugi_score_correction_command` | Компенсирующее событие со ссылкой на candidate или action; исходное событие сохраняется, projection исключает эффект | Сброс с причиной `SES-006` (I2a) |
-| Gamjeom warning и `kerugi_disqualification_confirmed` | Warning при effective sum `10`; одно подтверждение local owner только после warning | - |
-| `KerugiTimerJournal`, `JdbcKerugiTimerJournal` (`V4`) | `START`/`PAUSE`/`RESUME`/`STOP`, отдельный `ROUND_BREAK`; `kerugi_timer_updated` только для нового события | Длительности по возрасту, remaining time, раунды `KER-010` (I2b) |
-| `KerugiResultJournal`, `JdbcKerugiResultJournal` (`V5`) | Одно решение local owner с причиной `final_score` или `golden_round`; второе решение отклоняется | Проверка по authoritative score, связь с session/bracket `SES-007` (I2a, I2b) |
+| `KerugiBout`, `KerugiBoutService` (I2a) | Один бой - одна сессия в `domain_events`: старт с составом и настройками, переходы, кандидаты, действия оператора, коррекция, сброс с причиной, дисквалификация, результат; rebuild после restart; idempotent retry | Таймер и раунды (I2b) |
+| `RealtimeHub` (I2a) | Один dispatcher для судей и оператора; snapshot, resync, `session_state_updated`, `kerugi_score_updated` в порядке журнала; операторские команды с устройства отклоняются | Client (client PR I2a) |
+| `CourtBouts`, экран боя (I2a) | «Начать» с панели площадки, состав из подключённых устройств, блокировка жеребьёвки; desktop экран боя | Ручной прогон (этап 7) |
+| `KerugiTimerJournal`, `JdbcKerugiTimerJournal` | `START`/`PAUSE`/`RESUME`/`STOP`, отдельный `ROUND_BREAK` | Длительности по возрасту, remaining time, раунды `KER-010` и подключение к бою (I2b) |
 
 ### Gate G3
 
