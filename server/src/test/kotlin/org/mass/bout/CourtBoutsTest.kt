@@ -8,6 +8,7 @@ import org.mass.PairingSubmission
 import org.mass.RealtimeHub
 import org.mass.applications.ApplicationCategory
 import org.mass.applications.ApplicationDiscipline
+import org.mass.applications.Weapon
 import org.mass.applications.CompetitionApplications
 import org.mass.applications.CompetitionApplicationsService
 import org.mass.applications.JdbcCompetitionApplicationsJournal
@@ -275,6 +276,20 @@ class CourtBoutsTest {
         var rest = total - 8
         criteria.indices.forEach { index -> (minOf(9, rest)).also { criteria[index] += it; rest -= it } }
         return JudgeVector(criteria.take(4), criteria.drop(4), 0)
+    }
+
+    @Test
+    fun `the seven technical disciplines follow the application sheets and weapons`() {
+        fun of(discipline: ApplicationDiscipline, weapon: Weapon? = null) =
+            CourtBouts.technicalDiscipline(category(listOf("Тренер"), discipline = discipline).copy(weapon = weapon))
+        assertNull(of(ApplicationDiscipline.KERUGI))
+        assertEquals(TechnicalDiscipline.HOSINSOOL, of(ApplicationDiscipline.SELF_DEFENSE))
+        assertEquals(TechnicalDiscipline.PAIR_FREESTYLE, of(ApplicationDiscipline.STAGED_PAIR))
+        assertEquals(TechnicalDiscipline.GROUP_FREESTYLE, of(ApplicationDiscipline.STAGED_GROUP))
+        assertEquals(TechnicalDiscipline.SWORD, of(ApplicationDiscipline.FREE_FORM, Weapon.SWORD))
+        assertEquals(TechnicalDiscipline.POLE, of(ApplicationDiscipline.FREE_FORM, Weapon.STAFF))
+        assertEquals(TechnicalDiscipline.PAIRED_NUNCHAKU, of(ApplicationDiscipline.FREE_FORM, Weapon.DOUBLE_NUNCHAKU))
+        assertEquals(TechnicalDiscipline.PAIRED_FANS, of(ApplicationDiscipline.FREE_FORM, Weapon.FANS))
     }
 
     @Test
