@@ -11,6 +11,8 @@ import org.mass.domain.SessionState
 import org.mass.persistence.BackupInspection
 import org.mass.persistence.JournalBackup
 import org.mass.persistence.JournalBackups
+import org.mass.report.CompetitionReportTest
+import org.mass.report.CompetitionScenario
 import java.time.Instant
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -171,6 +173,42 @@ class ServerRuntimeTest {
         assertEquals(running.peerId, assertIs<ServerRuntimeState.Running>(clean.start()).peerId)
         assertEquals(result, clean.realtime!!.bouts.bout(sessionId)!!.result)
         assertEquals(restored.database, Files.readString(root.resolve("clean-computer/database")))
+    }
+
+    @Test
+    fun `a judged competition exports the same XLSX and CSV after a restore on a clean computer`() {
+        val generatedAt = Instant.parse("2026-11-08T16:00:00Z")
+        val source = runtime(freePort())
+        assertIs<ServerRuntimeState.Running>(source.start())
+        CompetitionScenario(
+            requireNotNull(source.competitionApplications), requireNotNull(source.competitionDraws), requireNotNull(source.courtBouts),
+            source.pairingRequests,
+        ).apply {
+            importAndDraw()
+            connectJudges()
+            judgeEverything()
+        }
+        val reports = requireNotNull(source.reports)
+        val before = requireNotNull(reports.report(generatedAt))
+        assertTrue(before.categories.all { it.places.isNotEmpty() })
+        val csv = String(requireNotNull(reports.csv(generatedAt)))
+        val xlsx = CompetitionReportTest.cells(requireNotNull(reports.xlsx(generatedAt)))
+        // `BAK-002`: every completed bout and performance left a backup; the latest holds the whole competition.
+        val sessions = before.sessions.size
+        val automatic = awaitValue { requireNotNull(source.backups).list().filter { it.header?.reason == JournalBackups.AFTER_SESSION }.takeIf { it.size == sessions } }
+        val usb = root.resolve("usb/competition.jsonl").also { requireNotNull(source.backups).copy(automatic.first().path, it) }
+        source.stop()
+
+        val clean = runtime(freePort(), data = "clean-computer")
+        assertIs<ServerRuntimeState.Running>(clean.start())
+        assertEquals(null, requireNotNull(clean.reports).report(generatedAt))
+        assertIs<RestoreOutcome.Restored>(clean.restore(usb))
+        val restored = requireNotNull(clean.reports)
+        assertEquals(before, restored.report(generatedAt))
+        assertEquals(csv, String(requireNotNull(restored.csv(generatedAt))))
+        assertEquals(xlsx, CompetitionReportTest.cells(requireNotNull(restored.xlsx(generatedAt))))
+        // The restored projections accept no second run of a decided bout: the court panel is empty.
+        assertEquals(null, requireNotNull(clean.courtBouts).panel().next)
     }
 
     @Test
