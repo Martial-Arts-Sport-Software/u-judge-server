@@ -38,7 +38,8 @@ jobs:
           data="$RUNNER_TEMP/ujudge-data"
           mkdir -p smoke
           for run in 1 2; do
-            "$app" --smoke-test --data-directory="$data" --report="smoke/macos-run-$run.txt"
+            "$app" --smoke-test --data-directory="$data" --report="smoke/macos-run-$run.txt" ||
+              { tail -n 60 "$data"/logs/*; exit 1; }
           done
           test "$(grep '^peerId=' smoke/macos-run-1.txt)" = "$(grep '^peerId=' smoke/macos-run-2.txt)"
           cp -R "$data/logs" smoke/macos-logs
@@ -89,7 +90,10 @@ jobs:
             $report = "$PWD\smoke\windows-run-$run.txt"
             $check = Start-Process $exe.FullName -ArgumentList "--smoke-test --data-directory=`"$data`" --report=`"$report`"" -Wait -PassThru
             if (Test-Path $report) { Get-Content $report }
-            if ($check.ExitCode -ne 0) { throw "Smoke test run $run exited with $($check.ExitCode)" }
+            if ($check.ExitCode -ne 0) {
+              Get-ChildItem "$data\logs" -ErrorAction SilentlyContinue | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 60 }
+              throw "Smoke test run $run exited with $($check.ExitCode)"
+            }
           }
           $peer1 = Select-String -Path smoke\windows-run-1.txt -Pattern '^peerId='
           $peer2 = Select-String -Path smoke\windows-run-2.txt -Pattern '^peerId='
@@ -129,12 +133,15 @@ jobs:
           set -euo pipefail
           deb=$(ls desktop/build/compose/binaries/main/deb/*.deb)
           package=$(dpkg-deb -f "$deb" Package)
+          # The jpackage postinst registers a menu entry with xdg-desktop-menu, which fails on a runner without this directory.
+          sudo mkdir -p /usr/share/desktop-directories
           sudo apt-get install -y "./$deb"
           app=$(dpkg -L "$package" | grep '/bin/UJudgeServer$')
           data="$RUNNER_TEMP/ujudge-data"
           mkdir -p smoke
           for run in 1 2; do
-            "$app" --smoke-test --data-directory="$data" --report="smoke/linux-run-$run.txt"
+            "$app" --smoke-test --data-directory="$data" --report="smoke/linux-run-$run.txt" ||
+              { tail -n 60 "$data"/logs/*; exit 1; }
           done
           test "$(grep '^peerId=' smoke/linux-run-1.txt)" = "$(grep '^peerId=' smoke/linux-run-2.txt)"
           cp -R "$data/logs" smoke/linux-logs
